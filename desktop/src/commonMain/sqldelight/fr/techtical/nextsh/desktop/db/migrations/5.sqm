@@ -1,0 +1,9 @@
+CREATE TABLE pending_conflicts (
+    id TEXT NOT NULL PRIMARY KEY,
+    entityType TEXT NOT NULL,
+    entityId TEXT NOT NULL,
+    localJson TEXT NOT NULL,
+    remoteJson TEXT NOT NULL,
+    detectedAt INTEGER NOT NULL
+);
+CREATE INDEX index_pending_conflicts_entity ON pending_conflicts(entityType, entityId);

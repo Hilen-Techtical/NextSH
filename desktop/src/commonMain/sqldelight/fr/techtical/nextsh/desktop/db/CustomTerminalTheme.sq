@@ -1,0 +1,33 @@
+CREATE TABLE custom_terminal_themes (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    background INTEGER NOT NULL,
+    foreground INTEGER NOT NULL,
+    cursor INTEGER NOT NULL,
+    selectionBg INTEGER NOT NULL,
+    ansi TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    vectorClock TEXT NOT NULL DEFAULT '{}',
+    deleted INTEGER NOT NULL DEFAULT 0,
+    deletedAt INTEGER,
+    updatedAt INTEGER NOT NULL DEFAULT 0
+);
+
+selectAll:
+SELECT * FROM custom_terminal_themes WHERE deleted = 0 ORDER BY name;
+
+selectAllIncludingDeleted:
+SELECT * FROM custom_terminal_themes ORDER BY name;
+
+selectById:
+SELECT * FROM custom_terminal_themes WHERE id = ? AND deleted = 0;
+
+insert:
+INSERT OR REPLACE INTO custom_terminal_themes(id, name, background, foreground, cursor, selectionBg, ansi, createdAt, vectorClock, deleted, deletedAt, updatedAt)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+markDeleted:
+UPDATE custom_terminal_themes SET deleted = 1, deletedAt = ?, updatedAt = ?, vectorClock = ? WHERE id = ?;
+
+delete:
+DELETE FROM custom_terminal_themes WHERE id = ?;

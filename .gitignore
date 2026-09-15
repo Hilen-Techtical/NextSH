@@ -1,0 +1,72 @@
+# Build outputs
+build/
+app/build/
+terminal/terminal-emulator/build/
+terminal/terminal-view/build/
+
+# Gradle
+.gradle/
+# Kotlin build/IC cache (Gradle 8+ / KGP)
+.kotlin/
+# NB: gradle/wrapper/gradle-wrapper.jar IS committed on purpose, following Gradle's own
+# recommendation, so that ./gradlew works for public clones and CI. Its
+# integrity is verified in CI via gradle/actions/wrapper-validation.
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Local config (contient le SDK path)
+local.properties
+
+# Keystore / signing (ne JAMAIS commiter)
+*.jks
+*.keystore
+keystore.properties
+
+# Secrets / credentials
+*.env
+credentials.json
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Stray data
+mnt/
+
+# APK / AAB / mapping
+*.apk
+*.aab
+*.ap_
+app/release/
+app/debug/
+mapping.txt
+
+# Native build intermediates
+.cxx/
+.externalNativeBuild/
+obj/
+
+# Logs
+*.log
+
+# Claude
+.claude
+
+# Audit
+docs/SECURITY_AUDIT_2026-04-14.md
+
+# Video de demonstration : rushes et rendus, jamais versionnes
+demo/rushes/
+demo/out/
+
+# Projet de montage Remotion (demo/remotion) : dependances, copies locales (rushes, polices, logo), images de travail
+node_modules/
+demo/remotion/public/rushes/
+demo/remotion/public/fonts/
+demo/remotion/public/nextsh_logo.png
+demo/work/

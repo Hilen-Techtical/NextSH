@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- YubiKey vendor ID = 0x1050 (4176) -->
+    <!-- All YubiKey 5 series product IDs (any combination of HID Keyboard / OTP / FIDO / CCID) -->
+    <usb-device vendor-id="4176" product-id="1025" /> <!-- 0x0401 CCID -->
+    <usb-device vendor-id="4176" product-id="1026" /> <!-- 0x0402 OTP -->
+    <usb-device vendor-id="4176" product-id="1027" /> <!-- 0x0403 FIDO -->
+    <usb-device vendor-id="4176" product-id="1028" /> <!-- 0x0404 OTP+FIDO -->
+    <usb-device vendor-id="4176" product-id="1029" /> <!-- 0x0405 OTP+CCID -->
+    <usb-device vendor-id="4176" product-id="1030" /> <!-- 0x0406 FIDO+CCID -->
+    <usb-device vendor-id="4176" product-id="1031" /> <!-- 0x0407 OTP+FIDO+CCID (mode commun) -->
+    <!-- YubiKey NEO -->
+    <usb-device vendor-id="4176" product-id="273" />  <!-- 0x0111 OTP+CCID -->
+    <usb-device vendor-id="4176" product-id="276" />  <!-- 0x0114 OTP+U2F -->
+    <!-- Security Key by Yubico -->
+    <usb-device vendor-id="4176" product-id="288" />  <!-- 0x0120 -->
+</resources>

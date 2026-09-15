@@ -1,0 +1,1073 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Default locale (French). The Compose Resources plugin selects this
+    automatically when no closer locale match is found.
+    English translations live in `values-en/strings.xml`.
+
+    Naming convention: <screen_or_component>_<role>. Always use snake_case.
+-->
+<resources>
+    <!-- ────────────────────────────────────────────────────────────────────
+         Common shared labels (appear in many places)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="action_cancel">Annuler</string>
+    <string name="action_close">Fermer</string>
+    <string name="action_save">Enregistrer</string>
+    <string name="action_delete">Supprimer</string>
+    <string name="action_confirm">Confirmer</string>
+    <string name="action_back">Retour</string>
+    <string name="action_open">Ouvrir</string>
+    <string name="action_edit">Modifier</string>
+    <string name="action_create">Créer</string>
+    <string name="action_add">Ajouter</string>
+    <string name="action_import">Importer</string>
+    <string name="action_export">Exporter</string>
+    <string name="action_continue">Continuer</string>
+    <string name="action_done">Terminé</string>
+    <string name="action_yes">Oui</string>
+    <string name="action_no">Non</string>
+    <string name="action_disable">Désactivé</string>
+    <string name="action_enable">Activé</string>
+    <string name="action_refresh">Rafraîchir</string>
+    <string name="action_search">Rechercher</string>
+    <string name="action_copy">Copier</string>
+    <string name="action_rename">Renommer</string>
+    <string name="action_disconnect">Déconnecter</string>
+    <string name="action_revoke">Révoquer</string>
+    <string name="action_minimize">Minimiser</string>
+    <string name="action_maximize">Agrandir</string>
+    <string name="action_restore">Restaurer</string>
+    <string name="status_unlocked">déverrouillé</string>
+    <string name="status_locked">verrouillé</string>
+    <string name="status_active">actif</string>
+    <string name="status_inactive">inactif</string>
+    <string name="status_unknown">Inconnu</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         TabBar tooltips (Sessions screen)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="tabbar_toggle_orientation">Inverser l'orientation du split</string>
+    <string name="tabbar_open_snippet">Insérer un snippet</string>
+    <string name="tabbar_open_sftp">Ouvrir un onglet SFTP</string>
+    <string name="tabbar_split_sftp">Split SFTP sur la session</string>
+    <string name="tabbar_new_session">Nouvelle session</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Snippet picker dialog
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="snippet_picker_title">Insérer un snippet</string>
+    <string name="snippet_picker_subtitle">La commande est envoyée au terminal actif (Entrée pour la première)</string>
+    <string name="snippet_picker_search_placeholder">Rechercher (label, commande, catégorie)…</string>
+    <string name="snippet_picker_empty_no_query">Aucun snippet</string>
+    <string name="snippet_picker_empty_with_query">Aucun résultat</string>
+    <string name="snippet_picker_empty_hint_no_query">Crée un snippet depuis l'écran Snippets pour pouvoir l'insérer ici.</string>
+    <string name="snippet_picker_empty_hint_with_query">Affine ta recherche.</string>
+    <string name="snippet_picker_global_badge">GLOBAL</string>
+    <string name="snippet_picker_cancel">Annuler</string>
+    <string name="snippet_picker_close">Fermer</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Host picker dialog
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="host_picker_title">Choisir un hôte</string>
+    <string name="host_picker_subtitle">Sélectionne un hôte pour ouvrir une nouvelle session</string>
+    <string name="host_picker_empty_title">Aucun hôte configuré</string>
+    <string name="host_picker_empty_hint">Ajoute un hôte depuis l'onglet Hôtes pour pouvoir lancer une session.</string>
+    <string name="host_picker_cancel">Annuler</string>
+    <string name="host_picker_close">Fermer</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Tray menu (rendered natively by Windows, limited theming)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="tray_open_nextsh">Ouvrir NextSH</string>
+    <string name="tray_stop_all_tunnels">Arrêter tous les tunnels</string>
+    <string name="tray_quit">Quitter</string>
+    <string name="tray_tooltip_default">NextSH</string>
+    <string name="tray_tooltip_one">NextSH : 1 tunnel actif</string>
+    <string name="tray_tooltip_many">NextSH : %1$d tunnels actifs</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Reconnect overlay (Disconnected / Error states)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="reconnect_disconnected_title">Session fermée</string>
+    <string name="reconnect_error_title">Échec de connexion</string>
+    <string name="reconnect_button">Reconnecter</string>
+    <string name="reconnect_default_message_lost">Connexion perdue (réseau ou serveur inaccessible)</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Session / pane errors (DesktopSessionManager)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="session_error_linked_terminal_closed">Terminal associé fermé</string>
+    <string name="session_error_ssh_session_missing">Session SSH introuvable après connexion</string>
+    <string name="session_error_ssh_key_missing">Clé SSH introuvable pour %1$s. Importez-la depuis le vault.</string>
+    <string name="session_error_private_key_missing">Clé privée introuvable pour %1$s.</string>
+    <string name="session_error_certificate_missing">Certificat introuvable pour %1$s.</string>
+    <string name="session_error_key_or_certificate_missing">Clé ou certificat introuvable pour %1$s.</string>
+    <string name="session_error_key_repository_unavailable">Clés SSH indisponibles (FIDO2) : impossible de lire le vault.</string>
+    <string name="session_error_fido2_key_invalid">Clé FIDO2 introuvable ou de type invalide pour %1$s. Vérifiez le vault.</string>
+    <string name="session_error_biometric_unsupported">Authentification biométrique non disponible sur Desktop (Android uniquement).</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Erreurs de connexion SSH (DesktopSshSessionManager + VaultSshClientFactory) :
+         messages localisés remplaçant le message JDK brut (ex. "Connection
+         timed out: getsockopt"), illisible pour un utilisateur non-technicien.
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="connect_error_timeout">Délai de connexion dépassé (%1$d s)</string>
+    <string name="connect_error_refused">Le serveur n'a pas répondu</string>
+    <string name="connect_error_host_not_found">Nom d'hôte introuvable</string>
+    <string name="connect_error_generic">Connexion impossible</string>
+    <string name="connect_error_generic_detail">Connexion impossible (%1$s)</string>
+    <string name="auth_error_refused">Authentification refusée : %1$s</string>
+    <string name="auth_error_fido2_unavailable">FIDO2 non disponible sur cette plateforme</string>
+    <string name="auth_error_fido2_key_invalid">Clé FIDO2 invalide (%1$s)</string>
+    <string name="auth_error_fido2_no_key">Aucun YubiKey détecté</string>
+    <string name="auth_error_fido2_cancelled">Opération FIDO2 annulée</string>
+    <string name="auth_error_fido2_touch_timeout">Touch YubiKey expiré</string>
+    <string name="auth_error_fido2_refused">Authentification FIDO2 refusée : %1$s</string>
+    <string name="error_ssh_unknown">Erreur SSH inconnue</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Sidebar (left rail)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="sidebar_tab_hosts">Hôtes</string>
+    <string name="sidebar_tab_sessions">Sessions</string>
+    <string name="sidebar_tab_tunnels">Tunnels</string>
+    <string name="sidebar_tab_transfers">Transferts</string>
+    <string name="sidebar_tab_vault">Vault</string>
+    <string name="sidebar_tab_settings">Paramètres</string>
+    <string name="sidebar_section_active_sessions">Sessions actives</string>
+    <string name="sidebar_section_active_sessions_empty">Aucune session active</string>
+    <string name="sidebar_section_hosts">Hôtes</string>
+    <string name="sidebar_section_hosts_empty">Aucun hôte configuré</string>
+    <string name="sidebar_action_new_host">Nouvel hôte</string>
+    <string name="sidebar_folder_unsorted">Sans dossier</string>
+    <string name="sidebar_host_status_connected">Session connectée</string>
+    <string name="sidebar_host_status_connecting">Connexion en cours</string>
+    <string name="sidebar_host_status_error">Session en erreur</string>
+    <string name="sidebar_host_status_none">Aucune session</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Custom title bar (top)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="titlebar_logo_alt">NextSH</string>
+    <string name="titlebar_search_placeholder">Rechercher hôtes, sessions, commandes…</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Status bar (bottom)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="statusbar_label_sessions">Sessions</string>
+    <string name="statusbar_label_tunnels">Tunnels</string>
+    <string name="statusbar_label_vault">Vault</string>
+    <string name="statusbar_label_version">Version</string>
+    <string name="statusbar_sync_lan_prefix">LAN</string>
+    <string name="statusbar_sync_syncing">synchro en cours</string>
+    <string name="statusbar_sync_offline">hors ligne</string>
+    <string name="statusbar_sync_pending">en attente</string>
+    <string name="statusbar_sync_ok_prefix">à jour</string>
+    <string name="statusbar_sync_error_prefix">échec</string>
+    <string name="statusbar_relative_never">jamais</string>
+    <string name="statusbar_relative_seconds_ago">il y a %1$d s</string>
+    <string name="statusbar_relative_minutes_ago">il y a %1$d min</string>
+    <string name="statusbar_relative_hours_ago">il y a %1$d h</string>
+    <string name="statusbar_relative_days_ago">il y a %1$d j</string>
+    <string name="statusbar_devices_one">%1$d appareil</string>
+    <string name="statusbar_devices_many">%1$d appareils</string>
+    <string name="theme_picker_title">Thème du terminal</string>
+    <string name="theme_picker_subtitle">Préréglages et thèmes personnalisés</string>
+    <string name="theme_picker_selected">Actif</string>
+    <string name="theme_picker_close">Fermer</string>
+    <string name="theme_picker_presets">Préréglages</string>
+    <string name="theme_picker_customs">Thèmes personnalisés</string>
+    <string name="theme_picker_new">＋ Nouveau thème personnalisé</string>
+    <string name="theme_picker_edit">Modifier</string>
+    <string name="theme_picker_delete">Supprimer</string>
+    <string name="theme_picker_manage">Gérer les thèmes</string>
+    <string name="theme_picker_manage_subtitle">Créez, modifiez ou supprimez vos thèmes</string>
+    <string name="theme_picker_manage_empty">Aucun thème personnalisé. Créez-en un avec « Nouveau thème personnalisé ».</string>
+    <string name="theme_editor_title">Thème personnalisé</string>
+    <string name="theme_editor_subtitle">Personnalise les couleurs du terminal</string>
+    <string name="theme_editor_name">Nom du thème</string>
+    <string name="theme_editor_background">Fond</string>
+    <string name="theme_editor_foreground">Texte</string>
+    <string name="theme_editor_cursor">Curseur</string>
+    <string name="theme_editor_selection">Sélection</string>
+    <string name="theme_editor_ansi">Couleurs ANSI</string>
+    <!-- Format: "ANSI %1$d" -->
+    <string name="theme_editor_ansi_index">ANSI %1$d</string>
+    <string name="theme_delete_title">Supprimer le thème ?</string>
+    <!-- Format: "« %1$s » sera supprimé définitivement." -->
+    <string name="theme_delete_message">« %1$s » sera supprimé définitivement. Les hôtes qui l'utilisaient reviendront au thème par défaut.</string>
+
+    <!-- Sélecteur de couleur (roue HSV + sliders RGB) -->
+    <string name="color_picker_title">Choisir une couleur</string>
+    <string name="color_picker_subtitle">Ajuste la teinte, la saturation et la luminosité</string>
+    <string name="color_picker_tab_wheel">Roue</string>
+    <string name="color_picker_tab_rgb">RGB</string>
+    <string name="color_picker_lightness">Luminosité</string>
+    <string name="color_picker_hex">Hex</string>
+    <string name="color_picker_ok">OK</string>
+    <string name="color_picker_red">Rouge</string>
+    <string name="color_picker_green">Vert</string>
+    <string name="color_picker_blue">Bleu</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Confirm dialog (generic)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="confirm_dialog_default_confirm">Supprimer</string>
+    <string name="confirm_dialog_default_cancel">Annuler</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Open external link confirmation
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="open_link_title">Ouvrir un lien externe ?</string>
+    <string name="open_link_body">Ceci va ouvrir %1$s dans votre navigateur :</string>
+    <string name="open_link_confirm">Ouvrir</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Cmd+K palette
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="cmdk_search_placeholder">Rechercher hôtes, sessions, commandes…</string>
+    <string name="cmdk_empty">Aucun résultat</string>
+    <string name="cmdk_section_hosts">Hôtes</string>
+    <string name="cmdk_section_commands">Commandes</string>
+    <string name="cmdk_enter_hint">Entrée</string>
+    <string name="cmdk_command_new_tunnel">Nouveau tunnel</string>
+    <string name="cmdk_command_new_host">Nouvel hôte</string>
+    <string name="cmdk_command_generate_key">Générer une clé SSH</string>
+    <string name="cmdk_command_lock_vault">Verrouiller le vault</string>
+    <string name="cmdk_command_settings">Paramètres</string>
+    <string name="cmdk_command_other_shortcuts">Autres raccourcis clavier</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Fenêtre d'aide « Autres raccourcis clavier » (ShortcutsWindow)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="shortcuts_window_title">Raccourcis clavier</string>
+    <string name="shortcuts_window_subtitle">Tous les raccourcis disponibles dans NextSH</string>
+    <string name="shortcuts_section_general">Généraux</string>
+    <!-- Échap y figure aussi bien qu'il ne fasse pas partie du dispatcher AWT
+         global (il ferme le dialogue local actif, géré par chaque fenêtre).
+         Ce hint le précise pour éviter la confusion avec les autres lignes
+         de la section. -->
+    <string name="shortcuts_section_general_hint">Raccourcis globaux (dispatcher clavier) ; Échap ferme le dialogue ou la fenêtre actuellement ouverte.</string>
+    <string name="shortcuts_section_sessions">Sessions et onglets</string>
+    <string name="shortcuts_section_sessions_hint">Actifs sur l'écran Sessions.</string>
+    <string name="shortcuts_section_terminal">Terminal</string>
+    <string name="shortcuts_section_terminal_hint">Actifs sur un terminal (les raccourcis clavier nécessitent qu'il ait le focus).</string>
+    <string name="shortcuts_general_palette">Ouvrir la palette de commandes</string>
+    <string name="shortcuts_general_nav_hosts">Aller aux hôtes</string>
+    <string name="shortcuts_general_nav_sessions">Aller aux sessions</string>
+    <string name="shortcuts_general_nav_tunnels">Aller aux tunnels</string>
+    <string name="shortcuts_general_nav_transfers">Aller aux transferts</string>
+    <string name="shortcuts_general_nav_vault">Aller au vault</string>
+    <string name="shortcuts_general_nav_settings">Aller aux paramètres</string>
+    <string name="shortcuts_general_close_window">Fermer le dialogue ouvert</string>
+    <string name="shortcuts_sessions_new_tab">Nouvel onglet (choix de l'hôte)</string>
+    <string name="shortcuts_sessions_close_tab">Fermer l'onglet actif</string>
+    <string name="shortcuts_sessions_next_tab">Onglet suivant</string>
+    <string name="shortcuts_sessions_previous_tab">Onglet précédent</string>
+    <!-- Le cycle Ctrl+Shift+N/P saute les panes SFTP (voir terminalPaneLeafPaths
+         dans DesktopSessionManager.kt) : le libellé doit donc parler de
+         "terminal", pas de "pane" au sens large. -->
+    <string name="shortcuts_sessions_next_pane">Terminal suivant</string>
+    <string name="shortcuts_sessions_previous_pane">Terminal précédent</string>
+    <string name="shortcuts_sessions_broadcast">Activer / désactiver la diffusion sur l'onglet</string>
+    <string name="shortcuts_terminal_copy">Copier la sélection</string>
+    <string name="shortcuts_terminal_paste">Coller</string>
+    <string name="shortcuts_terminal_snippets">Insérer un snippet dans le terminal actif</string>
+    <!-- Noms de touches : convention volontairement NON traduite (Esc, Page
+         Up / Page Down, Tab / Shift+Tab, Shift…). Ce sont des noms de
+         touches, pas du texte descriptif. -->
+    <string name="shortcuts_key_escape">Esc</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Vault unlock + setup
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="vault_unlock_title">Déverrouiller le vault</string>
+    <string name="vault_unlock_subtitle">Saisissez votre Passphrase pour déverrouiller le vault</string>
+    <string name="vault_unlock_button">Déverrouiller le vault</string>
+    <string name="vault_unlock_button_loading">Déverrouillage…</string>
+    <string name="vault_unlock_recovery_link">Utiliser la phrase de récupération</string>
+    <string name="vault_unlock_logo_alt">NextSH</string>
+
+    <string name="vault_setup_title">Initialiser le vault</string>
+    <string name="vault_setup_subtitle">Choisis une Passphrase de 4 caractères minimum. Elle chiffre tes mots de passe et clés privées en local.</string>
+    <string name="vault_setup_pin_label">Passphrase</string>
+    <string name="vault_setup_pin_confirm_label">Confirmer la Passphrase</string>
+    <string name="vault_setup_button">Créer le vault</string>
+    <string name="vault_setup_button_loading">Initialisation…</string>
+    <string name="vault_setup_logo_alt">NextSH</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Recovery phrase (BIP39 12 mots) : affichage unique + déverrouillage
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="recovery_display_title">Votre phrase de récupération</string>
+    <string name="recovery_display_warning">Notez ces 12 mots dans l'ordre et conservez-les hors ligne. C'est le SEUL moyen de récupérer votre vault si vous oubliez votre Passphrase. Elle ne sera plus jamais affichée.</string>
+    <string name="recovery_acknowledge_label">J'ai noté ma phrase de récupération en lieu sûr</string>
+    <string name="recovery_continue">Continuer</string>
+    <string name="recovery_copied">Copié</string>
+    <string name="recovery_download">Télécharger</string>
+    <string name="recovery_file_header">Phrase de récupération du vault NextSH. Gardez ce fichier hors ligne et secret : quiconque possède ces mots peut déverrouiller votre vault.</string>
+
+    <string name="recovery_unlock_title">Phrase de récupération</string>
+    <string name="recovery_unlock_subtitle">Saisissez les 12 mots de votre phrase de récupération, séparés par des espaces.</string>
+    <string name="recovery_unlock_input_label">Phrase de récupération</string>
+    <string name="recovery_unlock_input_placeholder">mot1 mot2 mot3 … mot12</string>
+    <string name="recovery_unlock_word_count">%1$d / %2$d mots</string>
+    <string name="recovery_unlock_submit">Récupérer le vault</string>
+
+    <string name="recovery_set_pin_title">Définir une nouvelle Passphrase</string>
+    <string name="recovery_set_pin_subtitle">Choisissez une nouvelle Passphrase pour déverrouiller votre vault à l'avenir.</string>
+    <string name="recovery_set_pin_label">Nouvelle Passphrase</string>
+    <string name="recovery_set_pin_confirm_label">Confirmer la Passphrase</string>
+    <string name="recovery_set_pin_button">Enregistrer et continuer</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         First-launch onboarding (3-step stepper)
+         Step 1 (Welcome) → Step 2 (Create vault) → Step 3 (Optional sync)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="firstlaunch_step_count">Étape %1$d sur %2$d</string>
+    <string name="firstlaunch_welcome_title">Bienvenue dans NextSH</string>
+    <string name="firstlaunch_welcome_tagline">Client SSH natif. Vault chiffré. Synchro locale.</string>
+    <string name="firstlaunch_welcome_button">Commencer</string>
+    <string name="firstlaunch_vault_title">Créez votre vault</string>
+    <string name="firstlaunch_vault_explainer">Votre vault est chiffré localement (PBKDF2 200k + AES-256-GCM). Cette passphrase sera demandée à chaque ouverture.</string>
+    <string name="firstlaunch_sync_title">Synchronisation LAN</string>
+    <string name="firstlaunch_sync_subtitle">Optionnel</string>
+    <string name="firstlaunch_sync_explainer">Avez-vous NextSH sur Android ? La synchronisation LAN chiffrée permet de partager hôtes, clés et tunnels entre vos appareils.</string>
+    <string name="firstlaunch_sync_configure">Configurer maintenant</string>
+    <string name="firstlaunch_sync_skip">Passer</string>
+    <string name="firstlaunch_sync_later_hint">Vous pourrez configurer la synchronisation plus tard dans Paramètres.</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Settings screen
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="settings_title">Paramètres</string>
+    <string name="settings_section_connection">Connexion</string>
+    <string name="settings_section_terminal">Terminal</string>
+    <string name="settings_section_security">Sécurité</string>
+    <string name="settings_section_sync">Synchronisation LAN</string>
+    <string name="settings_section_danger">Zone dangereuse</string>
+    <string name="settings_section_about">À propos</string>
+
+    <string name="settings_label_connection_timeout">Délai de connexion (s)</string>
+    <string name="settings_label_terminal_font_size">Taille de police du terminal</string>
+    <string name="settings_label_clipboard_expiry">Expiration presse-papiers</string>
+    <string name="settings_label_known_hosts">Hôtes connus</string>
+    <string name="settings_label_change_pin">Changer le code PIN</string>
+    <string name="settings_label_export_backup">Exporter une sauvegarde (.nextsh)</string>
+    <string name="settings_label_import_backup">Importer une sauvegarde (.nextsh)</string>
+    <string name="settings_label_wipe_vault">Effacer le vault</string>
+    <string name="settings_label_sync_enabled">Activer la sync LAN</string>
+    <string name="settings_label_sync_enrolled">Appareils enrôlés</string>
+    <string name="settings_label_sync_enrollment">Enrôler un nouvel appareil</string>
+    <string name="settings_label_sync_conflicts">Conflits en attente</string>
+    <string name="settings_section_interface">Interface</string>
+    <string name="settings_label_language">Langue de l'interface</string>
+    <string name="settings_value_language_system">Système (auto)</string>
+    <string name="settings_value_language_fr">Français</string>
+    <string name="settings_value_language_en">English</string>
+    <string name="settings_language_restart_hint">Le changement sera effectif au prochain redémarrage de l'application</string>
+
+    <string name="settings_unit_seconds">s</string>
+    <string name="settings_unit_pixels">px</string>
+
+    <string name="settings_wipe_dialog_title">Effacer le vault ?</string>
+    <string name="settings_wipe_dialog_body">Cette action est irréversible. Tous les hôtes, clés, tunnels et snippets seront perdus.\n\nTape CONFIRMER pour valider.</string>
+    <string name="settings_wipe_dialog_token_placeholder">Tape CONFIRMER</string>
+    <string name="settings_wipe_dialog_token_required">CONFIRMER</string>
+    <string name="settings_wipe_dialog_confirm">Effacer définitivement</string>
+
+    <string name="settings_change_pin_title">Changer le code PIN</string>
+    <string name="settings_change_pin_current">PIN actuel</string>
+    <string name="settings_change_pin_new">Nouveau PIN</string>
+    <string name="settings_change_pin_confirm">Confirme le nouveau PIN</string>
+    <string name="settings_change_pin_error_wrong">PIN actuel incorrect</string>
+    <string name="settings_change_pin_error_mismatch">Les deux nouveaux PINs ne correspondent pas</string>
+    <string name="settings_change_pin_error_too_short">Nouveau PIN trop court</string>
+    <string name="settings_change_pin_success">PIN changé avec succès</string>
+
+    <string name="settings_export_dialog_title">Exporter une sauvegarde</string>
+    <string name="settings_export_dialog_passphrase">Phrase de passe (chiffre la sauvegarde)</string>
+    <string name="settings_export_dialog_passphrase_confirm">Confirme la phrase de passe</string>
+    <string name="settings_export_dialog_error_mismatch">Les phrases de passe ne correspondent pas</string>
+    <string name="settings_export_dialog_error_too_short">Phrase de passe trop courte (8 caractères minimum)</string>
+
+    <string name="settings_import_dialog_title">Importer une sauvegarde</string>
+    <string name="settings_import_dialog_passphrase">Phrase de passe</string>
+    <string name="settings_import_dialog_error_wrong">Phrase de passe incorrecte ou fichier corrompu</string>
+
+    <string name="settings_subtitle">Connexion, terminal, sécurité, sync LAN</string>
+    <string name="settings_label_connection_timeout_short">Timeout de connexion</string>
+    <string name="settings_hint_connection_timeout">Durée maximale d'attente lors de la connexion à un serveur. Le système peut abandonner plus tôt si le serveur ne répond pas du tout.</string>
+    <string name="settings_label_terminal_font">Taille de police</string>
+    <string name="settings_terminal_themes_title">Thèmes du terminal</string>
+    <string name="settings_terminal_themes_subtitle">Créer et modifier des thèmes de couleurs personnalisés.</string>
+    <string name="settings_terminal_themes_action">Gérer les thèmes</string>
+    <string name="settings_label_clipboard_expiry_short">Expiration presse-papiers</string>
+    <string name="settings_label_sync_enabled_short">Activer la sync LAN</string>
+    <string name="settings_label_enroll_mobile">Enrôler un appareil mobile</string>
+    <string name="settings_label_hide_from_capture">Cacher de la capture d'écran</string>
+    <string name="settings_hint_hide_from_capture">Les fenêtres NextSH (principale et dialogues) apparaîtront noires dans les screenshots, enregistrements et partages d'écran. Recommandé pour les sessions sensibles.</string>
+    <string name="settings_label_minimize_to_tray">Réduire dans la barre système à la fermeture</string>
+    <string name="settings_hint_minimize_to_tray">Les sessions SSH et tunnels actifs restent ouverts en arrière-plan ; cliquez sur l'icône dans la barre système pour rouvrir NextSH.</string>
+    <string name="settings_hint_minimize_to_tray_unavailable">Indisponible : l'icône de la barre système n'a pas pu être ajoutée sur ce système.</string>
+    <string name="settings_danger_warning">Ces actions sont irréversibles. Toutes les données locales seront perdues.</string>
+    <string name="settings_clipboard_disabled">Désactivé</string>
+    <string name="settings_clipboard_seconds_format">%1$d s</string>
+
+    <string name="settings_label_recovery_phrase">Régénérer la phrase de récupération</string>
+    <string name="settings_label_recovery_phrase_setup">Générer une phrase de récupération</string>
+    <string name="settings_recovery_status_exists">Une phrase de récupération est configurée</string>
+    <string name="settings_recovery_status_missing">Aucune phrase de récupération configurée</string>
+    <string name="settings_recovery_regenerate_title">Régénérer la phrase ?</string>
+    <string name="settings_recovery_regenerate_body">Une nouvelle phrase de récupération sera générée. L'ancienne phrase cessera immédiatement de fonctionner : assurez-vous de noter la nouvelle.</string>
+    <string name="settings_recovery_regenerate_confirm">Régénérer</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Quit confirmation (close button, active sessions/tunnels)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="quit_confirm_title">Quitter NextSH ?</string>
+    <string name="quit_confirm_body">%1$d session(s) SSH et %2$d tunnel(s) actifs seront fermés si vous quittez maintenant.</string>
+    <string name="quit_confirm_button">Quitter quand même</string>
+
+    <string name="settings_wipe_confirm_title">Êtes-vous sûr ?</string>
+    <string name="settings_wipe_confirm_body">Cette action est irréversible. Elle efface le vault (mots de passe, clés SSH privées, certificats, passphrases), la base de données (hôtes, tunnels, clés, snippets, conflits) ainsi que la liste des hôtes connus. Vous devrez recréer un PIN au prochain lancement.</string>
+    <string name="settings_wipe_confirm_continue">Continuer</string>
+    <string name="settings_wipe_token_title">Tapez %1$s pour confirmer</string>
+    <string name="settings_wipe_token_body">Pour confirmer l'effacement, tapez exactement le mot « %1$s » ci-dessous.</string>
+    <string name="settings_wipe_token_field_label">Confirmation</string>
+    <string name="settings_wipe_token_button">Effacer</string>
+    <string name="settings_label_purge_all">Supprimer toutes les données locales</string>
+    <string name="settings_purge_confirm_title">Désinstallation complète ?</string>
+    <string name="settings_purge_confirm_body">Pour une désinstallation totale. Cette action supprime DÉFINITIVEMENT toutes les données locales de NextSH : le vault (mots de passe, clés SSH, certificats, passphrases), la base de données, la clé maître stockée dans le trousseau du système (Windows Credential Manager / GNOME Keyring / Keychain) ainsi que les dossiers ~/.nextsh et ~/.config/nextsh. L\'application se fermera ensuite. Cette action est irréversible.</string>
+    <string name="settings_purge_confirm_continue">Continuer</string>
+    <string name="settings_purge_token_title">Tapez %1$s pour confirmer</string>
+    <string name="settings_purge_token_body">Pour confirmer la suppression définitive de toutes les données, tapez exactement le mot « %1$s » ci-dessous. L\'application se fermera ensuite.</string>
+    <string name="settings_purge_token_field_label">Confirmation</string>
+    <string name="settings_purge_token_button">Tout supprimer et quitter</string>
+
+    <string name="settings_sync_server_active">Serveur actif sur %1$s:%2$d</string>
+    <string name="settings_sync_server_starting">Démarrage…</string>
+    <string name="settings_sync_server_error">Erreur : %1$s</string>
+    <string name="settings_sync_server_stopped">Arrêté</string>
+    <string name="settings_sync_server_retry">Relancer le serveur</string>
+    <string name="settings_sync_last_received">Dernière sync reçue : %1$s</string>
+    <string name="settings_sync_last_none">Aucune sync reçue</string>
+    <string name="settings_sync_help_firewall_profile">Si la sync échoue, vérifiez que le réseau Windows est en profil « Privé » (le pare-feu bloque par défaut en profil « Public »).</string>
+    <string name="settings_sync_help_firewall_prompts">Vérifiez aussi que NextSH a été autorisé aux deux invites du pare-feu Windows.</string>
+    <string name="settings_relative_just_now">à l'instant</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Hosts screen (list)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="hosts_title">Hôtes</string>
+    <string name="hosts_subtitle">Gestion centralisée des serveurs et clés associées</string>
+    <string name="hosts_action_new">Nouvel hôte</string>
+    <string name="hosts_action_import">Importer</string>
+    <string name="hosts_search_placeholder">Rechercher un hôte…</string>
+    <string name="hosts_empty_title">Aucun hôte configuré</string>
+    <string name="hosts_empty_hint">Ajoutez un serveur SSH pour commencer</string>
+    <string name="hosts_card_action_connect">Connecter</string>
+    <string name="hosts_card_action_edit">Modifier</string>
+    <string name="hosts_card_action_delete">Supprimer</string>
+    <string name="hosts_card_action_sftp">SFTP</string>
+    <string name="hosts_card_more_actions">Plus d'actions</string>
+    <string name="hosts_card_status_online">En ligne</string>
+    <string name="hosts_card_status_offline">Hors ligne</string>
+    <string name="hosts_delete_title">Supprimer l'hôte ?</string>
+    <string name="hosts_delete_body">Voulez-vous supprimer « %1$s » (%2$s) ? Cette action est irréversible.</string>
+    <string name="hosts_import_dialog_title">Importer des hôtes</string>
+    <string name="hosts_import_dialog_subtitle">%1$d hôtes trouvés, sélectionnez ceux à importer</string>
+    <string name="hosts_import_select_all">Tout sélectionner</string>
+    <string name="hosts_import_action_confirm">Importer (%1$d)</string>
+    <string name="hosts_import_empty_selection">Aucun sélectionné</string>
+    <string name="hosts_import_result">%1$d importés, %2$d ignorés.</string>
+    <string name="hosts_import_parsing">Lecture du fichier…</string>
+    <string name="hosts_import_importing">Import en cours…</string>
+    <string name="hosts_import_error_title">Import impossible</string>
+    <string name="hosts_import_error_none">Aucun hôte trouvé dans ce fichier. Formats acceptés : export NextSH natif (JSON), Termius (JSON) ou KeePassXC (CSV/XML). Si ce fichier est une sauvegarde chiffrée NextSH (.nextsh), utilisez plutôt « Importer une sauvegarde (.nextsh) » dans les réglages. Ce n'est pas un import d'hôtes.</string>
+    <string name="hosts_import_error_generic">Le fichier n'a pas pu être lu. Vérifiez le format puis réessayez.</string>
+    <string name="hosts_import_error_file_too_large">Fichier trop volumineux (%1$d Mio max). Choisissez un export plus petit.</string>
+    <string name="hosts_import_detected_format">Format détecté : %1$s</string>
+    <string name="hosts_import_secret_badge">Contient un secret</string>
+    <string name="hosts_import_secret_warning">Ce fichier contient des secrets en clair (mot de passe, clé privée ou passphrase). Les entrées concernées sont décochées par défaut : cochez-les pour importer leurs secrets dans le vault, puis supprimez le fichier source après l'import.</string>
+    <string name="hosts_import_format_info_button">Format d'import NextSH</string>
+    <string name="hosts_import_format_info_title">Format de fichier NextSH</string>
+    <string name="hosts_import_format_info_intro">Export JSON natif NextSH, utilisable pour importer des hôtes en lot : c'est le même format que produit l'export d'hôtes NextSH.</string>
+    <string name="hosts_import_format_info_required">Champ obligatoire : hostname (adresse ou nom de l'hôte).</string>
+    <string name="hosts_import_format_info_optional">Champs optionnels : label, port (22 par défaut), username, group, auth (password ou ssh_key), password, privateKey, keyPassphrase, id.</string>
+    <string name="hosts_import_format_info_scope">Cet import crée uniquement des hôtes : ce n'est pas une sauvegarde complète du coffre (pas de snippets, thèmes, tunnels…).</string>
+    <string name="hosts_import_format_info_secrets_warning">password, privateKey et keyPassphrase sont stockés en clair dans le fichier JSON. Ne partagez jamais ce fichier et supprimez-le après l'import.</string>
+    <string name="hosts_import_format_info_copy">Copier l'exemple</string>
+    <string name="hosts_import_format_info_copied">Copié !</string>
+    <string name="hosts_folder_unsorted">Sans groupe</string>
+    <string name="hosts_relative_just_now">à l'instant</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Tunnels screen (list)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="tunnels_title">Tunnels</string>
+    <string name="tunnels_subtitle">Port forwarding et proxy SOCKS5 actifs</string>
+
+    <string name="tunnels_action_new">Nouveau tunnel</string>
+    <string name="tunnels_empty_title">Aucun tunnel configuré</string>
+    <string name="tunnels_empty_hint">Crée un tunnel pour rediriger un port distant vers ta machine.</string>
+    <string name="tunnels_action_start">Démarrer</string>
+    <string name="tunnels_action_stop">Arrêter</string>
+    <string name="tunnels_action_open_browser">Ouvrir le navigateur</string>
+    <string name="tunnels_action_start_all">Tout démarrer</string>
+    <string name="tunnels_action_stop_all">Tout stopper</string>
+    <string name="tunnels_error_dialog_title">Erreur tunnel</string>
+    <string name="tunnels_empty_hint_alt">Crée un profil pour démarrer un port forward</string>
+    <string name="tunnels_status_active">Actif</string>
+    <string name="tunnels_status_starting">Démarrage…</string>
+    <string name="tunnels_status_reconnecting">Reconnexion…</string>
+    <string name="tunnels_status_stopped">Arrêté</string>
+    <string name="tunnels_status_error">Erreur</string>
+    <string name="tunnels_type_local">LOCAL</string>
+    <string name="tunnels_type_remote">REMOTE</string>
+    <string name="tunnels_type_dynamic">SOCKS5</string>
+    <string name="tunnels_node_role_local">Local</string>
+    <string name="tunnels_node_role_remote">Distant</string>
+    <string name="tunnels_node_role_gateway">SSH Gateway</string>
+    <string name="tunnels_node_role_multi_target">Multi-cible</string>
+    <string name="tunnels_node_sub_socks5">via SOCKS5</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Vault screen (keys + credentials)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="vault_title">Vault</string>
+    <string name="vault_action_new_key">Nouvelle clé</string>
+    <string name="vault_action_import_key">Importer une clé</string>
+    <string name="vault_section_keys">Clés SSH</string>
+    <string name="vault_section_credentials">Credentials</string>
+    <string name="vault_empty_keys_title">Aucune clé SSH</string>
+    <string name="vault_empty_keys_hint">Génère ou importe une clé pour t'authentifier sur tes hôtes.</string>
+    <string name="vault_key_type_ed25519">Ed25519</string>
+    <string name="vault_key_type_rsa">RSA 4096</string>
+    <string name="vault_key_type_ecdsa_256">ECDSA 256</string>
+    <string name="vault_key_type_ecdsa_384">ECDSA 384</string>
+    <string name="vault_key_type_ecdsa_521">ECDSA 521</string>
+    <string name="vault_key_action_show">Afficher la clé publique</string>
+    <string name="vault_key_action_copy">Copier la clé publique</string>
+    <string name="vault_key_action_export">Exporter la clé privée</string>
+    <string name="vault_key_action_delete">Supprimer la clé</string>
+    <string name="vault_key_delete_title">Supprimer cette clé ?</string>
+    <string name="vault_key_delete_body">La clé « %1$s » sera retirée du vault. Les hôtes qui l'utilisent ne pourront plus s'authentifier.</string>
+    <string name="vault_generate_dialog_title">Générer une nouvelle clé</string>
+    <string name="vault_generate_dialog_label">Nom</string>
+    <string name="vault_generate_dialog_type">Type de clé</string>
+    <string name="vault_generate_dialog_passphrase">Phrase de passe (optionnel)</string>
+    <string name="vault_generate_dialog_passphrase_confirm">Confirme la phrase de passe</string>
+    <string name="vault_generate_dialog_button">Générer</string>
+    <string name="vault_import_dialog_title">Importer une clé</string>
+    <string name="vault_import_dialog_label">Nom</string>
+    <string name="vault_import_dialog_file">Fichier de clé privée</string>
+    <string name="vault_import_dialog_passphrase">Phrase de passe (si chiffrée)</string>
+    <string name="vault_import_dialog_button">Importer</string>
+    <string name="vault_show_key_title">Clé publique</string>
+    <string name="vault_show_key_copied">Clé publique copiée dans le presse-papiers</string>
+
+    <!-- VaultScreen: full -->
+    <string name="vault_subtitle">Coffre-fort des clés SSH chiffré localement</string>
+    <string name="vault_action_generate">Générer une clé</string>
+    <string name="vault_action_import">Importer une clé</string>
+    <string name="vault_section_keys_alt">Clés SSH</string>
+    <string name="vault_section_backup">Backup</string>
+    <string name="vault_action_export">Exporter</string>
+    <string name="vault_action_import_short">Importer</string>
+    <string name="vault_import_dialog_choose_title">Importer une clé SSH privée</string>
+    <string name="vault_import_confirm_title">Importer un backup ?</string>
+    <string name="vault_import_confirm_subtitle">Fusion avec le vault local</string>
+    <string name="vault_import_confirm_body">L'import fusionnera les données avec le vault existant. Les conflits seront résolus en faveur du backup.</string>
+    <string name="vault_import_confirm_continue">Continuer</string>
+    <string name="vault_delete_title">Supprimer la clé ?</string>
+    <string name="vault_delete_body">La clé « %1$s » et sa copie privée dans le vault seront définitivement supprimées.</string>
+    <string name="vault_empty_keys_title_alt">Aucune clé enregistrée</string>
+    <string name="vault_empty_keys_hint_alt">Génère ou importe une clé SSH pour commencer</string>
+    <string name="vault_key_unused">Inutilisée</string>
+    <string name="vault_key_action_copy_pub">Copier la clé publique</string>
+    <string name="vault_key_action_download_pub">Télécharger la clé publique</string>
+    <string name="vault_key_action_delete_short">Supprimer</string>
+    <string name="vault_key_save_dialog_title">Enregistrer la clé publique</string>
+    <string name="vault_key_save_filter_label">Clé publique OpenSSH (*.pub)</string>
+
+    <string name="vault_keytype_ed25519_label">ED25519</string>
+    <string name="vault_keytype_rsa_label">RSA 4096</string>
+    <string name="vault_keytype_ecdsa256_label">ECDSA P-256</string>
+    <string name="vault_keytype_ecdsa384_label">ECDSA P-384</string>
+    <string name="vault_keytype_ecdsa521_label">ECDSA P-521</string>
+    <string name="vault_keytype_sk_ed25519_label">sk-Ed25519</string>
+    <string name="vault_keytype_sk_ecdsa256_label">sk-ECDSA-256</string>
+    <string name="vault_keytype_ed25519_friendly">Ed25519 (recommandé)</string>
+    <string name="vault_keytype_sk_ed25519_friendly">sk-Ed25519 (FIDO2)</string>
+    <string name="vault_keytype_sk_ecdsa256_friendly">sk-ECDSA-256 (FIDO2)</string>
+
+    <string name="vault_generate_dialog_title_alt">Générer une clé SSH</string>
+    <string name="vault_generate_dialog_subtitle">Crée une nouvelle paire chiffrée localement</string>
+    <string name="vault_generate_dialog_label_field">Label</string>
+    <string name="vault_generate_dialog_label_placeholder">Ma clé Ed25519</string>
+    <string name="vault_generate_dialog_type_field">Type de clé</string>
+    <string name="vault_generate_dialog_action">Générer</string>
+
+    <string name="vault_import_key_dialog_title">Importer une clé SSH</string>
+    <string name="vault_import_key_label_field">Label</string>
+    <string name="vault_import_key_label_placeholder">Ma clé importée</string>
+    <string name="vault_import_key_passphrase_field">Passphrase (optionnelle)</string>
+    <string name="vault_import_key_passphrase_hint">Laisse vide si la clé n'est pas chiffrée.</string>
+    <string name="vault_import_key_action">Importer</string>
+
+    <string name="vault_passphrase_error_min">Minimum 8 caractères</string>
+    <string name="vault_passphrase_error_mismatch">Les passphrases ne correspondent pas</string>
+    <string name="vault_export_dialog_title">Exporter le vault</string>
+    <string name="vault_export_dialog_subtitle">Backup chiffré .nextsh</string>
+    <string name="vault_export_dialog_body">Le backup sera chiffré avec une passphrase de votre choix. Elle sera demandée lors de la restauration : ne l'oubliez pas.</string>
+    <string name="vault_export_dialog_field_passphrase">Passphrase</string>
+    <string name="vault_export_dialog_field_confirm">Confirmer la passphrase</string>
+    <string name="vault_export_dialog_action">Exporter</string>
+    <string name="vault_import_backup_dialog_title">Passphrase du backup</string>
+    <string name="vault_import_backup_dialog_action">Importer</string>
+    <string name="vault_field_show">Afficher</string>
+    <string name="vault_field_hide">Masquer</string>
+    <string name="vault_backup_save_dialog_title">Enregistrer le backup .nextsh</string>
+    <string name="vault_backup_save_filter_label">NextSH backup (*.nextsh)</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Sessions screen (empty state + connection states)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="sessions_empty_title">Aucune session ouverte</string>
+    <string name="sessions_empty_hint_prefix">Sélectionnez un hôte dans la barre latérale ou ouvrez le sélecteur rapide avec </string>
+    <string name="sessions_empty_button">Nouvelle session</string>
+    <string name="sessions_empty_kbd_label">Astuce :</string>
+    <string name="sessions_empty_kbd_suffix">pour la palette</string>
+    <string name="sessions_connecting">Connexion…</string>
+    <string name="sessions_password_title">Mot de passe SSH</string>
+    <string name="sessions_password_subtitle">Saisis le mot de passe pour %1$s</string>
+    <string name="sessions_password_placeholder">Mot de passe</string>
+    <string name="sessions_password_button">Se connecter</string>
+    <string name="sessions_sftp_opening">Ouverture SFTP…</string>
+    <string name="sessions_sftp_unavailable">SFTP indisponible</string>
+    <string name="sessions_action_close_tab">Fermer l'onglet</string>
+    <string name="sessions_action_close">Fermer</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Pane header (split-pane top bar)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="pane_action_split_h">Split horizontal</string>
+    <string name="pane_action_split_v">Split vertical</string>
+    <string name="pane_action_close">Fermer ce pane</string>
+    <string name="pane_latency_pending">-</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Transfers screen
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="transfers_title">Transferts</string>
+    <string name="transfers_empty_title">Aucun transfert</string>
+    <string name="transfers_empty_hint">Les uploads et downloads SFTP apparaîtront ici</string>
+    <string name="transfers_action_cancel">Annuler</string>
+    <string name="transfers_action_remove">Retirer</string>
+    <string name="transfers_action_clear_done">Effacer terminés</string>
+    <string name="transfers_state_queued_label">EN FILE</string>
+    <string name="transfers_state_inprogress_label">EN COURS</string>
+    <string name="transfers_state_done_label">TERMINÉ</string>
+    <string name="transfers_state_failed_label">ÉCHEC</string>
+    <string name="transfers_state_cancelled_label">ANNULÉ</string>
+    <string name="transfers_queued_with_size">En file : %1$s</string>
+    <string name="transfers_completed_with_size">Transféré : %1$s</string>
+    <string name="transfers_failed_default">Échec du transfert</string>
+    <string name="transfers_cancelled_message">Transfert annulé</string>
+    <string name="transfers_direction_upload">vers </string>
+    <string name="transfers_direction_download">depuis </string>
+    <string name="transfers_relative_just_now">à l'instant</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Known hosts screen
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="known_hosts_title">Hôtes connus</string>
+    <string name="known_hosts_subtitle_empty">Aucune empreinte serveur enregistrée</string>
+    <string name="known_hosts_empty_title">Aucun hôte connu</string>
+    <string name="known_hosts_empty_hint">Une empreinte sera enregistrée ici dès la première connexion réussie à un hôte SSH.</string>
+    <string name="known_hosts_action_back">Retour</string>
+    <string name="known_hosts_action_clear_all">Tout effacer</string>
+    <string name="known_hosts_added_on">Ajouté le %1$s</string>
+    <string name="known_hosts_action_remove">Supprimer</string>
+    <string name="known_hosts_delete_single_title">Supprimer l'hôte connu ?</string>
+    <string name="known_hosts_delete_single_body">Cette action retire l'empreinte stockée pour %1$s. À la prochaine connexion, l'empreinte serveur devra être reconfirmée.</string>
+    <string name="known_hosts_clear_all_title">Effacer toutes les empreintes ?</string>
+    <string name="known_hosts_clear_all_body">Toutes les empreintes serveur seront oubliées. Chaque hôte devra être reconfirmé à la prochaine connexion.</string>
+
+    <!-- Pane header buttons -->
+    <string name="pane_header_split_h">Split horizontal</string>
+    <string name="pane_header_split_v">Split vertical</string>
+    <string name="pane_header_close">Fermer le pane</string>
+    <string name="pane_header_broadcast_badge">Diffusion</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Host key prompt (TOFU + mismatch)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="host_key_unknown_title">Empreinte serveur inconnue</string>
+    <string name="host_key_unknown_body">L'hôte %1$s présente une empreinte qui n'est pas encore enregistrée. Vérifie qu'elle correspond à celle attendue avant d'accepter.</string>
+    <string name="host_key_accept">Accepter</string>
+    <string name="host_key_reject">Refuser</string>
+    <string name="host_key_mismatch_title">Empreinte serveur changée</string>
+    <string name="host_key_mismatch_body">L'hôte %1$s présente une empreinte différente de celle enregistrée. La connexion est refusée.</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Enrolled devices + enrollment
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="enrolled_devices_title">Appareils enrôlés</string>
+    <string name="enrolled_devices_subtitle">Appareils autorisés à synchroniser avec ce Desktop.</string>
+    <string name="enrolled_devices_empty">Aucun appareil enrôlé</string>
+    <string name="enrolled_devices_action_revoke">Révoquer</string>
+    <string name="enrolled_devices_revoke_title">Révoquer cet appareil ?</string>
+    <string name="enrolled_devices_revoke_body">L'appareil « %1$s » ne pourra plus se synchroniser. Il faudra le ré-enrôler pour rétablir la sync.</string>
+    <string name="enrolled_devices_last_sync">Dernière sync : %1$s</string>
+    <string name="relative_time_seconds">il y a qq secondes</string>
+    <string name="relative_time_minutes">il y a %1$d min</string>
+    <string name="relative_time_hours">il y a %1$d h</string>
+    <string name="relative_time_days">il y a %1$d j</string>
+
+    <string name="enrollment_title">Enrôler un appareil</string>
+    <string name="enrollment_state_starting">Préparation du serveur d'enrôlement…</string>
+    <string name="enrollment_state_listening">Scanne le QR avec NextSH mobile pour appairer</string>
+    <string name="enrollment_state_enrolled">Appareil appairé avec succès</string>
+    <string name="enrollment_state_error">Échec de l'enrôlement</string>
+    <string name="enrollment_preparing">Préparation…</string>
+    <string name="enrollment_done_label">Appareil enrôlé</string>
+    <string name="enrollment_error_label">Erreur d'enrôlement</string>
+    <string name="enrollment_action_back">Retour</string>
+    <string name="enrollment_qr_alt">QR code d'enrôlement</string>
+    <string name="enrollment_scan_hint">Scanne avec NextSH mobile</string>
+    <string name="enrollment_meta_address">Adresse</string>
+    <string name="enrollment_meta_fingerprint">Empreinte TLS</string>
+
+    <string name="enrolled_devices_subtitle_empty">Aucun appareil synchronisé</string>
+    <string name="enrolled_devices_subtitle_one">1 appareil synchronisé</string>
+    <string name="enrolled_devices_subtitle_many">%1$d appareils synchronisés</string>
+    <string name="enrolled_devices_action_back">Retour</string>
+    <string name="enrolled_devices_action_revoke_short">Révoquer</string>
+    <string name="enrolled_devices_revoke_dialog_title">Révoquer %1$s ?</string>
+    <string name="enrolled_devices_revoke_dialog_body">Le secret partagé sera effacé. Tu devras ré-enrôler cet appareil pour synchroniser à nouveau.</string>
+    <string name="enrolled_devices_event_revoked">Appareil %1$s révoqué</string>
+    <string name="enrolled_devices_event_error">Échec : %1$s</string>
+    <string name="enrolled_devices_section_title">Sync LAN</string>
+    <string name="enrolled_devices_empty_title">Aucun appareil enrôlé</string>
+    <string name="enrolled_devices_empty_hint">Ouvre « Enrôler un appareil mobile » dans Paramètres pour appairer un téléphone</string>
+    <string name="enrolled_devices_meta_host">Hôte</string>
+    <string name="enrolled_devices_meta_enrolled">Enrôlé</string>
+    <string name="enrolled_devices_meta_last_sync">Dernière sync</string>
+    <string name="enrolled_devices_meta_never">jamais</string>
+    <string name="enrolled_devices_platform_desktop">DESKTOP</string>
+    <string name="enrolled_devices_platform_android">ANDROID</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Conflict resolution
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="conflicts_title">Conflits de synchronisation</string>
+    <string name="conflicts_empty_subtitle">Aucun conflit en attente</string>
+    <string name="conflicts_empty_title">Aucun conflit</string>
+    <string name="conflicts_empty_hint">Toutes les données sont synchronisées</string>
+    <string name="conflicts_apply_with_count">Appliquer (%1$d)</string>
+    <string name="conflicts_detected_at">Détecté %1$s</string>
+    <string name="conflicts_corrupted">Conflit corrompu : données illisibles des deux côtés</string>
+    <string name="conflicts_action_ignore">Ignorer ce conflit</string>
+    <string name="conflicts_section_local">Ma version</string>
+    <string name="conflicts_section_remote">Version distante</string>
+    <string name="conflicts_keep_local">Garder ma version</string>
+    <string name="conflicts_keep_remote">Prendre la version distante</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Host detail (form)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="host_detail_title_new">Nouvel hôte</string>
+    <string name="host_detail_title_edit">Modifier l'hôte</string>
+    <string name="host_detail_section_identity">Identité</string>
+    <string name="host_detail_section_connection">Connexion</string>
+    <string name="host_detail_section_auth">Authentification</string>
+    <string name="host_detail_section_terminal">Terminal</string>
+    <string name="host_detail_section_danger">Zone dangereuse</string>
+
+    <string name="host_detail_label">Label</string>
+    <string name="host_detail_label_placeholder">prod-web-01</string>
+    <string name="host_detail_hostname">Adresse</string>
+    <string name="host_detail_hostname_placeholder">10.0.0.1 ou example.com</string>
+    <string name="host_detail_port">Port</string>
+    <string name="host_detail_username">Utilisateur</string>
+    <string name="host_detail_username_placeholder">root</string>
+    <string name="host_detail_folder">Dossier</string>
+    <string name="host_detail_keep_alive">Keep-alive (s)</string>
+    <string name="host_detail_auto_reconnect">Reconnexion automatique</string>
+
+    <string name="host_detail_auth_password">Mot de passe</string>
+    <string name="host_detail_auth_key">Clé SSH</string>
+    <string name="host_detail_auth_certificate">Certificat OpenSSH</string>
+    <string name="host_detail_auth_password_label">Mot de passe</string>
+    <string name="host_detail_auth_password_placeholder">••••••</string>
+    <string name="host_detail_auth_key_select">Sélectionne une clé</string>
+    <string name="host_detail_auth_certificate_select">Sélectionne un certificat</string>
+    <string name="host_detail_auth_certificate_pick_file">Choisir un fichier .pub</string>
+
+    <string name="host_detail_terminal_theme">Thème</string>
+    <string name="host_detail_save">Enregistrer</string>
+    <string name="host_detail_save_loading">Enregistrement…</string>
+    <string name="host_detail_delete">Supprimer cet hôte</string>
+    <string name="host_detail_delete_dialog_title">Supprimer l'hôte ?</string>
+    <string name="host_detail_delete_dialog_body">Cette action est irréversible. La fiche %1$s sera retirée du vault local.</string>
+    <string name="host_detail_delete_default_label">de cet hôte</string>
+    <string name="host_detail_danger_text">Action irréversible. La fiche %1$s sera retirée du vault local.</string>
+    <string name="host_detail_label_short">Label</string>
+    <string name="host_detail_label_placeholder_alt">Mon serveur</string>
+    <string name="host_detail_group_optional">Groupe (optionnel)</string>
+    <string name="host_detail_group_placeholder">production, staging…</string>
+    <string name="host_detail_hostname_label">Hostname</string>
+    <string name="host_detail_user_label">Utilisateur</string>
+    <string name="host_detail_auth_method">Méthode</string>
+    <string name="host_detail_password_new">Nouveau mot de passe (optionnel)</string>
+    <string name="host_detail_password_current">Mot de passe</string>
+    <string name="host_detail_password_keep_hint">Laisse vide pour conserver le mot de passe existant.</string>
+    <string name="host_detail_key_select_label">Clé SSH du vault</string>
+    <string name="host_detail_key_empty">Aucune clé disponible, importez ou générez une clé dans le Vault.</string>
+    <string name="host_detail_cert_label">Certificat OpenSSH (-cert.pub)</string>
+    <string name="host_detail_fido2_unavailable">FIDO2 / biométrique non disponible Desktop. Choisissez Mot de passe, Clé SSH ou Certificat.</string>
+    <string name="host_detail_auth_fido2_no_keys">Aucune clé FIDO2 disponible. Importe une clé depuis l'app Android (sync LAN) ou utilise ssh-keygen -t ed25519-sk.</string>
+    <string name="host_detail_auth_fido2_select">Clé FIDO2</string>
+    <string name="fido2_touch_title">Touche ta clé FIDO2</string>
+    <string name="fido2_touch_subtitle">%1$s clignote : pose ton doigt dessus pour valider</string>
+    <string name="fido2_touch_cancel">Annuler</string>
+    <string name="host_detail_field_show">Afficher</string>
+    <string name="host_detail_field_hide">Masquer</string>
+    <string name="host_detail_key_pick">Sélectionner une clé</string>
+    <string name="host_detail_key_pick_disabled">Aucune clé disponible</string>
+    <string name="host_detail_cert_kept">Certificat actuel conservé</string>
+    <string name="host_detail_cert_none">Aucun certificat sélectionné</string>
+    <string name="host_detail_cert_replace">Remplacer</string>
+    <string name="host_detail_cert_select">Sélectionner</string>
+    <string name="host_detail_existing_label">Existants :</string>
+    <string name="host_detail_auth_type_password">Mot de passe</string>
+    <string name="host_detail_auth_type_ssh_key">Clé SSH</string>
+    <string name="host_detail_auth_type_certificate">Certificat</string>
+    <string name="host_detail_auth_type_fido2">FIDO2 / Passkey</string>
+    <string name="host_detail_auth_type_biometric">Clé biométrique</string>
+    <string name="host_detail_cert_dialog_title">Sélectionner le certificat OpenSSH</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Tunnel config (form)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="tunnel_config_title_new">Nouveau tunnel</string>
+    <string name="tunnel_config_title_edit">Modifier le tunnel</string>
+    <string name="tunnel_config_label">Label</string>
+    <string name="tunnel_config_host">Hôte SSH</string>
+    <string name="tunnel_config_type">Type</string>
+    <string name="tunnel_config_type_local">LOCAL : port local → distant</string>
+    <string name="tunnel_config_type_remote">REMOTE : port distant → local</string>
+    <string name="tunnel_config_type_dynamic">SOCKS5 : proxy dynamique</string>
+    <string name="tunnel_config_local_port">Port local</string>
+    <string name="tunnel_config_remote_host">Adresse distante</string>
+    <string name="tunnel_config_remote_port">Port distant</string>
+    <string name="tunnel_config_auto_start">Démarrer automatiquement à l'ouverture</string>
+    <string name="tunnel_config_open_browser">Ouvrir le navigateur sur connexion</string>
+    <string name="tunnel_config_keep_alive_browser">Garder ouvert après fermeture du navigateur</string>
+    <string name="tunnel_config_save">Enregistrer</string>
+    <string name="tunnel_config_save_loading">Enregistrement…</string>
+    <string name="tunnel_config_delete">Supprimer ce tunnel</string>
+    <string name="tunnel_config_delete_dialog_title">Supprimer le tunnel ?</string>
+    <string name="tunnel_config_delete_dialog_body">Le profil « %1$s » sera retiré. Cette action est irréversible.</string>
+    <string name="tunnel_config_delete_default_label">ce tunnel</string>
+    <string name="tunnel_config_section_identity">Identité</string>
+    <string name="tunnel_config_section_host">Hôte SSH</string>
+    <string name="tunnel_config_section_routing">Routage</string>
+    <string name="tunnel_config_section_options">Options</string>
+    <string name="tunnel_config_section_danger">Zone dangereuse</string>
+    <string name="tunnel_config_label_short">Label</string>
+    <string name="tunnel_config_label_placeholder">Postgres prod</string>
+    <string name="tunnel_config_host_label">Hôte</string>
+    <string name="tunnel_config_host_empty">Aucun hôte enregistré : créez un hôte depuis la liste avant de configurer un tunnel.</string>
+    <string name="tunnel_config_local_port_label">Port local</string>
+    <string name="tunnel_config_remote_host_label">Hôte distant</string>
+    <string name="tunnel_config_remote_port_label">Port distant</string>
+    <string name="tunnel_config_remote_bind_label">Hôte distant (bind)</string>
+    <string name="tunnel_config_local_port_target">Port local (cible)</string>
+    <string name="tunnel_config_socks5_port_label">Port local SOCKS5</string>
+    <string name="tunnel_config_socks5_hint">Proxy SOCKS5 exposé sur localhost:%1$s.</string>
+    <string name="tunnel_config_option_auto_start">Démarrer automatiquement</string>
+    <string name="tunnel_config_option_open_browser">Ouvrir le navigateur à la connexion</string>
+    <string name="tunnel_config_option_keep_after_browser">Garder le tunnel actif après fermeture du navigateur</string>
+    <string name="tunnel_config_danger_text">Action irréversible. Le profil %1$s sera retiré.</string>
+    <string name="tunnel_config_pick_host">Sélectionner un hôte</string>
+    <string name="tunnel_config_pick_host_disabled">Aucun hôte disponible</string>
+    <string name="tunnel_config_type_local_label">Local forward (-L)</string>
+    <string name="tunnel_config_type_remote_label">Remote forward (-R)</string>
+    <string name="tunnel_config_type_dynamic_label">Dynamic SOCKS5 (-D)</string>
+    <string name="tunnel_config_type_local_desc">Expose un service distant sur localhost via SSH.</string>
+    <string name="tunnel_config_type_remote_desc">Expose un service local sur le bind distant via SSH.</string>
+    <string name="tunnel_config_type_dynamic_desc">Crée un proxy SOCKS5 pour router le trafic via SSH.</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         SFTP browser
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="sftp_title">Navigateur SFTP</string>
+    <string name="sftp_action_new_folder">Nouveau dossier</string>
+    <string name="sftp_action_upload">Upload</string>
+    <string name="sftp_action_download">Télécharger</string>
+    <string name="sftp_action_rename">Renommer</string>
+    <string name="sftp_action_delete">Supprimer</string>
+    <string name="sftp_action_chmod">Permissions</string>
+    <string name="sftp_action_copy_path">Copier le chemin</string>
+    <string name="sftp_action_preview">Aperçu</string>
+    <string name="sftp_toggle_hidden">Afficher les fichiers cachés</string>
+    <string name="sftp_sort_name_asc">Nom (A→Z)</string>
+    <string name="sftp_sort_name_desc">Nom (Z→A)</string>
+    <string name="sftp_sort_size_asc">Taille (croissant)</string>
+    <string name="sftp_sort_size_desc">Taille (décroissant)</string>
+    <string name="sftp_sort_date_asc">Date (ancien → récent)</string>
+    <string name="sftp_sort_date_desc">Date (récent → ancien)</string>
+    <string name="sftp_loading">Chargement…</string>
+    <string name="sftp_empty">Dossier vide</string>
+    <string name="sftp_select_all">Tout sélectionner</string>
+    <string name="sftp_selection_count">%1$d sélectionné(s)</string>
+    <string name="sftp_dialog_new_folder_title">Nouveau dossier</string>
+    <string name="sftp_dialog_new_folder_label">Nom</string>
+    <string name="sftp_dialog_rename_title">Renommer</string>
+    <string name="sftp_dialog_rename_label">Nouveau nom</string>
+    <string name="sftp_dialog_delete_single_title">Supprimer ?</string>
+    <string name="sftp_dialog_delete_single_body">« %1$s » sera supprimé définitivement.</string>
+    <string name="sftp_dialog_delete_multi_title">Supprimer %1$d éléments ?</string>
+    <string name="sftp_dialog_delete_multi_body">Les éléments sélectionnés seront supprimés définitivement.</string>
+    <string name="sftp_dialog_chmod_title">Permissions</string>
+    <string name="sftp_dialog_chmod_owner">Propriétaire</string>
+    <string name="sftp_dialog_chmod_group">Groupe</string>
+    <string name="sftp_dialog_chmod_others">Autres</string>
+    <string name="sftp_dialog_chmod_read">Lecture</string>
+    <string name="sftp_dialog_chmod_write">Écriture</string>
+    <string name="sftp_dialog_chmod_execute">Exécution</string>
+    <string name="sftp_dialog_new_folder_name_label">Nom du dossier</string>
+    <string name="sftp_dialog_new_folder_create">Créer</string>
+    <string name="sftp_dialog_rename_new_name_label">Nouveau nom</string>
+    <string name="sftp_dialog_delete_confirm_title">Confirmer la suppression</string>
+    <string name="sftp_dialog_delete_single_folder_warning">Ce dossier et tout son contenu seront supprimés.</string>
+    <string name="sftp_dialog_delete_single_file_warning">Ce fichier sera supprimé.</string>
+    <string name="sftp_dialog_delete_multi_warning">Les éléments sélectionnés (dossiers inclus récursivement) seront supprimés.</string>
+    <string name="sftp_dialog_chmod_apply">Appliquer</string>
+    <string name="sftp_dialog_cancel">Annuler</string>
+
+    <!-- SftpBrowser concrete labels -->
+    <string name="sftp_action_upload_alt">Téléverser</string>
+    <string name="sftp_action_show_hidden">Afficher les fichiers cachés</string>
+    <string name="sftp_action_hide_hidden">Masquer les fichiers cachés</string>
+    <string name="sftp_action_refresh">Rafraîchir</string>
+    <string name="sftp_action_clear_selection">Annuler la sélection</string>
+    <string name="sftp_selection_count_one">%1$d sélectionné</string>
+    <string name="sftp_selection_count_many">%1$d sélectionnés</string>
+    <string name="sftp_selection_select_all">Tout</string>
+    <string name="sftp_action_sort">Trier</string>
+    <string name="sftp_context_preview">Aperçu</string>
+    <string name="sftp_context_download">Télécharger…</string>
+    <string name="sftp_context_rename">Renommer</string>
+    <string name="sftp_context_chmod">Permissions…</string>
+    <string name="sftp_context_copy_path">Copier le chemin</string>
+    <string name="sftp_context_delete">Supprimer</string>
+    <string name="sftp_dialog_upload_title">Téléverser vers %1$s</string>
+    <string name="sftp_dialog_save_title">Enregistrer %1$s</string>
+    <string name="sftp_error_title">Erreur SFTP</string>
+    <string name="sftp_error_retry">Réessayer</string>
+    <string name="sftp_sort_name_asc_alt">Nom (A → Z)</string>
+    <string name="sftp_sort_name_desc_alt">Nom (Z → A)</string>
+    <string name="sftp_sort_size_asc_alt">Taille (↑)</string>
+    <string name="sftp_sort_size_desc_alt">Taille (↓)</string>
+    <string name="sftp_sort_date_asc_alt">Date (↑)</string>
+    <string name="sftp_sort_date_desc_alt">Date (↓)</string>
+    <string name="sftp_empty_short">Dossier vide</string>
+
+    <!-- SftpPreviewPanel -->
+    <string name="sftp_preview_close">Fermer l'aperçu</string>
+    <string name="sftp_preview_expand">Agrandir l'aperçu</string>
+    <string name="sftp_preview_collapse">Réduire l'aperçu</string>
+    <string name="sftp_preview_unavailable_title">Aperçu indisponible</string>
+    <string name="sftp_preview_image_unsupported">Format d'image non supporté</string>
+
+    <!-- SFTP manager errors -->
+    <string name="sftp_error_client_not_ready">Client SFTP non initialisé</string>
+    <string name="sftp_error_invalid_path">Chemin invalide</string>
+    <string name="sftp_error_connection_lost">Connexion SFTP perdue</string>
+    <string name="sftp_error_generic">Erreur SFTP</string>
+    <string name="sftp_error_create_dir_failed">Impossible de créer le dossier</string>
+    <string name="sftp_error_delete_failed">Impossible de supprimer</string>
+    <string name="sftp_error_delete_recursive_failed">Impossible de supprimer l'élément</string>
+    <string name="sftp_error_cannot_delete_root">Impossible de supprimer la racine</string>
+    <string name="sftp_error_rename_failed">Impossible de renommer</string>
+    <string name="sftp_error_chmod_failed">Impossible de modifier les permissions</string>
+    <string name="sftp_error_read_failed">Impossible de lire le fichier</string>
+    <string name="sftp_error_download_failed">Impossible de télécharger</string>
+    <string name="sftp_error_upload_failed">Impossible d'envoyer le fichier</string>
+    <string name="sftp_error_invalid_folder_name">Nom de dossier invalide</string>
+    <string name="sftp_error_invalid_file_name">Nom de fichier invalide</string>
+    <string name="sftp_error_invalid_new_path">Nouveau chemin invalide</string>
+    <string name="sftp_error_invalid_permissions">Permissions invalides (0–511)</string>
+    <string name="sftp_error_read_generic">Erreur de lecture</string>
+    <string name="sftp_error_download_generic">Erreur de téléchargement</string>
+    <string name="sftp_error_upload_generic">Erreur d'envoi</string>
+    <string name="sftp_error_stat_failed">Erreur stat SFTP</string>
+    <string name="sftp_error_close_failed">Erreur fermeture SFTP</string>
+    <string name="sftp_error_session_not_found">Session SSH introuvable : %1$s</string>
+    <string name="sftp_error_preview_too_large">Fichier trop volumineux pour l'aperçu (%1$d octets)</string>
+    <string name="sftp_error_permission_denied">Permission refusée</string>
+    <string name="sftp_error_not_found">Fichier ou dossier introuvable</string>
+    <string name="sftp_error_target_exists">Cible déjà existante</string>
+    <string name="sftp_error_no_space">Espace disque insuffisant</string>
+    <string name="sftp_error_is_directory">Opération incompatible avec un dossier</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         FIDO2 Enroll dialog (vault)
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="vault_action_enroll_fido2">Générer clé FIDO2</string>
+    <string name="fido2_enroll_dialog_title">Enrôler une clé FIDO2</string>
+    <string name="fido2_enroll_dialog_subtitle">Génère une clé sk-ssh-ed25519 sur ta YubiKey</string>
+    <string name="fido2_enroll_label_field">Label</string>
+    <string name="fido2_enroll_label_placeholder">Ma YubiKey 5C NFC</string>
+    <string name="fido2_enroll_pin_field">PIN YubiKey</string>
+    <string name="fido2_enroll_pin_hint">Saisis le PIN configuré sur ta YubiKey.</string>
+    <string name="fido2_enroll_advanced_section">Options avancées</string>
+    <string name="fido2_enroll_rpid_field">Application (RP-ID)</string>
+    <string name="fido2_enroll_algo_field">Algorithme</string>
+    <string name="fido2_enroll_algo_value">Ed25519 + ECDSA P-256 (fallback Windows)</string>
+    <string name="fido2_enroll_btn_detect">Brancher la clé</string>
+    <string name="fido2_enroll_btn_make">Générer la clé</string>
+    <string name="fido2_enroll_btn_continue">Continuer</string>
+    <string name="fido2_enroll_detecting">Détection de la YubiKey…</string>
+    <string name="fido2_enroll_waiting_touch">Touche ta YubiKey pour confirmer</string>
+    <string name="fido2_enroll_waiting_touch_sub">%1$s clignote : pose ton doigt dessus</string>
+    <string name="fido2_enroll_success">Clé FIDO2 enrôlée avec succès !</string>
+    <string name="fido2_enroll_success_ed25519">Clé sk-ssh-ed25519 enrôlée avec succès !</string>
+    <string name="fido2_enroll_success_ecdsa256">Clé sk-ecdsa-sha2-nistp256 enrôlée avec succès (fallback ECDSA P-256 Windows).</string>
+    <string name="fido2_enroll_retry">Réessayer</string>
+    <!-- Affiché sur Windows quand l'interface HID FIDO est verrouillée par Windows Hello -->
+    <string name="fido2_enroll_windows_hid_locked">Aucune YubiKey détectée. Sur Windows, l'accès direct USB HID FIDO est réservé à Windows Hello.\n\nSolutions :\n  (a) Activer l'interface CCID dans YubiKey Manager pour exposer la clé en PC/SC,\n  (b) Brancher via un lecteur NFC USB (mode CCID natif),\n  (c) Lancer NextSH en tant qu'administrateur (contournement temporaire).</string>
+    <!-- Affiché quand le bug PC/SC Windows+Java (SCARD_E_NOT_TRANSACTED / 0x80100027) persiste après retries -->
+    <string name="fido2_enroll_pcsc_windows_bug">L'accès PC/SC à ta YubiKey échoue (SCARD_E_NOT_TRANSACTED / 0x80100027).\n\nWorkarounds :\n  (a) Ferme tout logiciel Yubico (YubiKey Manager, Yubico Authenticator) et tout navigateur web actif, puis débranche et rebranche ta clé : ces apps verrouillent l'accès CCID en concurrence,\n  (b) Redémarre le service Windows Smart Card (services.msc → SCardSvr),\n  (c) Utiliser un lecteur NFC USB (mode CCID natif),\n  (d) Lancer NextSH en tant qu'administrateur.\n\nNote : l'implémentation Windows WebAuthn API native est prévue dans une prochaine version.</string>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Snippets screen
+    ──────────────────────────────────────────────────────────────────── -->
+    <string name="snippets_title">Snippets</string>
+    <string name="snippets_subtitle">Commandes réutilisables, globales ou liées à un hôte</string>
+    <string name="snippets_action_manage">Snippets</string>
+    <string name="snippets_action_add">Nouveau snippet</string>
+    <string name="snippets_action_edit">Modifier</string>
+    <string name="snippets_field_label">Nom</string>
+    <string name="snippets_field_command">Commande</string>
+    <string name="snippets_field_category">Catégorie</string>
+    <string name="snippets_field_host">Hôte</string>
+    <string name="snippets_field_host_global">Global</string>
+    <string name="snippets_filter_all">Tous</string>
+    <string name="snippets_empty_title">Aucun snippet</string>
+    <string name="snippets_empty_hint">Crée ton premier snippet pour accélérer tes commandes fréquentes.</string>
+    <string name="snippets_delete_title">Supprimer le snippet ?</string>
+    <string name="snippets_delete_body">Cette action est définitive. Le snippet ne sera plus disponible dans les sessions.</string>
+    <string name="snippets_error_label_empty">Le nom est requis.</string>
+    <string name="snippets_error_command_empty">La commande est requise.</string>
+    <string name="snippets_message_saved">Snippet enregistré</string>
+    <string name="snippets_message_deleted">Snippet supprimé</string>
+    <string name="snippets_tooltip_edit">Modifier</string>
+    <string name="snippets_tooltip_delete">Supprimer</string>
+    <string name="snippets_error_unknown">Erreur inattendue</string>
+</resources>

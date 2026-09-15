@@ -1,0 +1,29 @@
+CREATE TABLE enrolled_devices (
+    deviceId TEXT NOT NULL PRIMARY KEY,
+    deviceName TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    publicKeyFingerprint TEXT NOT NULL,
+    tlsCertFingerprint TEXT,
+    lastSyncAt INTEGER,
+    enrolledAt INTEGER NOT NULL,
+    lastKnownHost TEXT
+);
+
+selectAll:
+SELECT * FROM enrolled_devices ORDER BY enrolledAt DESC;
+
+selectByDeviceId:
+SELECT * FROM enrolled_devices WHERE deviceId = ?;
+
+upsert:
+INSERT OR REPLACE INTO enrolled_devices(deviceId, deviceName, platform, publicKeyFingerprint, tlsCertFingerprint, lastSyncAt, enrolledAt, lastKnownHost)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+delete:
+DELETE FROM enrolled_devices WHERE deviceId = ?;
+
+updateLastSyncAt:
+UPDATE enrolled_devices SET lastSyncAt = ? WHERE deviceId = ?;
+
+updateLastKnownHost:
+UPDATE enrolled_devices SET lastKnownHost = ? WHERE deviceId = ?;

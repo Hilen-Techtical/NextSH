@@ -1,0 +1,588 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NextSH</string>
+    <string name="tunnel_channel_name">SSH Tunnels</string>
+    <string name="tunnel_channel_description">Active SSH tunnel connections</string>
+
+    <!-- ── Navigation ──────────────────────────────────────────────────────── -->
+    <string name="nav_hosts">Hosts</string>
+    <string name="nav_tunnels">Tunnels</string>
+    <string name="nav_vault">Vault</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- ── Common actions ─────────────────────────────────────────────────── -->
+    <string name="action_back">Back</string>
+    <string name="action_save">Save</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_delete_all">Delete all</string>
+    <string name="action_add_host">Add host</string>
+    <string name="action_add_host_fab">Add host</string>
+    <string name="action_new_tunnel">New tunnel</string>
+    <string name="action_create_tunnel">Create tunnel</string>
+    <string name="action_generate_key">Generate key</string>
+    <string name="action_generate">Generate</string>
+    <string name="action_import">Import</string>
+    <string name="action_import_key">Import key</string>
+    <string name="action_export">Export</string>
+    <string name="action_reconnect">Reconnect</string>
+    <string name="action_trust_host">Trust</string>
+    <string name="action_reject">Reject</string>
+    <string name="action_cancel_connection">Cancel connection</string>
+    <string name="action_unlock_vault">Unlock vault</string>
+    <string name="action_skip">Skip</string>
+    <string name="action_wipe_vault">Wipe vault</string>
+    <string name="action_wipe">Wipe</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_select_file">Select file (.pem, .key, id_rsa…)</string>
+    <string name="action_settings">Settings</string>
+    <string name="action_edit">Edit</string>
+    <string name="action_new_tab">New tab</string>
+    <string name="action_resume_browser">Resume browser</string>
+    <string name="action_open_browser">Open in browser</string>
+    <string name="action_stop">Stop</string>
+    <string name="action_start">Start</string>
+    <string name="action_close">Close</string>
+    <string name="action_minimize">Minimize</string>
+    <string name="action_nav_back">Back</string>
+    <string name="action_nav_forward">Forward</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="action_show_password">Show</string>
+    <string name="action_favorite">Add to favorites</string>
+    <string name="action_unfavorite">Remove from favorites</string>
+    <string name="shortcut_connect_host">Connect to %s</string>
+    <string name="shortcut_start_tunnel">Start tunnel %s</string>
+    <string name="shortcut_disabled_message">Shortcut unavailable</string>
+    <string name="action_hide_password">Hide</string>
+
+    <!-- ── Screen titles ──────────────────────────────────────────────────── -->
+    <string name="title_edit_host">Edit host</string>
+    <string name="title_new_host">New host</string>
+    <string name="title_edit_tunnel">Edit tunnel</string>
+    <string name="title_new_tunnel">New tunnel</string>
+    <string name="title_vault">Vault</string>
+    <string name="title_import_key">Import key</string>
+    <string name="title_settings">Settings</string>
+    <string name="title_known_hosts">Known hosts</string>
+    <string name="title_ssh_tunnels">SSH Tunnels</string>
+
+    <!-- ── Section headers ────────────────────────────────────────────────── -->
+    <string name="section_connection">Connection</string>
+    <string name="section_authentication">Authentication</string>
+    <string name="section_options">Options</string>
+    <string name="section_terminal">Terminal</string>
+    <string name="section_general">General</string>
+    <string name="section_tunnel_type">Tunnel type</string>
+    <string name="section_ssh_host">SSH host</string>
+    <string name="section_ssh_keys">SSH keys</string>
+    <string name="section_credentials">Credentials</string>
+    <string name="section_backup">Backup</string>
+    <string name="section_security">Security</string>
+    <string name="section_about">About</string>
+    <string name="section_information">Information</string>
+    <string name="section_private_key">Private key</string>
+
+    <!-- ── Custom terminal themes (WS7) ───────────────────────────────────── -->
+    <string name="settings_terminal_themes">Terminal themes</string>
+    <string name="title_terminal_themes">Terminal themes</string>
+    <string name="themes_empty">No custom themes yet</string>
+    <string name="themes_subtitle_one">1 custom theme</string>
+    <string name="themes_subtitle_many">%1$d custom themes</string>
+    <string name="action_new_theme">New theme</string>
+    <string name="action_new_custom_theme">＋ New theme</string>
+    <string name="action_edit_theme">Edit theme</string>
+    <string name="action_delete_theme">Delete theme</string>
+    <string name="dialog_custom_theme_title">Custom theme</string>
+    <string name="dialog_delete_theme_title">Delete theme?</string>
+    <!-- Format: "\"%1$s\" will be permanently deleted." -->
+    <string name="dialog_delete_theme_message">\"%1$s\" will be permanently deleted. Hosts using it will revert to the default theme.</string>
+    <string name="label_theme_name">Theme name</string>
+    <string name="placeholder_theme_name">My theme</string>
+    <string name="label_theme_background">Background</string>
+    <string name="label_theme_foreground">Foreground</string>
+    <string name="label_theme_cursor">Cursor</string>
+    <string name="label_theme_selection">Selection</string>
+    <string name="label_theme_ansi">ANSI colors</string>
+    <!-- Format: "ANSI %1$d" -->
+    <string name="label_theme_ansi_index">ANSI %1$d</string>
+
+    <!-- ── HSV color picker (R3b) ─────────────────────────────────────────── -->
+    <string name="color_picker_title">Pick a color</string>
+    <string name="color_picker_tab_wheel">Wheel</string>
+    <string name="color_picker_tab_rgb">RGB</string>
+    <string name="color_picker_lightness">Brightness</string>
+    <string name="color_picker_hex">Hex</string>
+    <string name="color_picker_red">Red</string>
+    <string name="color_picker_green">Green</string>
+    <string name="color_picker_blue">Blue</string>
+    <!-- Format: "Edit color: %1$s", swatch content description -->
+    <string name="color_picker_edit_slot">Edit color: %1$s</string>
+
+    <!-- ── Section titles: dynamic (tunnel port sections) ────────────────── -->
+    <string name="section_local_forward">Local forward</string>
+    <string name="section_remote_forward">Remote forward</string>
+    <string name="section_socks5_proxy">SOCKS5 proxy</string>
+
+    <!-- ── Form labels ────────────────────────────────────────────────────── -->
+    <string name="label_name">Name</string>
+    <string name="label_host">Host</string>
+    <string name="label_port">Port</string>
+    <string name="label_username">Username</string>
+    <string name="label_password">Password</string>
+    <string name="label_ssh_key">SSH key</string>
+    <string name="label_associated_private_key">Associated private key</string>
+    <string name="label_group">Group</string>
+    <string name="label_keepalive">Keep-alive (s)</string>
+    <string name="label_auto_reconnect">Auto reconnect</string>
+    <string name="label_local_port">Local port</string>
+    <string name="label_remote_host">Remote host</string>
+    <string name="label_remote_port">Remote port</string>
+    <string name="label_local_host">Local host</string>
+    <string name="label_local_socks5_port">Local SOCKS5 port</string>
+    <string name="label_auto_start">Auto start</string>
+    <string name="label_open_browser_on_connect">Open browser on connect</string>
+    <string name="label_keep_alive_after_browser_close">Keep tunnel active after close</string>
+    <string name="label_key_name">Key name</string>
+    <string name="label_key_type">Type</string>
+    <string name="badge_biometric">Bio</string>
+    <string name="label_biometric_key">Biometric key</string>
+    <string name="label_biometric_key_desc">ECDSA P-256 protected by fingerprint</string>
+    <string name="label_passphrase">Passphrase</string>
+    <string name="label_confirm_passphrase">Confirm passphrase</string>
+    <string name="label_private_key_content">Private key content</string>
+    <string name="label_terminal_font_size">Font size</string>
+    <string name="label_scrollback">Scrollback history</string>
+    <string name="label_keepalive_interval">Keep-alive</string>
+    <string name="label_connection_timeout">Connection timeout</string>
+    <string name="settings_connection_timeout_help">Maximum time to wait when connecting to a server. The system may give up sooner if the server does not respond at all.</string>
+    <string name="label_biometric_unlock">Biometric unlock</string>
+    <string name="label_known_hosts">Known hosts</string>
+    <string name="label_clipboard_expiry">Clipboard expiry</string>
+    <string name="label_version">Version</string>
+    <string name="label_application">Application</string>
+
+    <!-- ── Auth type labels ───────────────────────────────────────────────── -->
+    <string name="auth_type_password">Password</string>
+    <string name="auth_type_ssh_key">SSH key</string>
+    <string name="auth_type_certificate">Certificate</string>
+    <string name="auth_type_fido2">FIDO2</string>
+
+    <!-- ── Filter chips ───────────────────────────────────────────────────── -->
+    <string name="filter_all">All</string>
+
+    <!-- ── Placeholders ───────────────────────────────────────────────────── -->
+    <string name="placeholder_host_name">My server</string>
+    <string name="placeholder_hostname">192.168.1.100</string>
+    <string name="placeholder_port">22</string>
+    <string name="placeholder_username">root</string>
+    <string name="placeholder_password">••••••••</string>
+    <string name="placeholder_select_key">Select a key</string>
+    <string name="placeholder_group">Production, Dev, Lab…</string>
+    <string name="placeholder_tunnel_name">n8n VPS, Proxmox UI…</string>
+    <string name="placeholder_local_port">8080</string>
+    <string name="placeholder_remote_host">127.0.0.1</string>
+    <string name="placeholder_remote_port">80</string>
+    <string name="placeholder_socks5_port">1080</string>
+    <string name="placeholder_key_name">My Ed25519 key</string>
+    <string name="placeholder_server_key_name">My server key</string>
+    <string name="placeholder_key_formats">Formats: PEM (.pem), OpenSSH (id_rsa, id_ed25519), PKCS#8 (.key)</string>
+
+    <!-- ── Empty states ───────────────────────────────────────────────────── -->
+    <string name="empty_no_hosts_title">No hosts configured</string>
+    <string name="empty_no_hosts_subtitle">Add your first SSH server to get started</string>
+
+    <!-- Host import (NextSH / Termius / KeePassXC) -->
+    <string name="host_import_title">Import hosts</string>
+    <string name="host_import_pick_title">Import from NextSH, Termius or KeePassXC</string>
+    <string name="host_import_pick_hint">Pick a native NextSH, Termius (JSON) or KeePassXC (CSV/XML) export.</string>
+    <string name="host_import_select_file">Choose a file</string>
+    <string name="host_import_found">%1$d hosts found</string>
+    <string name="host_import_action_confirm">Import (%1$d)</string>
+    <string name="host_import_parsing">Reading file…</string>
+    <string name="host_import_importing">Importing…</string>
+    <string name="host_import_result">%1$d imported, %2$d skipped.</string>
+    <string name="host_import_error_none">No hosts found in this file. Make sure it is a NextSH, Termius (JSON) or KeePassXC (CSV/XML) export. If this file is an encrypted NextSH backup (.nextsh), use “Import backup” in the Vault (Backup section) instead of host import.</string>
+    <string name="host_import_error_generic">The file could not be read. Check the format and try again.</string>
+    <string name="host_import_error_too_large">This file exceeds the maximum allowed size (%1$d MiB) for import.</string>
+    <string name="host_import_format_detected">Format detected: %1$s</string>
+    <string name="host_import_secret_badge">Contains a secret</string>
+    <string name="host_import_secret_warning">This file contains secrets in plain text. Matching entries are unchecked by default: check them to import their secrets into the vault, then delete the source file.</string>
+    <string name="host_import_format_info_secrets_warning">password, privateKey, and keyPassphrase are stored in plain text in the JSON file: delete the file after importing.</string>
+    <string name="host_import_format_info_button">File format</string>
+    <string name="host_import_format_info_title">NextSH file format</string>
+    <string name="host_import_format_info_intro">NextSH can import its own JSON host exports, in addition to Termius and KeePassXC.</string>
+    <string name="host_import_format_info_required">Required field: hostname.</string>
+    <string name="host_import_format_info_optional">Optional fields: label, port, username, group, auth (password or ssh_key), password, privateKey (inline PEM), keyPassphrase, id.</string>
+    <string name="host_import_format_info_scope">Hosts only: tunnels, snippets and themes are not imported.</string>
+    <string name="host_import_format_info_copy_example">Copy example</string>
+    <string name="host_import_format_info_copied">Example copied</string>
+    <string name="empty_no_tunnels_title">No tunnels configured</string>
+    <string name="empty_no_tunnels_subtitle">Create a tunnel profile to access your remote services</string>
+    <string name="empty_no_keys_title">No SSH keys</string>
+    <string name="empty_no_keys_subtitle">Generate or import your first key</string>
+    <string name="empty_no_known_hosts_title">No known hosts</string>
+    <string name="empty_no_known_hosts_subtitle">Hosts will be added on your first connection</string>
+    <string name="empty_no_hosts_picker">No hosts configured</string>
+
+    <!-- ── Status messages ────────────────────────────────────────────────── -->
+    <string name="status_connecting_ssh">SSH connecting…</string>
+    <string name="status_connection_error">Connection error</string>
+    <string name="status_session_disconnected">Session disconnected</string>
+    <string name="status_no_active_session">No active session</string>
+    <string name="status_tunnel_disconnected">Tunnel disconnected</string>
+    <string name="status_disabled">Disabled</string>
+    <string name="status_generating">Generating…</string>
+    <string name="status_importing">Importing…</string>
+
+    <!-- ── SSH connect errors (SshSessionManager) ─────────────────────────── -->
+    <string name="connect_error_timeout">Connection timed out (%1$d s)</string>
+    <string name="connect_error_refused">The server did not respond</string>
+    <string name="connect_error_host_not_found">Host name not found</string>
+    <string name="connect_error_generic">Connection failed</string>
+    <string name="connect_error_generic_detail">Connection failed (%1$s)</string>
+    <string name="auth_error_failed">Authentication failed</string>
+    <string name="auth_error_failed_biometric">Authentication failed with the biometric key</string>
+    <string name="auth_error_failed_fido2">FIDO2 authentication failed</string>
+
+    <!-- ── Credential storage ─────────────────────────────────────────────── -->
+    <string name="label_no_passwords_stored">No passwords stored</string>
+    <string name="label_passwords_stored_one">1 password stored</string>
+    <string name="label_passwords_stored_plural">%d passwords stored</string>
+
+    <!-- ── Dialog titles ──────────────────────────────────────────────────── -->
+    <string name="dialog_delete_host_title">Delete host?</string>
+    <string name="dialog_delete_host_message">This will also delete all associated tunnels.</string>
+    <string name="dialog_delete_tunnel_title">Delete tunnel?</string>
+    <string name="dialog_delete_tunnel_message">The tunnel will be stopped if active, then permanently deleted.</string>
+    <string name="dialog_delete_key_title">Delete key?</string>
+    <string name="dialog_delete_key_message">"%s" will be permanently deleted from the vault.</string>
+    <string name="dialog_wipe_vault_title">Wipe vault?</string>
+    <string name="dialog_wipe_vault_message">This will permanently delete all hosts, SSH keys and tunnels. This action is irreversible.</string>
+    <string name="dialog_generate_key_title">Generate SSH key</string>
+    <string name="dialog_export_vault_title">Export vault</string>
+    <string name="dialog_import_backup_title">Import backup</string>
+    <string name="dialog_export_vault_message">Choose a passphrase to encrypt the backup. It will be required to restore your data.</string>
+    <string name="dialog_import_backup_message">Enter the passphrase used when exporting the backup.</string>
+    <string name="dialog_host_verification_title">Host verification</string>
+    <string name="dialog_host_key_changed_title">⚠ Host key changed</string>
+    <string name="dialog_host_key_changed_message">WARNING: The SSH key of host %s has changed since the last connection. This may indicate a man-in-the-middle attack.</string>
+    <string name="dialog_trust_host_question">Do you want to trust this host?</string>
+    <string name="dialog_external_nav_title">External navigation</string>
+    <string name="dialog_external_nav_message">This page is trying to open an external URL.</string>
+    <string name="dialog_external_nav_warning">Traffic will no longer be protected by the SSH tunnel.</string>
+    <string name="dialog_open_link_title">Open external link?</string>
+    <string name="dialog_open_repo_body">This will open the NextSH public GitHub repository in your browser:</string>
+    <string name="action_open_link">Open</string>
+    <string name="dialog_delete_known_host_title">Delete host?</string>
+    <string name="dialog_delete_known_host_message">Entry "%s" will be removed from known_hosts. You will need to confirm the key on the next connection.</string>
+    <string name="dialog_delete_all_known_hosts_title">Delete all?</string>
+    <string name="dialog_delete_all_known_hosts_message">All known host keys will be deleted. You will need to confirm fingerprints on future connections.</string>
+    <string name="dialog_connect_to_host">Connect to host</string>
+
+    <!-- ── Host key verification dialog details ───────────────────────────── -->
+    <string name="label_host_address">Host: %s</string>
+    <string name="label_algorithm">Algorithm: %s</string>
+    <string name="label_key_fingerprint">Key fingerprint:</string>
+    <string name="label_stored_key">Stored key:</string>
+    <string name="label_received_key">Received key:</string>
+
+    <!-- ── FIDO2 explanatory text ──────────────────────────────────────────── -->
+    <string name="label_experimental">Experimental</string>
+    <string name="fido2_info_line1">FIDO2/Passkey authentication requires an SSH server configured to accept FIDO2 keys (sk-ecdsa-sha2-nistp256 or sk-ssh-ed25519).</string>
+    <string name="fido2_info_line2">The passkey must be registered on your device via the Android password manager.</string>
+    <string name="fido2_tap_key">Tap your security key (USB or NFC)</string>
+    <string name="fido2_timeout">Timeout: no security key detected</string>
+    <string name="fido2_no_key_detected">No security key detected</string>
+    <string name="fido2_mode_hardware">Hardware Key</string>
+    <string name="fido2_mode_passkey">Passkey</string>
+    <string name="label_fido2_sk_key">Security key (sk-*)</string>
+    <string name="fido2_no_sk_keys">No sk-* keys, import a FIDO2 public key</string>
+    <string name="fido2_error_no_key">No FIDO2 key configured for this host</string>
+    <string name="fido2_error_cancelled">FIDO2 authentication cancelled</string>
+    <string name="fido2_error_timeout">FIDO2 authentication timeout</string>
+    <string name="fido2_pin_title">Enter your security key PIN</string>
+    <string name="fido2_pin_hint">PIN (4–63 chars)</string>
+    <string name="fido2_pin_tries_remaining">Tries remaining: %1$d</string>
+    <string name="fido2_pin_blocked">Key is blocked. A full reset is required to reuse it.</string>
+    <string name="fido2_pin_required_no_ui">This key requires a PIN but the PIN entry UI is unavailable.</string>
+
+    <!-- ── Certificate hint ───────────────────────────────────────────────── -->
+    <string name="certificate_hint">The certificate must be imported into the vault with the same ID as the key (cert_{id}).</string>
+
+    <!-- ── No key dropdown item ───────────────────────────────────────────── -->
+    <string name="label_no_key_import_first">No keys, import one first</string>
+    <string name="label_no_host_configured">No hosts configured</string>
+
+    <!-- ── Passphrase validation ──────────────────────────────────────────── -->
+    <string name="error_passphrase_too_short">Minimum 8 characters</string>
+    <string name="error_passphrases_mismatch">Passphrases do not match</string>
+
+    <!-- ── Settings display values ───────────────────────────────────────── -->
+    <string name="settings_scrollback_lines">%d lines</string>
+    <string name="settings_scrollback_klines">%dk lines</string>
+    <string name="settings_font_size_pt">%d pt</string>
+    <string name="settings_keepalive_seconds">%d s</string>
+    <string name="settings_timeout_seconds">%d s</string>
+    <string name="settings_app_credit">NextSH by Techtical</string>
+
+    <!-- ── Vault unlock screen ────────────────────────────────────────────── -->
+    <string name="label_secure_ssh_client">Secure SSH Client</string>
+    <string name="label_nextsh_logo">NextSH logo</string>
+    <string name="label_no_device_lock">No authentication method configured.\nPlease enable a PIN, pattern, or biometrics in your device settings.</string>
+
+    <!-- ── Via host label ─────────────────────────────────────────────────── -->
+    <string name="label_via_host">via %s</string>
+
+    <!-- ── Tab close content description ────────────────────────────────────── -->
+    <string name="action_close_tab">Close %s</string>
+
+    <!-- ── Delete known host content description ──────────────────────────── -->
+    <string name="action_delete_known_host">Delete %s</string>
+
+    <!-- ── Snippets ──────────────────────────────────────────────────────── -->
+    <string name="nav_snippets">Snippets</string>
+    <string name="title_snippets">Snippets</string>
+    <string name="empty_snippets_title">No snippets</string>
+    <string name="empty_snippets_subtitle">Add your frequent commands</string>
+    <string name="action_add_snippet">Add snippet</string>
+    <string name="action_edit_snippet">Edit snippet</string>
+    <string name="label_snippet_label">Name</string>
+    <string name="label_snippet_command">Command</string>
+    <string name="label_snippet_category">Category (optional)</string>
+    <string name="label_snippet_host">Host</string>
+    <string name="label_snippet_global">Global</string>
+    <string name="dialog_execute_snippet_title">Execute snippet?</string>
+    <string name="action_execute">Execute</string>
+    <string name="dialog_delete_snippet_title">Delete snippet?</string>
+    <string name="dialog_delete_snippet_message">This action cannot be undone.</string>
+    <string name="dialog_snippet_picker_title">Insert snippet</string>
+    <string name="error_snippet_label_empty">Snippet name cannot be empty</string>
+    <string name="error_snippet_command_empty">Command cannot be empty</string>
+
+    <!-- ── SFTP Browser ──────────────────────────────────────────────────── -->
+    <string name="action_sftp_browse">SFTP Browser</string>
+    <string name="title_sftp_browser">Files</string>
+    <string name="sftp_empty_directory">Empty folder</string>
+    <string name="sftp_empty_directory_subtitle">No files in this directory</string>
+    <string name="sftp_error_connection">SFTP connection lost</string>
+    <string name="sftp_error_permission">Permission denied</string>
+    <string name="sftp_error_not_found">File or folder not found</string>
+    <string name="sftp_error_generic">SFTP error: %1$s</string>
+    <string name="sftp_parent_directory">Parent folder</string>
+    <string name="sftp_sort_name">Name</string>
+    <string name="sftp_sort_size">Size</string>
+    <string name="sftp_sort_date">Date</string>
+    <string name="sftp_sort_ascending">Ascending</string>
+    <string name="sftp_sort_descending">Descending</string>
+    <string name="sftp_show_hidden">Show hidden files</string>
+    <string name="sftp_hide_hidden">Hide hidden files</string>
+    <string name="action_sort">Sort</string>
+    <string name="action_retry">Retry</string>
+    <string name="sftp_loading">Loading…</string>
+
+    <!-- ── SFTP CRUD ──────────────────────────────────────────────────────── -->
+    <string name="sftp_action_download">Download</string>
+    <string name="sftp_action_preview">Preview</string>
+    <string name="sftp_action_rename">Rename</string>
+    <string name="sftp_action_chmod">Permissions</string>
+    <string name="sftp_action_delete">Delete</string>
+    <string name="sftp_dialog_rename_title">Rename</string>
+    <string name="sftp_dialog_mkdir_title">New folder</string>
+    <string name="sftp_dialog_mkdir_hint">Folder name</string>
+    <string name="sftp_dialog_chmod_title">Permissions</string>
+    <string name="sftp_dialog_delete_title">Delete</string>
+    <string name="sftp_dialog_delete_message">Delete "%1$s"?</string>
+    <string name="sftp_dialog_delete_dir_warning">This folder and all its contents will be permanently deleted.</string>
+    <string name="sftp_dialog_delete_file_warning">This file will be permanently deleted.</string>
+    <string name="sftp_success_mkdir">Folder created</string>
+    <string name="sftp_success_rename">File renamed</string>
+    <string name="sftp_success_chmod">Permissions changed</string>
+    <string name="sftp_success_delete">Item deleted</string>
+    <string name="sftp_error_name_empty">Name cannot be empty</string>
+    <string name="sftp_error_name_invalid">Invalid file name</string>
+    <string name="sftp_chmod_owner">Owner</string>
+    <string name="sftp_chmod_group">Group</string>
+    <string name="sftp_chmod_others">Others</string>
+    <string name="sftp_chmod_read">Read</string>
+    <string name="sftp_chmod_write">Write</string>
+    <string name="sftp_chmod_execute">Execute</string>
+    <!-- SFTP Multi-select -->
+    <string name="sftp_selection_count">%1$d selected</string>
+    <string name="sftp_select_all">All</string>
+    <string name="sftp_action_delete_selected">Delete</string>
+    <string name="sftp_dialog_multi_delete_title">Delete %1$d item(s)?</string>
+    <string name="sftp_dialog_multi_delete_message">These items will be permanently deleted.</string>
+    <string name="action_create">Create</string>
+    <string name="action_confirm">Confirm</string>
+
+    <!-- ── SFTP Preview ─────────────────────────────────────────────────────── -->
+    <string name="sftp_preview_title">Preview</string>
+    <string name="sftp_preview_loading">Loading preview…</string>
+    <string name="sftp_preview_error">Unable to load preview</string>
+    <string name="sftp_preview_too_large">File too large for preview (%1$s). Download to view.</string>
+    <string name="sftp_preview_decode_error">Unable to decode image</string>
+    <string name="sftp_preview_line_count">%1$d lines</string>
+
+    <!-- ── SFTP Connection ───────────────────────────────────────────────── -->
+    <string name="sftp_disconnected">SFTP connection lost</string>
+    <string name="sftp_reconnect">Reconnect</string>
+    <string name="sftp_reconnecting">Reconnecting…</string>
+
+    <!-- ── SFTP Transfers ─────────────────────────────────────────────────── -->
+    <string name="sftp_transfer_channel_name">SFTP Transfers</string>
+    <string name="sftp_transfer_downloading">Downloading %1$s</string>
+    <string name="sftp_transfer_uploading">Uploading %1$s</string>
+    <string name="sftp_transfer_complete">Transfer complete</string>
+    <string name="sftp_transfer_failed">Transfer failed</string>
+    <string name="sftp_transfer_cancelled">Transfer cancelled</string>
+    <string name="sftp_action_upload">Upload file</string>
+    <string name="sftp_transfer_progress">%1$d%%</string>
+    <string name="sftp_transfer_notification_title">SFTP Transfer</string>
+    <string name="sftp_transfer_cancel_action">Cancel</string>
+    <string name="sftp_transfer_more">+%1$d more transfer(s)</string>
+    <string name="sftp_transfer_no_session">SFTP session not ready. Reopen the folder and try again.</string>
+    <string name="sftp_transfer_session_lost">SSH connection closed. Reconnect, then start the transfer again.</string>
+    <string name="sftp_transfer_failed_detail">Transfer of %1$s failed: %2$s</string>
+    <string name="sftp_transfer_timeout">Reached the 6-hour background transfer limit. Reopen NextSH to resume.</string>
+    <string name="sftp_transfer_start_refused">Cannot start the transfer right now. Reopen NextSH and try again.</string>
+
+    <!-- ── Tunnels: foreground service notification ───────────────────────── -->
+    <string name="tunnel_notification_title_single">%1$s active</string>
+    <string name="tunnel_notification_text">SSH tunnel active, tap to manage</string>
+    <string name="tunnel_notification_stop">Stop</string>
+    <string name="tunnel_notification_stop_all">Stop all</string>
+    <string name="tunnel_notification_reconnecting">Reconnecting %1$d tunnel(s)…</string>
+    <string name="tunnel_notification_mixed">%1$d active, %2$d failed</string>
+    <string name="tunnel_notification_active_count">%1$d tunnel(s) active</string>
+    <string name="tunnel_notification_more">+%1$d more</string>
+    <string name="tunnel_service_timeout">System time limit reached. Restart your tunnels from NextSH.</string>
+    <string name="tunnel_service_start_refused">Cannot keep the tunnel running in the background. Reopen NextSH and try again.</string>
+    <string name="notification_permission_rationale">Allow notifications to follow your tunnels and transfers, and to stop them from the notification shade.</string>
+
+    <!-- ── LAN Sync: Enrollment Phase 2 + Scheduler Wave 3.4 ─────────── -->
+    <string name="section_sync_lan">LAN Sync</string>
+    <string name="action_scan_qr">Scan QR code</string>
+    <string name="label_sync_enabled">Auto sync</string>
+    <string name="label_sync_interval">Sync frequency</string>
+    <string name="action_sync_now">Sync now</string>
+    <string name="sync_status_uptodate">Up to date</string>
+    <string name="sync_status_pending">Pending</string>
+    <string name="sync_status_syncing">Syncing…</string>
+    <string name="sync_status_error">Error: %1$s</string>
+    <string name="sync_status_offline">Offline</string>
+    <string name="relative_seconds_ago">%1$d s ago</string>
+    <string name="relative_minutes_ago">%1$d min ago</string>
+    <string name="relative_hours_ago">%1$d h ago</string>
+    <string name="relative_days_ago">%1$d d ago</string>
+    <string name="sync_subtitle_uptodate">Sync up to date</string>
+    <string name="sync_subtitle_syncing">Syncing</string>
+    <string name="sync_subtitle_error">Sync error</string>
+    <string name="sync_subtitle_offline">Sync offline</string>
+    <string name="sync_subtitle_conflicts_one">1 pending conflict</string>
+    <string name="sync_subtitle_conflicts_many">%1$d pending conflicts</string>
+    <string name="sync_last_sync_at">Last sync: %1$s</string>
+    <string name="sync_never_synced">Never synced</string>
+    <string name="sync_pending_conflicts">%1$d pending conflict(s)</string>
+    <string name="title_enrollment_scan">Enroll a Desktop device</string>
+    <string name="enrollment_scan_hint">Align the QR code within the frame</string>
+    <string name="enrollment_camera_permission_required">Camera permission is required to scan the enrollment QR code.\nOpen the app settings to grant it.</string>
+    <string name="action_open_settings">Open settings</string>
+    <string name="enrollment_desktop_detected">Desktop device detected</string>
+    <string name="label_fingerprint">Fingerprint</string>
+    <string name="enrollment_fingerprint_hint">Verify this fingerprint matches the one shown on your PC.</string>
+    <string name="error_fingerprint_mismatch">Fingerprint mismatch.\nExpected: %1$s\nReceived: %2$s\n\nPossible MITM: restart enrollment on the Desktop.</string>
+    <string name="enrollment_submitting">Sending…</string>
+    <string name="enrollment_success">Device \'%1$s\' enrolled successfully</string>
+    <string name="enrollment_action_done">Done</string>
+
+    <!-- ── Conflict resolution: Wave 4.2 ──────────────────────────────── -->
+    <string name="title_conflict_resolution">Sync conflicts</string>
+    <string name="conflict_banner_pending">%1$d conflict(s) to resolve</string>
+    <string name="conflict_local_label">My version</string>
+    <string name="conflict_remote_label">Remote version</string>
+    <string name="action_keep_local">Keep my version</string>
+    <string name="action_keep_remote">Take remote version</string>
+    <string name="action_apply_resolutions">Apply resolutions (%1$d)</string>
+    <string name="conflict_empty">No conflicts</string>
+    <string name="sync_banner_syncing">Syncing…</string>
+    <string name="sync_banner_error">Sync failed: %1$s</string>
+    <string name="sync_banner_offline">Offline</string>
+    <string name="sync_banner_synced_relative">Synced %1$s</string>
+
+    <!-- ── Split-screen ────────────────────────────────────────────────── -->
+    <string name="action_split_screen">Split screen</string>
+    <string name="action_exit_split">Exit split screen</string>
+    <string name="action_swap_panes">Swap panes</string>
+    <string name="action_toggle_orientation">Toggle orientation</string>
+    <string name="dialog_split_picker_title">Choose second session</string>
+    <string name="action_split_with_sftp">SFTP Browser</string>
+    <string name="label_sftp_pane">SFTP: %s</string>
+    <string name="label_no_session">No session</string>
+
+    <!-- ── Enrolled Devices (Phase 2 Wave 5) ───────────────────────────── -->
+    <string name="title_enrolled_devices">Enrolled devices</string>
+    <string name="enrolled_empty">No enrolled devices</string>
+    <string name="enrolled_empty_hint">Scan a QR code to get started</string>
+    <string name="action_revoke">Revoke</string>
+    <string name="dialog_revoke_title">Revoke %1$s?</string>
+    <string name="dialog_revoke_message">The shared secret will be wiped. You will need to re-enroll this device to sync again.</string>
+    <string name="enrolled_status_revoked">Device %1$s revoked</string>
+    <string name="enrolled_status_error">Revocation failed</string>
+    <string name="enrolled_host_label">Host: %1$s</string>
+    <string name="enrolled_ecdh_label">ECDH: %1$s</string>
+    <string name="enrolled_tls_label">TLS: %1$s…</string>
+    <string name="enrolled_enrolled_label">Enrolled %1$s</string>
+    <string name="enrolled_last_sync_label">Last sync: %1$s</string>
+    <string name="enrolled_last_sync_never">never</string>
+
+    <!-- ── LAN discovery (C4): "Search on network" button ──────────────── -->
+    <string name="action_search_network">Search on network</string>
+    <string name="enrolled_search_started">Searching for %1$s…</string>
+    <string name="enrolled_search_found">%1$s found on the network: sync complete</string>
+    <string name="enrolled_search_not_found">%1$s not found on this network. Are you on the same network? VPN does not relay network search.</string>
+
+    <!-- ── FIDO2 enrollment (YubiKey hardware) ──────────────────────────── -->
+    <string name="vault_action_enroll_fido2">Enroll FIDO2 key</string>
+    <string name="title_fido2_enroll">Enroll a FIDO2 key</string>
+    <string name="fido2_enroll_intro">Generate an sk-ssh-ed25519 key protected by your YubiKey.\nA physical touch is required.</string>
+    <string name="fido2_enroll_show_advanced">Advanced options</string>
+    <string name="fido2_enroll_hide_advanced">Hide options</string>
+    <string name="fido2_enroll_advanced_title">Advanced options</string>
+    <string name="fido2_enroll_label_rpid">Relying Party ID (rpId)</string>
+    <string name="fido2_enroll_rpid_hint">FIDO2 RP identifier. Default "ssh:" is recommended for SSH keys.</string>
+    <string name="fido2_enroll_action_detect">Plug in / Tap your key</string>
+    <string name="fido2_pin_optional_label">PIN (optional)</string>
+    <string name="fido2_pin_optional_hint">Leave blank if the key has no PIN configured.</string>
+    <string name="fido2_waiting_key_title">Plug in or tap your YubiKey</string>
+    <string name="fido2_waiting_key_hint">USB-C: plug in the key. NFC: hold it against the phone until confirmation.</string>
+    <string name="fido2_error_pin_required_hint">Enter your PIN in the form and try again.</string>
+    <string name="fido2_enroll_success_title">Key enrolled!</string>
+    <string name="fido2_enroll_success_message">Key "%1$s" has been added to your vault.\nAssign it to an SSH host to use it.</string>
+
+    <!-- ── Vault: public key actions ───────────────────────────────────── -->
+    <string name="vault_key_action_copy_pub">Copy public key</string>
+    <string name="vault_key_action_download_pub">Download public key</string>
+    <string name="vault_message_pub_key_copied">Public key copied</string>
+    <string name="vault_message_pub_key_downloaded">Public key saved</string>
+    <string name="error_pub_key_save_failed">Failed to save file</string>
+
+    <!-- ── First-launch onboarding (3-step stepper) ─────────────────────────
+         Step 1 (Welcome) → Step 2 (Secure vault) → Step 3 (Optional sync)
+    ─────────────────────────────────────────────────────────────────────── -->
+    <string name="firstlaunch_step_count">Step %1$d of %2$d</string>
+    <string name="firstlaunch_welcome_title">Welcome to NextSH</string>
+    <string name="firstlaunch_welcome_tagline">Native SSH client. Encrypted vault. Local sync.</string>
+    <string name="firstlaunch_welcome_button">Get started</string>
+    <string name="firstlaunch_vault_title">Secure your vault</string>
+    <string name="firstlaunch_vault_explainer">Your vault is protected by the device secure hardware (Android Keystore). Unlocking uses your biometrics or device lock, no password to remember.</string>
+    <string name="firstlaunch_vault_button">Enable vault</string>
+    <string name="firstlaunch_vault_security_badge">Android Keystore · TEE / StrongBox</string>
+    <string name="firstlaunch_sync_title">LAN sync</string>
+    <string name="firstlaunch_sync_subtitle">Optional</string>
+    <string name="firstlaunch_sync_explainer">Do you have NextSH on desktop? Encrypted LAN sync lets you share hosts, keys and tunnels across your devices.</string>
+    <string name="firstlaunch_sync_configure">Configure now</string>
+    <string name="firstlaunch_sync_skip">Skip</string>
+    <string name="firstlaunch_sync_later_hint">You can set up sync later in Settings.</string>
+    <string name="firstlaunch_error_auth_expired">Authentication session expired. Please try again.</string>
+    <string name="firstlaunch_error_key_invalidated">Vault key invalidated: your biometric data has changed.</string>
+</resources>

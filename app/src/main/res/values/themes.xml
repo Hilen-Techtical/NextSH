@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base theme: Compose handles all theming; this is just for the window/activity -->
+    <style name="Theme.SSHVault" parent="android:Theme.Material.NoActionBar" />
+
+    <!-- Cold-start splash (AndroidX SplashScreen). Brand NearBlack background
+         (#0F0F0F) with the safe-zone-corrected launcher foreground centred.
+         Theme-independent: the splash is always NearBlack (brand), not
+         driven by light/dark. Hands off to Theme.SSHVault immediately. -->
+    <style name="Theme.SSHVault.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground_inset</item>
+        <item name="postSplashScreenTheme">@style/Theme.SSHVault</item>
+    </style>
+</resources>

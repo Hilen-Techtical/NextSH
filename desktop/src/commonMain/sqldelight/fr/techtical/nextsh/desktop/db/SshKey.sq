@@ -1,0 +1,38 @@
+CREATE TABLE ssh_keys (
+    id TEXT NOT NULL PRIMARY KEY,
+    label TEXT NOT NULL,
+    keyType TEXT NOT NULL,
+    publicKey TEXT NOT NULL,
+    isBiometric INTEGER NOT NULL DEFAULT 0,
+    keystoreAlias TEXT,
+    fido2CredentialId TEXT,
+    fido2RpId TEXT,
+    createdAt INTEGER NOT NULL,
+    vectorClock TEXT NOT NULL DEFAULT '{}',
+    deleted INTEGER NOT NULL DEFAULT 0,
+    deletedAt INTEGER,
+    updatedAt INTEGER NOT NULL DEFAULT 0
+);
+
+selectAll:
+SELECT * FROM ssh_keys WHERE deleted = 0 ORDER BY label;
+
+selectAllIncludingDeleted:
+SELECT * FROM ssh_keys ORDER BY label;
+
+selectById:
+SELECT * FROM ssh_keys WHERE id = ? AND deleted = 0;
+
+insert:
+INSERT OR REPLACE INTO ssh_keys(id, label, keyType, publicKey, isBiometric, keystoreAlias, fido2CredentialId, fido2RpId, createdAt, vectorClock, deleted, deletedAt, updatedAt)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+update:
+UPDATE ssh_keys SET label = ?, keyType = ?, publicKey = ?, isBiometric = ?, keystoreAlias = ?, fido2CredentialId = ?, fido2RpId = ?, vectorClock = ?, updatedAt = ?
+WHERE id = ?;
+
+markDeleted:
+UPDATE ssh_keys SET deleted = 1, deletedAt = ?, updatedAt = ?, vectorClock = ? WHERE id = ?;
+
+delete:
+DELETE FROM ssh_keys WHERE id = ?;

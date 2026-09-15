@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Wraps the real NextSH logo foreground (the raster shield artwork) with a
+     safe-zone inset so the framed logo sits comfortably inside the launcher
+     mask. The adaptive background is transparent ("sans fond"), so the logo
+     floats on the launcher surface rather than on a flat tile. The artwork is
+     unchanged; only scaled down + centred. Tune the inset % to taste. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@mipmap/ic_launcher_foreground"
+    android:inset="18%" />

@@ -1,0 +1,29 @@
+CREATE TABLE pending_conflicts (
+    id TEXT NOT NULL PRIMARY KEY,
+    entityType TEXT NOT NULL,
+    entityId TEXT NOT NULL,
+    localJson TEXT NOT NULL,
+    remoteJson TEXT NOT NULL,
+    detectedAt INTEGER NOT NULL
+);
+
+CREATE INDEX index_pending_conflicts_entity ON pending_conflicts(entityType, entityId);
+
+selectAll:
+SELECT * FROM pending_conflicts ORDER BY detectedAt DESC;
+
+selectCount:
+SELECT COUNT(*) FROM pending_conflicts;
+
+upsert:
+INSERT OR REPLACE INTO pending_conflicts(id, entityType, entityId, localJson, remoteJson, detectedAt)
+VALUES (?, ?, ?, ?, ?, ?);
+
+deleteById:
+DELETE FROM pending_conflicts WHERE id = ?;
+
+deleteByEntity:
+DELETE FROM pending_conflicts WHERE entityType = ? AND entityId = ?;
+
+deleteAll:
+DELETE FROM pending_conflicts;

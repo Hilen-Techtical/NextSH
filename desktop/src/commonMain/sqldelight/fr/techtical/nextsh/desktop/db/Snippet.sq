@@ -1,0 +1,41 @@
+CREATE TABLE snippets (
+    id TEXT NOT NULL PRIMARY KEY,
+    label TEXT NOT NULL,
+    command TEXT NOT NULL,
+    category TEXT,
+    hostId TEXT,
+    createdAt INTEGER NOT NULL,
+    vectorClock TEXT NOT NULL DEFAULT '{}',
+    deleted INTEGER NOT NULL DEFAULT 0,
+    deletedAt INTEGER,
+    updatedAt INTEGER NOT NULL DEFAULT 0
+);
+
+selectAll:
+SELECT * FROM snippets WHERE deleted = 0 ORDER BY label;
+
+selectAllIncludingDeleted:
+SELECT * FROM snippets ORDER BY label;
+
+selectForHost:
+SELECT * FROM snippets WHERE (hostId = ? OR hostId IS NULL) AND deleted = 0 ORDER BY label;
+
+selectCategories:
+SELECT DISTINCT category FROM snippets WHERE category IS NOT NULL AND deleted = 0 ORDER BY category;
+
+selectById:
+SELECT * FROM snippets WHERE id = ? AND deleted = 0;
+
+insert:
+INSERT OR REPLACE INTO snippets(id, label, command, category, hostId, createdAt, vectorClock, deleted, deletedAt, updatedAt)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+update:
+UPDATE snippets SET label = ?, command = ?, category = ?, hostId = ?, vectorClock = ?, updatedAt = ?
+WHERE id = ?;
+
+markDeleted:
+UPDATE snippets SET deleted = 1, deletedAt = ?, updatedAt = ?, vectorClock = ? WHERE id = ?;
+
+delete:
+DELETE FROM snippets WHERE id = ?;

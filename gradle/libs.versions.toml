@@ -1,0 +1,198 @@
+[versions]
+ktor                    = "3.0.0"
+zxing                   = "3.5.3"
+cameraX                 = "1.4.2"
+mlkit                   = "17.3.0"
+
+# Android
+agp                     = "8.9.3"
+compileSdk              = "36"
+minSdk                  = "29"
+targetSdk               = "36"
+
+# Kotlin
+kotlin                  = "2.0.21"
+ksp                     = "2.0.21-1.0.27"
+coroutines              = "1.9.0"
+
+# Multiplatform
+composeMultiplatform    = "1.7.3"
+sqldelight              = "2.0.2"
+kotlinxDatetime         = "0.6.0"
+slf4j                   = "2.0.13"
+jediterm                = "3.40"
+jna                     = "5.14.0"
+kcef                    = "2025.03.23"
+composeIconsLucide      = "1.1.0"
+
+# Compose
+composeBom              = "2024.05.00"
+activityCompose         = "1.9.0"
+navigationCompose       = "2.7.7"
+
+# AndroidX
+coreKtx                 = "1.13.1"
+coreSplashscreen        = "1.0.1"
+lifecycleKtx            = "2.8.1"
+biometric               = "1.2.0-alpha05"
+securityCrypto          = "1.1.0"
+room                    = "2.6.1"
+datastore               = "1.1.1"
+credentials             = "1.3.0"
+yubikit                 = "2.4.0"
+yubikit-desktop         = "2.8.1"
+
+# DI
+hilt                    = "2.51.1"
+hiltNavCompose          = "1.2.0"
+
+# SSH
+sshj                    = "0.38.0"
+bouncycastle            = "1.78.1"
+
+# Serialization
+kotlinxSerialization    = "1.7.3"
+
+# Logging
+timber                  = "5.0.1"
+
+workManager             = "2.9.1"
+
+# Tests
+junit5                  = "5.10.2"
+mockk                   = "1.13.11"
+espresso                = "3.5.1"
+testExtJunit            = "1.1.5"
+okhttp                  = "4.12.0"
+
+[libraries]
+# AndroidX Core
+androidx-core-ktx               = { group = "androidx.core",               name = "core-ktx",                          version.ref = "coreKtx" }
+androidx-core-splashscreen      = { group = "androidx.core",               name = "core-splashscreen",                 version.ref = "coreSplashscreen" }
+androidx-activity-compose       = { group = "androidx.activity",            name = "activity-compose",                  version.ref = "activityCompose" }
+androidx-lifecycle-runtime      = { group = "androidx.lifecycle",           name = "lifecycle-runtime-ktx",             version.ref = "lifecycleKtx" }
+androidx-lifecycle-viewmodel    = { group = "androidx.lifecycle",           name = "lifecycle-viewmodel-compose",       version.ref = "lifecycleKtx" }
+
+# Compose BOM
+compose-bom                     = { group = "androidx.compose",             name = "compose-bom",                       version.ref = "composeBom" }
+compose-ui                      = { group = "androidx.compose.ui",          name = "ui" }
+compose-ui-tooling              = { group = "androidx.compose.ui",          name = "ui-tooling" }
+compose-ui-tooling-preview      = { group = "androidx.compose.ui",          name = "ui-tooling-preview" }
+compose-material3               = { group = "androidx.compose.material3",   name = "material3" }
+compose-icons-extended          = { group = "androidx.compose.material",    name = "material-icons-extended" }
+
+# Navigation
+navigation-compose              = { group = "androidx.navigation",          name = "navigation-compose",                version.ref = "navigationCompose" }
+
+# Security
+androidx-biometric              = { group = "androidx.biometric",           name = "biometric",                         version.ref = "biometric" }
+androidx-security-crypto        = { group = "androidx.security",            name = "security-crypto",                   version.ref = "securityCrypto" }
+androidx-credentials            = { group = "androidx.credentials",         name = "credentials",                       version.ref = "credentials" }
+androidx-credentials-play-services = { group = "androidx.credentials",     name = "credentials-play-services-auth",    version.ref = "credentials" }
+yubikit-android                 = { group = "com.yubico.yubikit",          name = "android",                           version.ref = "yubikit" }
+yubikit-fido                    = { group = "com.yubico.yubikit",          name = "fido",                              version.ref = "yubikit" }
+yubikit-desktop                 = { group = "com.yubico.yubikit",          name = "desktop",                           version.ref = "yubikit-desktop" }
+yubikit-core-desktop            = { group = "com.yubico.yubikit",          name = "core",                              version.ref = "yubikit-desktop" }
+yubikit-fido-desktop            = { group = "com.yubico.yubikit",          name = "fido",                              version.ref = "yubikit-desktop" }
+
+# Room
+room-runtime                    = { group = "androidx.room",                name = "room-runtime",                      version.ref = "room" }
+room-ktx                        = { group = "androidx.room",                name = "room-ktx",                          version.ref = "room" }
+room-compiler                   = { group = "androidx.room",                name = "room-compiler",                     version.ref = "room" }
+
+# DataStore
+datastore-preferences           = { group = "androidx.datastore",           name = "datastore-preferences",             version.ref = "datastore" }
+
+# WorkManager
+androidx-work-runtime           = { group = "androidx.work",                name = "work-runtime-ktx",                  version.ref = "workManager" }
+
+# Hilt
+hilt-android                    = { group = "com.google.dagger",            name = "hilt-android",                      version.ref = "hilt" }
+hilt-compiler                   = { group = "com.google.dagger",            name = "hilt-android-compiler",             version.ref = "hilt" }
+hilt-navigation-compose         = { group = "androidx.hilt",                name = "hilt-navigation-compose",           version.ref = "hiltNavCompose" }
+
+# Coroutines
+kotlinx-coroutines-core         = { group = "org.jetbrains.kotlinx",        name = "kotlinx-coroutines-core",           version.ref = "coroutines" }
+kotlinx-coroutines-android      = { group = "org.jetbrains.kotlinx",        name = "kotlinx-coroutines-android",        version.ref = "coroutines" }
+kotlinx-coroutines-swing        = { group = "org.jetbrains.kotlinx",        name = "kotlinx-coroutines-swing",          version.ref = "coroutines" }
+kotlinx-coroutines-test         = { group = "org.jetbrains.kotlinx",        name = "kotlinx-coroutines-test",           version.ref = "coroutines" }
+
+# Multiplatform
+kotlinx-datetime                = { group = "org.jetbrains.kotlinx",        name = "kotlinx-datetime",                  version.ref = "kotlinxDatetime" }
+sqldelight-runtime              = { group = "app.cash.sqldelight",           name = "runtime",                           version.ref = "sqldelight" }
+sqldelight-sqlite-driver        = { group = "app.cash.sqldelight",           name = "sqlite-driver",                     version.ref = "sqldelight" }
+sqldelight-android-driver       = { group = "app.cash.sqldelight",           name = "android-driver",                    version.ref = "sqldelight" }
+sqldelight-coroutines-ext       = { group = "app.cash.sqldelight",           name = "coroutines-extensions",             version.ref = "sqldelight" }
+slf4j-nop                       = { group = "org.slf4j",                     name = "slf4j-nop",                         version.ref = "slf4j" }
+jediterm-core                   = { group = "org.jetbrains.jediterm",        name = "jediterm-core",                     version.ref = "jediterm" }
+jna                             = { group = "net.java.dev.jna",              name = "jna",                               version.ref = "jna" }
+jna-platform                    = { group = "net.java.dev.jna",              name = "jna-platform",                      version.ref = "jna" }
+i2p-eddsa                       = { group = "net.i2p.crypto",                name = "eddsa",                             version = "0.3.0" }
+kcef                            = { group = "dev.datlag",                    name = "kcef",                              version.ref = "kcef" }
+compose-icons-lucide            = { group = "com.composables",                name = "icons-lucide",                       version.ref = "composeIconsLucide" }
+
+# SSH
+sshj                            = { group = "com.hierynomus",               name = "sshj",                              version.ref = "sshj" }
+bouncycastle-bcprov             = { group = "org.bouncycastle",             name = "bcprov-jdk18on",                    version.ref = "bouncycastle" }
+bouncycastle-bcpkix             = { group = "org.bouncycastle",             name = "bcpkix-jdk18on",                    version.ref = "bouncycastle" }
+
+# Serialization
+kotlinx-serialization-json      = { group = "org.jetbrains.kotlinx",        name = "kotlinx-serialization-json",        version.ref = "kotlinxSerialization" }
+
+# Logging
+timber                          = { group = "com.jakewharton.timber",       name = "timber",                            version.ref = "timber" }
+
+# Ktor server (Desktop LAN sync)
+ktor-server-core                = { group = "io.ktor", name = "ktor-server-core-jvm",                         version.ref = "ktor" }
+ktor-server-cio                 = { group = "io.ktor", name = "ktor-server-cio-jvm",                          version.ref = "ktor" }
+ktor-server-netty               = { group = "io.ktor", name = "ktor-server-netty-jvm",                        version.ref = "ktor" }
+ktor-server-content-negotiation = { group = "io.ktor", name = "ktor-server-content-negotiation-jvm",          version.ref = "ktor" }
+ktor-serialization-json         = { group = "io.ktor", name = "ktor-serialization-kotlinx-json-jvm",          version.ref = "ktor" }
+ktor-server-test-host           = { group = "io.ktor", name = "ktor-server-test-host-jvm",                    version.ref = "ktor" }
+
+# Ktor client (Android LAN enrollment)
+ktor-client-core                  = { group = "io.ktor", name = "ktor-client-core",                 version.ref = "ktor" }
+ktor-client-okhttp                = { group = "io.ktor", name = "ktor-client-okhttp",               version.ref = "ktor" }
+ktor-client-content-negotiation   = { group = "io.ktor", name = "ktor-client-content-negotiation",  version.ref = "ktor" }
+ktor-client-serialization-json    = { group = "io.ktor", name = "ktor-serialization-kotlinx-json",  version.ref = "ktor" }
+
+# CameraX (QR scanning)
+camerax-core          = { group = "androidx.camera", name = "camera-core",       version.ref = "cameraX" }
+camerax-camera2       = { group = "androidx.camera", name = "camera-camera2",    version.ref = "cameraX" }
+camerax-lifecycle     = { group = "androidx.camera", name = "camera-lifecycle",  version.ref = "cameraX" }
+camerax-view          = { group = "androidx.camera", name = "camera-view",       version.ref = "cameraX" }
+
+# ML Kit Barcode scanning (on-device)
+mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkit" }
+
+# ZXing (QR code)
+zxing-core                      = { group = "com.google.zxing", name = "core",                                 version.ref = "zxing" }
+zxing-javase                    = { group = "com.google.zxing", name = "javase",                               version.ref = "zxing" }
+
+# Tests
+junit5-api                      = { group = "org.junit.jupiter",            name = "junit-jupiter-api",                 version.ref = "junit5" }
+junit5-engine                   = { group = "org.junit.jupiter",            name = "junit-jupiter-engine",              version.ref = "junit5" }
+mockk                           = { group = "io.mockk",                     name = "mockk",                             version.ref = "mockk" }
+androidx-test-ext               = { group = "androidx.test.ext",            name = "junit",                             version.ref = "testExtJunit" }
+espresso-core                   = { group = "androidx.test.espresso",       name = "espresso-core",                     version.ref = "espresso" }
+okhttp-mockwebserver            = { group = "com.squareup.okhttp3",         name = "mockwebserver",                     version.ref = "okhttp" }
+
+[plugins]
+android-application             = { id = "com.android.application",         version.ref = "agp" }
+android-library                 = { id = "com.android.library",             version.ref = "agp" }
+kotlin-android                  = { id = "org.jetbrains.kotlin.android",    version.ref = "kotlin" }
+kotlin-multiplatform            = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlin-serialization            = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+ksp                             = { id = "com.google.devtools.ksp",         version.ref = "ksp" }
+hilt                            = { id = "com.google.dagger.hilt.android",  version.ref = "hilt" }
+compose-multiplatform           = { id = "org.jetbrains.compose",           version.ref = "composeMultiplatform" }
+kotlin-compose-compiler         = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+sqldelight                      = { id = "app.cash.sqldelight",             version.ref = "sqldelight" }
+
+[bundles]
+compose                         = ["compose-ui", "compose-material3", "compose-icons-extended", "compose-ui-tooling-preview"]
+room                            = ["room-runtime", "room-ktx"]
+ssh                             = ["sshj", "bouncycastle-bcprov", "bouncycastle-bcpkix"]
+security                        = ["androidx-biometric", "androidx-security-crypto"]
+fido2                           = ["yubikit-android", "yubikit-fido"]
+camerax                         = ["camerax-core", "camerax-camera2", "camerax-lifecycle", "camerax-view"]

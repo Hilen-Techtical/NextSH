@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Règles d'extraction de données (Android 12+).
+    Note : allowBackup="false" dans le manifest, ces règles sont une défense en profondeur.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="nextsh_vault.xml"/>
+        <exclude domain="sharedpref" path="nextsh_vault_v2.xml"/>
+        <exclude domain="database" path="nextsh.db"/>
+    </cloud-backup>
+    <device-transfer>
+        <include domain="sharedpref" path="."/>
+        <exclude domain="sharedpref" path="nextsh_vault.xml"/>
+        <exclude domain="sharedpref" path="nextsh_vault_v2.xml"/>
+        <exclude domain="database" path="nextsh.db"/>
+    </device-transfer>
+</data-extraction-rules>

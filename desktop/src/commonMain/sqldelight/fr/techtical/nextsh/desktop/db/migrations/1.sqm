@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS enrolled_devices (
+    deviceId TEXT NOT NULL PRIMARY KEY,
+    deviceName TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    publicKeyFingerprint TEXT NOT NULL,
+    lastSyncAt INTEGER,
+    enrolledAt INTEGER NOT NULL
+);

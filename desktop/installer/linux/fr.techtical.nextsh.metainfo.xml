@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright (c) 2026 Thibaud Maneval - Techtical (https://www.techtical.fr)
+  SPDX-License-Identifier: MIT
+
+  AppStream metainfo shared by the .deb and the AppImage. Software centers
+  (GNOME Software, KDE Discover) read it for the logo, the developer, the
+  licence and the links; jpackage does not generate one.
+
+  Placeholders are filled by desktop/build.gradle.kts (linuxMetainfo):
+    @DESKTOP_ID@  desktop entry file name of the packaging at hand
+    @VERSION@     desktopVersion
+    @DATE@        build date
+-->
+<component type="desktop-application">
+  <id>fr.techtical.nextsh</id>
+  <name>NextSH</name>
+  <summary>Native SSH client with encrypted vault</summary>
+  <summary xml:lang="fr">Client SSH natif avec coffre-fort chiffré</summary>
+  <developer id="fr.techtical">
+    <name>Techtical</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>NextSH is a native SSH client with an encrypted vault for credentials and keys, SSH tunnels (local, remote and SOCKS5), an SFTP browser and split-screen terminals.</p>
+    <p>Hosts, tunnels, snippets and keys sync between the Android and Desktop apps over the local network, encrypted end to end.</p>
+    <p xml:lang="fr">NextSH est un client SSH natif avec un coffre-fort chiffré pour les identifiants et les clés, des tunnels SSH (local, distant et SOCKS5), un explorateur SFTP et des terminaux en écran partagé.</p>
+    <p xml:lang="fr">Hôtes, tunnels, extraits et clés se synchronisent entre les applications Android et Desktop sur le réseau local, chiffrés de bout en bout.</p>
+  </description>
+  <launchable type="desktop-id">@DESKTOP_ID@</launchable>
+  <url type="homepage">https://www.techtical.fr</url>
+  <url type="bugtracker">https://github.com/Hilen-Techtical/NextSH/issues</url>
+  <url type="vcs-browser">https://github.com/Hilen-Techtical/NextSH</url>
+  <categories>
+    <category>Network</category>
+    <category>RemoteAccess</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="@VERSION@" date="@DATE@" />
+  </releases>
+</component>

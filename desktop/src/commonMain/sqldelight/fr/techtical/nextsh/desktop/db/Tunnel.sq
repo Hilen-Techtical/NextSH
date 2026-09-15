@@ -1,0 +1,56 @@
+CREATE TABLE tunnels (
+    id TEXT NOT NULL PRIMARY KEY,
+    label TEXT NOT NULL,
+    hostId TEXT NOT NULL,
+    type TEXT NOT NULL,
+    localPort INTEGER NOT NULL,
+    remoteHost TEXT NOT NULL,
+    remotePort INTEGER NOT NULL,
+    autoStart INTEGER NOT NULL DEFAULT 0,
+    openBrowserOnConnect INTEGER NOT NULL DEFAULT 0,
+    keepAliveAfterBrowserClose INTEGER NOT NULL DEFAULT 1,
+    isFavorite INTEGER NOT NULL DEFAULT 0,
+    createdAt INTEGER NOT NULL,
+    vectorClock TEXT NOT NULL DEFAULT '{}',
+    deleted INTEGER NOT NULL DEFAULT 0,
+    deletedAt INTEGER,
+    updatedAt INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY(hostId) REFERENCES hosts(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_tunnels_hostId ON tunnels(hostId);
+
+selectAll:
+SELECT * FROM tunnels WHERE deleted = 0 ORDER BY label;
+
+selectAllIncludingDeleted:
+SELECT * FROM tunnels ORDER BY label;
+
+selectByHost:
+SELECT * FROM tunnels WHERE hostId = ? AND deleted = 0 ORDER BY label;
+
+selectById:
+SELECT * FROM tunnels WHERE id = ? AND deleted = 0;
+
+selectAutoStart:
+SELECT * FROM tunnels WHERE autoStart = 1 AND deleted = 0 ORDER BY label;
+
+selectFavorites:
+SELECT * FROM tunnels WHERE isFavorite = 1 AND deleted = 0 ORDER BY label;
+
+insert:
+INSERT OR REPLACE INTO tunnels(id, label, hostId, type, localPort, remoteHost, remotePort, autoStart, openBrowserOnConnect, keepAliveAfterBrowserClose, isFavorite, createdAt, vectorClock, deleted, deletedAt, updatedAt)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+update:
+UPDATE tunnels SET label = ?, hostId = ?, type = ?, localPort = ?, remoteHost = ?, remotePort = ?, autoStart = ?, openBrowserOnConnect = ?, keepAliveAfterBrowserClose = ?, isFavorite = ?, vectorClock = ?, updatedAt = ?
+WHERE id = ?;
+
+setFavorite:
+UPDATE tunnels SET isFavorite = ? WHERE id = ?;
+
+markDeleted:
+UPDATE tunnels SET deleted = 1, deletedAt = ?, updatedAt = ?, vectorClock = ? WHERE id = ?;
+
+delete:
+DELETE FROM tunnels WHERE id = ?;

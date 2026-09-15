@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+        Phase 2 Sync LAN: le serveur d'enrôlement Desktop est HTTP plain (ECDH protège l'échange
+        des clés publiques, le secret dérivé n'est jamais transmis en clair).
+        Phase 3 introduit TLS pour le serveur de sync long-lived et on pourra re-tighten ici.
+        Android ne supporte pas les plages CIDR dans domain-config, d'où base-config permissive.
+    -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>

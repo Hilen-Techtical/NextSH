@@ -1,0 +1,22 @@
+CREATE TABLE known_hosts (
+    hostPort TEXT NOT NULL PRIMARY KEY,
+    algorithm TEXT NOT NULL,
+    publicKeyEncoded BLOB NOT NULL,
+    addedAt INTEGER NOT NULL
+);
+
+selectAll:
+SELECT * FROM known_hosts ORDER BY addedAt DESC;
+
+selectByHostPort:
+SELECT * FROM known_hosts WHERE hostPort = ?;
+
+upsert:
+INSERT OR REPLACE INTO known_hosts(hostPort, algorithm, publicKeyEncoded, addedAt)
+VALUES (?, ?, ?, ?);
+
+deleteByHostPort:
+DELETE FROM known_hosts WHERE hostPort = ?;
+
+deleteAll:
+DELETE FROM known_hosts;

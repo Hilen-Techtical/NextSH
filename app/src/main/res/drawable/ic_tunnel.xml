@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#C9A84C">
+    <!-- Horizontal pipe/tunnel shape -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M2,8 C2,6.9 2.9,6 4,6 L20,6 C21.1,6 22,6.9 22,8 L22,16 C22,17.1 21.1,18 20,18 L4,18 C2.9,18 2,17.1 2,16 Z
+                          M4,8 L4,16 L20,16 L20,8 Z"/>
+    <!-- Arrow through tunnel -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M7,12 L17,12 M14,9 L17,12 L14,15"
+        android:strokeColor="@android:color/white"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillAlpha="0"/>
+</vector>

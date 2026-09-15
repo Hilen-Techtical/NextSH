@@ -1,0 +1,2656 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 8.9.3" type="baseline" client="gradle" dependencies="false" name="AGP (8.9.3)" variant="all" version="8.9.3">
+
+    <issue
+        id="DefaultLocale"
+        message="Implicitly using the default locale is a common source of bugs: Use `String.format(Locale, ...)` instead"
+        errorLine1="    bytes &lt; 1_048_576L               -> String.format(&quot;%.1f KB&quot;, bytes / 1_024.0)"
+        errorLine2="                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/sftp/SftpFileItem.kt"
+            line="215"
+            column="41"/>
+    </issue>
+
+    <issue
+        id="DefaultLocale"
+        message="Implicitly using the default locale is a common source of bugs: Use `String.format(Locale, ...)` instead"
+        errorLine1="    bytes &lt; 1_073_741_824L           -> String.format(&quot;%.1f MB&quot;, bytes / 1_048_576.0)"
+        errorLine2="                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/sftp/SftpFileItem.kt"
+            line="216"
+            column="41"/>
+    </issue>
+
+    <issue
+        id="DefaultLocale"
+        message="Implicitly using the default locale is a common source of bugs: Use `String.format(Locale, ...)` instead"
+        errorLine1="    else                             -> String.format(&quot;%.2f GB&quot;, bytes / 1_073_741_824.0)"
+        errorLine2="                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/sftp/SftpFileItem.kt"
+            line="217"
+            column="41"/>
+    </issue>
+
+    <issue
+        id="FullBackupContent"
+        message="`nextsh.db` is not in an included path"
+        errorLine1="        &lt;exclude domain=&quot;database&quot; path=&quot;nextsh.db&quot;/>"
+        errorLine2="                                         ~~~~~~~~~">
+        <location
+            file="src/main/res/xml/data_extraction_rules.xml"
+            line="16"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of com.android.application than 8.9.3 is available: 9.4.0"
+        errorLine1="agp                     = &quot;8.9.3&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="8"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of com.android.application than 8.9.3 is available: 9.4.0"
+        errorLine1="agp                     = &quot;8.9.3&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="8"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of com.android.application than 8.9.3 is available: 9.4.0"
+        errorLine1="agp                     = &quot;8.9.3&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="8"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of com.android.library than 8.9.3 is available: 9.4.0"
+        errorLine1="agp                     = &quot;8.9.3&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="8"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of com.android.library than 8.9.3 is available: 9.4.0"
+        errorLine1="agp                     = &quot;8.9.3&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="8"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of com.android.library than 8.9.3 is available: 9.4.0"
+        errorLine1="agp                     = &quot;8.9.3&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="8"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-camera2 than 1.4.2 is available: 1.6.2"
+        errorLine1="cameraX                 = &quot;1.4.2&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="4"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-camera2 than 1.4.2 is available: 1.6.2"
+        errorLine1="cameraX                 = &quot;1.4.2&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="4"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-camera2 than 1.4.2 is available: 1.6.2"
+        errorLine1="cameraX                 = &quot;1.4.2&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="4"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-core than 1.4.2 is available: 1.6.2"
+        errorLine1="cameraX                 = &quot;1.4.2&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="4"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-core than 1.4.2 is available: 1.6.2"
+        errorLine1="cameraX                 = &quot;1.4.2&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="4"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-core than 1.4.2 is available: 1.6.2"
+        errorLine1="cameraX                 = &quot;1.4.2&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="4"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-lifecycle than 1.4.2 is available: 1.6.2"
+        errorLine1="cameraX                 = &quot;1.4.2&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="4"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-lifecycle than 1.4.2 is available: 1.6.2"
+        errorLine1="cameraX                 = &quot;1.4.2&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="4"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-lifecycle than 1.4.2 is available: 1.6.2"
+        errorLine1="cameraX                 = &quot;1.4.2&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="4"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-view than 1.4.2 is available: 1.6.2"
+        errorLine1="cameraX                 = &quot;1.4.2&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="4"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-view than 1.4.2 is available: 1.6.2"
+        errorLine1="cameraX                 = &quot;1.4.2&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="4"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-view than 1.4.2 is available: 1.6.2"
+        errorLine1="cameraX                 = &quot;1.4.2&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="4"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.compose:compose-bom than 2024.05.00 is available: 2026.08.00"
+        errorLine1="composeBom              = &quot;2024.05.00&quot;"
+        errorLine2="                          ~~~~~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="29"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.compose:compose-bom than 2024.05.00 is available: 2026.08.00"
+        errorLine1="composeBom              = &quot;2024.05.00&quot;"
+        errorLine2="                          ~~~~~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="29"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.compose:compose-bom than 2024.05.00 is available: 2026.08.00"
+        errorLine1="composeBom              = &quot;2024.05.00&quot;"
+        errorLine2="                          ~~~~~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="29"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.activity:activity-compose than 1.9.0 is available: 1.13.0"
+        errorLine1="activityCompose         = &quot;1.9.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="30"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.activity:activity-compose than 1.9.0 is available: 1.13.0"
+        errorLine1="activityCompose         = &quot;1.9.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="30"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.activity:activity-compose than 1.9.0 is available: 1.13.0"
+        errorLine1="activityCompose         = &quot;1.9.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="30"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.navigation:navigation-compose than 2.7.7 is available: 2.10.0"
+        errorLine1="navigationCompose       = &quot;2.7.7&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="31"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.navigation:navigation-compose than 2.7.7 is available: 2.10.0"
+        errorLine1="navigationCompose       = &quot;2.7.7&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="31"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.navigation:navigation-compose than 2.7.7 is available: 2.10.0"
+        errorLine1="navigationCompose       = &quot;2.7.7&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="31"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-ktx than 1.13.1 is available: 1.19.0"
+        errorLine1="coreKtx                 = &quot;1.13.1&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="34"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-ktx than 1.13.1 is available: 1.19.0"
+        errorLine1="coreKtx                 = &quot;1.13.1&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="34"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-ktx than 1.13.1 is available: 1.19.0"
+        errorLine1="coreKtx                 = &quot;1.13.1&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="34"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-splashscreen than 1.0.1 is available: 1.2.0"
+        errorLine1="coreSplashscreen        = &quot;1.0.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="35"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-splashscreen than 1.0.1 is available: 1.2.0"
+        errorLine1="coreSplashscreen        = &quot;1.0.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="35"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-splashscreen than 1.0.1 is available: 1.2.0"
+        errorLine1="coreSplashscreen        = &quot;1.0.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="35"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-ktx than 2.8.1 is available: 2.11.0"
+        errorLine1="lifecycleKtx            = &quot;2.8.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="36"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-ktx than 2.8.1 is available: 2.11.0"
+        errorLine1="lifecycleKtx            = &quot;2.8.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="36"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-ktx than 2.8.1 is available: 2.11.0"
+        errorLine1="lifecycleKtx            = &quot;2.8.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="36"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-viewmodel-compose than 2.8.1 is available: 2.11.0"
+        errorLine1="lifecycleKtx            = &quot;2.8.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="36"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-viewmodel-compose than 2.8.1 is available: 2.11.0"
+        errorLine1="lifecycleKtx            = &quot;2.8.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="36"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-viewmodel-compose than 2.8.1 is available: 2.11.0"
+        errorLine1="lifecycleKtx            = &quot;2.8.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="36"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.security:security-crypto than 1.1.0-alpha06 is available: 1.1.0"
+        errorLine1="securityCrypto          = &quot;1.1.0-alpha06&quot;"
+        errorLine2="                          ~~~~~~~~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="38"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.security:security-crypto than 1.1.0-alpha06 is available: 1.1.0"
+        errorLine1="securityCrypto          = &quot;1.1.0-alpha06&quot;"
+        errorLine2="                          ~~~~~~~~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="38"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.security:security-crypto than 1.1.0-alpha06 is available: 1.1.0"
+        errorLine1="securityCrypto          = &quot;1.1.0-alpha06&quot;"
+        errorLine2="                          ~~~~~~~~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="38"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-compiler than 2.6.1 is available: 2.8.4"
+        errorLine1="room                    = &quot;2.6.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="39"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-compiler than 2.6.1 is available: 2.8.4"
+        errorLine1="room                    = &quot;2.6.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="39"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-compiler than 2.6.1 is available: 2.8.4"
+        errorLine1="room                    = &quot;2.6.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="39"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-ktx than 2.6.1 is available: 2.8.4"
+        errorLine1="room                    = &quot;2.6.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="39"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-ktx than 2.6.1 is available: 2.8.4"
+        errorLine1="room                    = &quot;2.6.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="39"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-ktx than 2.6.1 is available: 2.8.4"
+        errorLine1="room                    = &quot;2.6.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="39"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-runtime than 2.6.1 is available: 2.8.4"
+        errorLine1="room                    = &quot;2.6.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="39"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-runtime than 2.6.1 is available: 2.8.4"
+        errorLine1="room                    = &quot;2.6.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="39"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.room:room-runtime than 2.6.1 is available: 2.8.4"
+        errorLine1="room                    = &quot;2.6.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="39"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.datastore:datastore-preferences than 1.1.1 is available: 1.2.1"
+        errorLine1="datastore               = &quot;1.1.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="40"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.datastore:datastore-preferences than 1.1.1 is available: 1.2.1"
+        errorLine1="datastore               = &quot;1.1.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="40"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.datastore:datastore-preferences than 1.1.1 is available: 1.2.1"
+        errorLine1="datastore               = &quot;1.1.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="40"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.credentials:credentials than 1.3.0 is available: 1.6.0"
+        errorLine1="credentials             = &quot;1.3.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="41"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.credentials:credentials than 1.3.0 is available: 1.6.0"
+        errorLine1="credentials             = &quot;1.3.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="41"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.credentials:credentials than 1.3.0 is available: 1.6.0"
+        errorLine1="credentials             = &quot;1.3.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="41"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.credentials:credentials-play-services-auth than 1.3.0 is available: 1.6.0"
+        errorLine1="credentials             = &quot;1.3.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="41"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.credentials:credentials-play-services-auth than 1.3.0 is available: 1.6.0"
+        errorLine1="credentials             = &quot;1.3.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="41"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.credentials:credentials-play-services-auth than 1.3.0 is available: 1.6.0"
+        errorLine1="credentials             = &quot;1.3.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="41"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of com.yubico.yubikit:android than 2.4.0 is available: 3.2.0"
+        errorLine1="yubikit                 = &quot;2.4.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="42"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of com.yubico.yubikit:android than 2.4.0 is available: 3.2.0"
+        errorLine1="yubikit                 = &quot;2.4.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="42"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of com.yubico.yubikit:android than 2.4.0 is available: 3.2.0"
+        errorLine1="yubikit                 = &quot;2.4.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="42"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of com.yubico.yubikit:fido than 2.4.0 is available: 2.8.1"
+        errorLine1="yubikit                 = &quot;2.4.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="42"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of com.yubico.yubikit:fido than 2.4.0 is available: 2.8.1"
+        errorLine1="yubikit                 = &quot;2.4.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="42"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of com.yubico.yubikit:fido than 2.4.0 is available: 2.8.1"
+        errorLine1="yubikit                 = &quot;2.4.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="42"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.hilt:hilt-navigation-compose than 1.2.0 is available: 1.4.0"
+        errorLine1="hiltNavCompose          = &quot;1.2.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="47"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.hilt:hilt-navigation-compose than 1.2.0 is available: 1.4.0"
+        errorLine1="hiltNavCompose          = &quot;1.2.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="47"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.hilt:hilt-navigation-compose than 1.2.0 is available: 1.4.0"
+        errorLine1="hiltNavCompose          = &quot;1.2.0&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="47"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of org.bouncycastle:bcpkix-jdk18on than 1.78.1 is available: 1.79"
+        errorLine1="bouncycastle            = &quot;1.78.1&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="51"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of org.bouncycastle:bcpkix-jdk18on than 1.78.1 is available: 1.79"
+        errorLine1="bouncycastle            = &quot;1.78.1&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="51"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of org.bouncycastle:bcpkix-jdk18on than 1.78.1 is available: 1.79"
+        errorLine1="bouncycastle            = &quot;1.78.1&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="51"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of org.bouncycastle:bcprov-jdk18on than 1.78.1 is available: 1.79"
+        errorLine1="bouncycastle            = &quot;1.78.1&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="51"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of org.bouncycastle:bcprov-jdk18on than 1.78.1 is available: 1.79"
+        errorLine1="bouncycastle            = &quot;1.78.1&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="51"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of org.bouncycastle:bcprov-jdk18on than 1.78.1 is available: 1.79"
+        errorLine1="bouncycastle            = &quot;1.78.1&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="51"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.work:work-runtime-ktx than 2.9.1 is available: 2.11.2"
+        errorLine1="workManager             = &quot;2.9.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="59"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.work:work-runtime-ktx than 2.9.1 is available: 2.11.2"
+        errorLine1="workManager             = &quot;2.9.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="59"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.work:work-runtime-ktx than 2.9.1 is available: 2.11.2"
+        errorLine1="workManager             = &quot;2.9.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="59"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of org.junit.jupiter:junit-jupiter-api than 5.10.2 is available: 5.11.2"
+        errorLine1="junit5                  = &quot;5.10.2&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="62"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of org.junit.jupiter:junit-jupiter-api than 5.10.2 is available: 5.11.2"
+        errorLine1="junit5                  = &quot;5.10.2&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="62"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of org.junit.jupiter:junit-jupiter-api than 5.10.2 is available: 5.11.2"
+        errorLine1="junit5                  = &quot;5.10.2&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="62"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of org.junit.jupiter:junit-jupiter-engine than 5.10.2 is available: 5.11.2"
+        errorLine1="junit5                  = &quot;5.10.2&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="62"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of org.junit.jupiter:junit-jupiter-engine than 5.10.2 is available: 5.11.2"
+        errorLine1="junit5                  = &quot;5.10.2&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="62"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of org.junit.jupiter:junit-jupiter-engine than 5.10.2 is available: 5.11.2"
+        errorLine1="junit5                  = &quot;5.10.2&quot;"
+        errorLine2="                          ~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="62"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test.espresso:espresso-core than 3.5.1 is available: 3.7.0"
+        errorLine1="espresso                = &quot;3.5.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="64"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test.espresso:espresso-core than 3.5.1 is available: 3.7.0"
+        errorLine1="espresso                = &quot;3.5.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="64"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test.espresso:espresso-core than 3.5.1 is available: 3.7.0"
+        errorLine1="espresso                = &quot;3.5.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="64"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test.ext:junit than 1.1.5 is available: 1.3.0"
+        errorLine1="testExtJunit            = &quot;1.1.5&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="65"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test.ext:junit than 1.1.5 is available: 1.3.0"
+        errorLine1="testExtJunit            = &quot;1.1.5&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="65"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test.ext:junit than 1.1.5 is available: 1.3.0"
+        errorLine1="testExtJunit            = &quot;1.1.5&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="65"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="SimilarGradleDependency"
+        message="There are multiple dependencies com.yubico.yubikit:fido but with different version"
+        errorLine1="yubikit-fido                    = { group = &quot;com.yubico.yubikit&quot;,          name = &quot;fido&quot;,                              version.ref = &quot;yubikit&quot; }"
+        errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="93"
+            column="36"/>
+    </issue>
+
+    <issue
+        id="SimilarGradleDependency"
+        message="There are multiple dependencies com.yubico.yubikit:fido but with different version"
+        errorLine1="yubikit-fido                    = { group = &quot;com.yubico.yubikit&quot;,          name = &quot;fido&quot;,                              version.ref = &quot;yubikit&quot; }"
+        errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="93"
+            column="36"/>
+    </issue>
+
+    <issue
+        id="SimilarGradleDependency"
+        message="There are multiple dependencies com.yubico.yubikit:fido but with different version"
+        errorLine1="yubikit-fido                    = { group = &quot;com.yubico.yubikit&quot;,          name = &quot;fido&quot;,                              version.ref = &quot;yubikit&quot; }"
+        errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="93"
+            column="36"/>
+    </issue>
+
+    <issue
+        id="SimilarGradleDependency"
+        message="There are multiple dependencies com.yubico.yubikit:fido but with different version"
+        errorLine1="yubikit-fido-desktop            = { group = &quot;com.yubico.yubikit&quot;,          name = &quot;fido&quot;,                              version.ref = &quot;yubikit-desktop&quot; }"
+        errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="96"
+            column="36"/>
+    </issue>
+
+    <issue
+        id="SimilarGradleDependency"
+        message="There are multiple dependencies com.yubico.yubikit:fido but with different version"
+        errorLine1="yubikit-fido-desktop            = { group = &quot;com.yubico.yubikit&quot;,          name = &quot;fido&quot;,                              version.ref = &quot;yubikit-desktop&quot; }"
+        errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="96"
+            column="36"/>
+    </issue>
+
+    <issue
+        id="SimilarGradleDependency"
+        message="There are multiple dependencies com.yubico.yubikit:fido but with different version"
+        errorLine1="yubikit-fido-desktop            = { group = &quot;com.yubico.yubikit&quot;,          name = &quot;fido&quot;,                              version.ref = &quot;yubikit-desktop&quot; }"
+        errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="96"
+            column="36"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.camera.core.ExperimentalGetImage` or `@OptIn(markerClass = androidx.camera.core.ExperimentalGetImage.class)`"
+        errorLine1="                        val mediaImage = imageProxy.image"
+        errorLine2="                                                    ~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/sync/EnrollmentScanScreen.kt"
+            line="225"
+            column="53"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="    modifier: Modifier = Modifier,"
+        errorLine2="    ~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/sync/EnrollmentScanScreen.kt"
+            line="562"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="    modifier: Modifier = Modifier,"
+        errorLine2="    ~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/sftp/SftpBrowserScreen.kt"
+            line="78"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="    modifier: Modifier = Modifier,"
+        errorLine2="    ~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/sftp/SftpFileItem.kt"
+            line="58"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="    modifier: Modifier = Modifier,"
+        errorLine2="    ~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/vault/VaultScreen.kt"
+            line="703"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="DiscouragedApi"
+        message="Should not restrict activity to fixed orientation. This may not be suitable for different form factors, causing the app to be letterboxed."
+        errorLine1="            android:screenOrientation=&quot;portrait&quot;"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="50"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="Typos"
+        message="&quot;exemple&quot; is a common misspelling; did you mean &quot;example&quot;?"
+        errorLine1="    &lt;string name=&quot;host_import_format_info_copy_example&quot;>Copier l\&apos;exemple&lt;/string>"
+        errorLine2="                                                                  ^">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="217"
+            column="67"/>
+    </issue>
+
+    <issue
+        id="Typos"
+        message="&quot;Exemple&quot; is a common misspelling; did you mean &quot;Example&quot;?"
+        errorLine1="    &lt;string name=&quot;host_import_format_info_copied&quot;>Exemple copié&lt;/string>"
+        errorLine2="                                                  ^">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="218"
+            column="51"/>
+    </issue>
+
+    <issue
+        id="Typos"
+        message="&quot;trafic&quot; is a common misspelling; did you mean &quot;traffic&quot;?"
+        errorLine1="    &lt;string name=&quot;dialog_external_nav_warning&quot;>Le trafic ne sera plus protégé par le tunnel SSH.&lt;/string>"
+        errorLine2="                                                  ^">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="278"
+            column="51"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;custom&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;themes_subtitle_many&quot;>%1$d custom themes&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-en/strings.xml"
+            line="90"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;thèmes&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;themes_subtitle_many&quot;>%1$d thèmes personnalisés&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="90"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;hosts&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;host_import_found&quot;>%1$d hosts found&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-en/strings.xml"
+            line="199"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;hôtes&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;host_import_found&quot;>%1$d hôtes trouvés&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="199"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;imported&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;host_import_result&quot;>%1$d imported, %2$d skipped.&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-en/strings.xml"
+            line="203"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;importés&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;host_import_result&quot;>%1$d importés, %2$d ignorés.&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="203"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;Mio&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;host_import_error_too_large&quot;>Ce fichier dépasse la taille maximale autorisée (%1$d Mio) pour un import.&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="206"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;passwords&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;label_passwords_stored_plural&quot;>%d passwords stored&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-en/strings.xml"
+            line="250"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;mots&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;label_passwords_stored_plural&quot;>%d mots de passe stockés&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="253"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;lines&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;settings_scrollback_lines&quot;>%d lines&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-en/strings.xml"
+            line="321"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;lignes&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;settings_scrollback_lines&quot;>%d lignes&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="324"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;selected&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;sftp_selection_count&quot;>%1$d selected&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-en/strings.xml"
+            line="410"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;item&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;sftp_dialog_multi_delete_title&quot;>Delete %1$d item(s)?&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-en/strings.xml"
+            line="413"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;sélectionné&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;sftp_selection_count&quot;>%1$d sélectionné(s)&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="413"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;élément&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;sftp_dialog_multi_delete_title&quot;>Supprimer %1$d élément(s) ?&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="416"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;lines&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;sftp_preview_line_count&quot;>%1$d lines&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-en/strings.xml"
+            line="424"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;lignes&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;sftp_preview_line_count&quot;>%1$d lignes&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="427"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;pending&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;sync_subtitle_conflicts_many&quot;>%1$d pending conflicts&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-en/strings.xml"
+            line="462"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;conflits&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;sync_subtitle_conflicts_many&quot;>%1$d conflits en attente&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="465"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;pending&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;sync_pending_conflicts&quot;>%1$d pending conflict(s)&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-en/strings.xml"
+            line="465"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;conflit&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;sync_pending_conflicts&quot;>%1$d conflit(s) en attente&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="468"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;conflict&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;conflict_banner_pending&quot;>%1$d conflict(s) to resolve&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-en/strings.xml"
+            line="480"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;conflit&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;conflict_banner_pending&quot;>%1$d conflit(s) à résoudre&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="483"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;sur&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;firstlaunch_step_count&quot;>Étape %1$d sur %2$d&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="555"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="TrustAllX509TrustManager"
+        message="`checkClientTrusted` is empty, which could cause insecure network traffic due to trusting arbitrary TLS/SSL certificates presented by peers"
+        errorLine1="    override fun checkClientTrusted(chain: Array&lt;out X509Certificate>, authType: String) {"
+        errorLine2="                 ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/core/sync/PinnedTrustManager.kt"
+            line="33"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="TrustAllX509TrustManager"
+        message="`checkServerTrusted` is empty, which could cause insecure network traffic due to trusting arbitrary TLS/SSL certificates presented by peers">
+        <location
+            file="$GRADLE_USER_HOME/caches/modules-2/files-2.1/org.bouncycastle/bcpkix-jdk18on/1.78.1/17b3541f736df97465f87d9f5b5dfa4991b37bb3/bcpkix-jdk18on-1.78.1.jar"/>
+    </issue>
+
+    <issue
+        id="CustomX509TrustManager"
+        message="Implementing a custom `X509TrustManager` is error-prone and likely to be insecure. It is likely to disable certificate validation altogether, and is non-trivial to implement correctly without calling Android&apos;s default implementation."
+        errorLine1="class PinnedTrustManager(private val expectedFingerprintHex: String) : X509TrustManager {"
+        errorLine2="      ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/core/sync/PinnedTrustManager.kt"
+            line="21"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="InsecureBaseConfiguration"
+        message="Insecure Base Configuration"
+        errorLine1="    &lt;base-config cleartextTrafficPermitted=&quot;true&quot;>"
+        errorLine2="                                            ~~~~">
+        <location
+            file="src/main/res/xml/network_security_config.xml"
+            line="9"
+            column="45"/>
+    </issue>
+
+    <issue
+        id="WebViewClientOnReceivedSslError"
+        message="Permitting connections with SSL-related errors could allow eavesdroppers to intercept data sent by your app, which impacts the privacy of your users. Consider canceling the connections by invoking `SslErrorHandler#cancel()`."
+        errorLine1="                                        if (viewModel.isLocalhostUrl(url)) handler.proceed() else handler.cancel()"
+        errorLine2="                                                                           ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/browser/TunnelBrowserScreen.kt"
+            line="334"
+            column="76"/>
+    </issue>
+
+    <issue
+        id="PlaySdkIndexVulnerability"
+        message="com.yubico.yubikit:core version 2.8.1 contains encryption employing the less secure mode AES/ECB."
+        errorLine1="yubikit-desktop         = &quot;2.8.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="43"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="PlaySdkIndexVulnerability"
+        message="com.yubico.yubikit:core version 2.8.1 contains encryption employing the less secure mode AES/ECB."
+        errorLine1="yubikit-desktop         = &quot;2.8.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="43"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="PlaySdkIndexVulnerability"
+        message="com.yubico.yubikit:core version 2.8.1 contains encryption employing the less secure mode AES/ECB."
+        errorLine1="yubikit-desktop         = &quot;2.8.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="43"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="PlaySdkIndexVulnerability"
+        message="com.yubico.yubikit:core version 2.8.1 contains unsafe encryption patterns."
+        errorLine1="yubikit-desktop         = &quot;2.8.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="43"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="PlaySdkIndexVulnerability"
+        message="com.yubico.yubikit:core version 2.8.1 contains unsafe encryption patterns."
+        errorLine1="yubikit-desktop         = &quot;2.8.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="43"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="PlaySdkIndexVulnerability"
+        message="com.yubico.yubikit:core version 2.8.1 contains unsafe encryption patterns."
+        errorLine1="yubikit-desktop         = &quot;2.8.1&quot;"
+        errorLine2="                          ~~~~~~~">
+        <location
+            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            line="43"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 29"
+        errorLine1="            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/sessions/SessionViewModel.kt"
+            line="547"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="This folder configuration (`v26`) is unnecessary; `minSdkVersion` is 29. Merge all the resources in this folder into `mipmap-anydpi`.">
+        <location
+            file="src/main/res/mipmap-anydpi-v26"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableFloatStateOf` instead of `mutableStateOf`"
+        errorLine1="    var hue by remember(initialArgb) { mutableStateOf(initialHsv[0]) }"
+        errorLine2="                                       ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/components/ColorPicker.kt"
+            line="96"
+            column="40"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableFloatStateOf` instead of `mutableStateOf`"
+        errorLine1="    var sat by remember(initialArgb) { mutableStateOf(initialHsv[1]) }"
+        errorLine2="                                       ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/components/ColorPicker.kt"
+            line="97"
+            column="40"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableFloatStateOf` instead of `mutableStateOf`"
+        errorLine1="    var value by remember(initialArgb) { mutableStateOf(initialHsv[2]) }"
+        errorLine2="                                         ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/components/ColorPicker.kt"
+            line="98"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var lastPushedArgb by remember(initialArgb) { mutableStateOf(currentArgb) }"
+        errorLine2="                                                  ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/components/ColorPicker.kt"
+            line="106"
+            column="51"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var tabIndex by remember { mutableStateOf(0) }"
+        errorLine2="                               ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/components/ColorPicker.kt"
+            line="112"
+            column="32"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var background by remember(initial.id) { mutableStateOf(opaque(initial.background)) }"
+        errorLine2="                                             ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/themes/CustomThemeEditor.kt"
+            line="213"
+            column="46"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var foreground by remember(initial.id) { mutableStateOf(opaque(initial.foreground)) }"
+        errorLine2="                                             ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/themes/CustomThemeEditor.kt"
+            line="214"
+            column="46"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var cursor by remember(initial.id) { mutableStateOf(opaque(initial.cursor)) }"
+        errorLine2="                                         ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/themes/CustomThemeEditor.kt"
+            line="215"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var selectionBg by remember(initial.id) { mutableStateOf(initial.selectionBg) }"
+        errorLine2="                                              ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/themes/CustomThemeEditor.kt"
+            line="219"
+            column="47"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var exampleCopiedTrigger by remember { mutableStateOf(0) }"
+        errorLine2="                                           ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/hosts/HostImportScreen.kt"
+            line="134"
+            column="44"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableLongStateOf` instead of `mutableStateOf`"
+        errorLine1="    var now by remember(anchorMs) { mutableStateOf(System.currentTimeMillis()) }"
+        errorLine2="                                    ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/components/RelativeTimeTick.kt"
+            line="28"
+            column="37"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var pubKeySavedTrigger by remember { mutableStateOf(0) }"
+        errorLine2="                                         ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/vault/VaultScreen.kt"
+            line="155"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var pubKeyCopiedTrigger by remember { mutableStateOf(0) }"
+        errorLine2="                                          ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/vault/VaultScreen.kt"
+            line="157"
+            column="43"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.drawable.ic_launcher_foreground` appears to be unused"
+        errorLine1="&lt;vector xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;"
+        errorLine2="^">
+        <location
+            file="src/main/res/drawable/ic_launcher_foreground.xml"
+            line="2"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.action_trust_host` appears to be unused"
+        errorLine1="    &lt;string name=&quot;action_trust_host&quot;>Faire confiance&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="29"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.action_reject` appears to be unused"
+        errorLine1="    &lt;string name=&quot;action_reject&quot;>Refuser&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="30"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.action_cancel_connection` appears to be unused"
+        errorLine1="    &lt;string name=&quot;action_cancel_connection&quot;>Annuler la connexion&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="31"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.action_skip` appears to be unused"
+        errorLine1="    &lt;string name=&quot;action_skip&quot;>Passer&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="33"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.action_stop` appears to be unused"
+        errorLine1="    &lt;string name=&quot;action_stop&quot;>Arrêter&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="43"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.action_start` appears to be unused"
+        errorLine1="    &lt;string name=&quot;action_start&quot;>Démarrer&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="44"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.shortcut_disabled_message` appears to be unused"
+        errorLine1="    &lt;string name=&quot;shortcut_disabled_message&quot;>Raccourci non disponible&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="56"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.label_local_host` appears to be unused"
+        errorLine1="    &lt;string name=&quot;label_local_host&quot;>Hôte local&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="140"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.label_biometric_unlock` appears to be unused"
+        errorLine1="    &lt;string name=&quot;label_biometric_unlock&quot;>Déverrouillage biométrique&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="158"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.dialog_host_verification_title` appears to be unused"
+        errorLine1="    &lt;string name=&quot;dialog_host_verification_title&quot;>Vérification de l\&apos;hôte&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="269"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.dialog_host_key_changed_title` appears to be unused"
+        errorLine1="    &lt;string name=&quot;dialog_host_key_changed_title&quot;>⚠ Clé de l\&apos;hôte modifiée&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="270"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.dialog_host_key_changed_message` appears to be unused"
+        errorLine1="    &lt;string name=&quot;dialog_host_key_changed_message&quot;>ATTENTION : La clé SSH de l\&apos;hôte %s a changé depuis la dernière connexion. Cela peut indiquer une attaque de type man-in-the-middle.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="271"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.dialog_trust_host_question` appears to be unused"
+        errorLine1="    &lt;string name=&quot;dialog_trust_host_question&quot;>Voulez-vous faire confiance à cet hôte ?&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="272"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.label_host_address` appears to be unused"
+        errorLine1="    &lt;string name=&quot;label_host_address&quot;>Hôte : %s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="286"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.label_algorithm` appears to be unused"
+        errorLine1="    &lt;string name=&quot;label_algorithm&quot;>Algorithme : %s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="287"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.label_key_fingerprint` appears to be unused"
+        errorLine1="    &lt;string name=&quot;label_key_fingerprint&quot;>Empreinte de la clé :&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="288"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.label_stored_key` appears to be unused"
+        errorLine1="    &lt;string name=&quot;label_stored_key&quot;>Clé stockée :&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="289"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.label_received_key` appears to be unused"
+        errorLine1="    &lt;string name=&quot;label_received_key&quot;>Clé reçue :&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="290"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.label_experimental` appears to be unused"
+        errorLine1="    &lt;string name=&quot;label_experimental&quot;>Expérimental&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="293"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.fido2_timeout` appears to be unused"
+        errorLine1="    &lt;string name=&quot;fido2_timeout&quot;>Délai expiré : aucune clé de sécurité détectée&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="297"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.fido2_no_key_detected` appears to be unused"
+        errorLine1="    &lt;string name=&quot;fido2_no_key_detected&quot;>Aucune clé de sécurité détectée&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="298"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.fido2_error_no_key` appears to be unused"
+        errorLine1="    &lt;string name=&quot;fido2_error_no_key&quot;>Aucune clé FIDO2 configurée pour cet hôte&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="303"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.fido2_error_cancelled` appears to be unused"
+        errorLine1="    &lt;string name=&quot;fido2_error_cancelled&quot;>Authentification FIDO2 annulée&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="304"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.fido2_error_timeout` appears to be unused"
+        errorLine1="    &lt;string name=&quot;fido2_error_timeout&quot;>Délai d\&apos;authentification FIDO2 expiré&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="305"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.fido2_pin_required_no_ui` appears to be unused"
+        errorLine1="    &lt;string name=&quot;fido2_pin_required_no_ui&quot;>Cette clé exige un PIN mais l\&apos;interface PIN n\&apos;est pas disponible.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="310"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_app_credit` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_app_credit&quot;>NextSH by Techtical&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="329"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.label_via_host` appears to be unused"
+        errorLine1="    &lt;string name=&quot;label_via_host&quot;>via %s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="337"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.title_sftp_browser` appears to be unused"
+        errorLine1="    &lt;string name=&quot;title_sftp_browser&quot;>Fichiers&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="367"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_error_connection` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_error_connection&quot;>Connexion SFTP perdue&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="370"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_error_permission` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_error_permission&quot;>Permission refusée&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="371"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_error_not_found` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_error_not_found&quot;>Fichier ou dossier introuvable&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="372"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_error_generic` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_error_generic&quot;>Erreur SFTP : %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="373"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_loading` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_loading&quot;>Chargement…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="384"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_success_mkdir` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_success_mkdir&quot;>Dossier créé&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="400"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_success_rename` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_success_rename&quot;>Fichier renommé&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="401"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_success_chmod` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_success_chmod&quot;>Permissions modifiées&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="402"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_success_delete` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_success_delete&quot;>Élément supprimé&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="403"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_error_name_empty` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_error_name_empty&quot;>Le nom ne peut pas être vide&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="404"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_error_name_invalid` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_error_name_invalid&quot;>Nom de fichier invalide&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="405"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_preview_title` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_preview_title&quot;>Aperçu&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="422"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_preview_loading` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_preview_loading&quot;>Chargement de l\&apos;aperçu…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="423"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_preview_too_large` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_preview_too_large&quot;>Fichier trop volumineux pour l\&apos;aperçu (%1$s). Téléchargez-le pour le visualiser.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="425"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_reconnecting` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_reconnecting&quot;>Reconnexion…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="432"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_transfer_complete` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_transfer_complete&quot;>Transfert terminé&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="438"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_transfer_failed` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_transfer_failed&quot;>Échec du transfert&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="439"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sftp_transfer_cancelled` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sftp_transfer_cancelled&quot;>Transfert annulé&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="440"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.sync_pending_conflicts` appears to be unused"
+        errorLine1="    &lt;string name=&quot;sync_pending_conflicts&quot;>%1$d conflit(s) en attente&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="468"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.label_sftp_pane` appears to be unused"
+        errorLine1="    &lt;string name=&quot;label_sftp_pane&quot;>SFTP : %s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="502"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.enrolled_host_label` appears to be unused"
+        errorLine1="    &lt;string name=&quot;enrolled_host_label&quot;>Hôte : %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="514"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.enrolled_ecdh_label` appears to be unused"
+        errorLine1="    &lt;string name=&quot;enrolled_ecdh_label&quot;>ECDH : %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="515"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.enrolled_tls_label` appears to be unused"
+        errorLine1="    &lt;string name=&quot;enrolled_tls_label&quot;>TLS : %1$s…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="516"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.enrolled_enrolled_label` appears to be unused"
+        errorLine1="    &lt;string name=&quot;enrolled_enrolled_label&quot;>Enrôlé %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="517"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.enrolled_last_sync_label` appears to be unused"
+        errorLine1="    &lt;string name=&quot;enrolled_last_sync_label&quot;>Dernière sync : %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="518"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="IconXmlAndPng"
+        message="The following images appear both as density independent `.xml` files and as bitmap files: src\main\res\drawable\ic_launcher_foreground.xml, src\main\res\mipmap-hdpi\ic_launcher_foreground.png">
+        <location
+            file="src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png"/>
+        <location
+            file="src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png"/>
+        <location
+            file="src/main/res/mipmap-xhdpi/ic_launcher_foreground.png"/>
+        <location
+            file="src/main/res/mipmap-mdpi/ic_launcher_foreground.png"/>
+        <location
+            file="src/main/res/mipmap-hdpi/ic_launcher_foreground.png"/>
+        <location
+            file="src/main/res/drawable/ic_launcher_foreground.xml"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icon used as round icon did not have a circular shape">
+        <location
+            file="src/main/res/mipmap-hdpi/ic_launcher_round.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icon used as round icon did not have a circular shape">
+        <location
+            file="src/main/res/mipmap-mdpi/ic_launcher_round.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icon used as round icon did not have a circular shape">
+        <location
+            file="src/main/res/mipmap-xhdpi/ic_launcher_round.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icon used as round icon did not have a circular shape">
+        <location
+            file="src/main/res/mipmap-xxhdpi/ic_launcher_round.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icon used as round icon did not have a circular shape">
+        <location
+            file="src/main/res/mipmap-xxxhdpi/ic_launcher_round.png"/>
+    </issue>
+
+    <issue
+        id="MonochromeLauncherIcon"
+        message="The application adaptive icon is missing a monochrome tag"
+        errorLine1="&lt;adaptive-icon xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;>"
+        errorLine2="^">
+        <location
+            file="src/main/res/mipmap-anydpi-v26/ic_launcher.xml"
+            line="2"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="MonochromeLauncherIcon"
+        message="The application adaptive roundIcon is missing a monochrome tag"
+        errorLine1="&lt;adaptive-icon xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;>"
+        errorLine2="^">
+        <location
+            file="src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml"
+            line="2"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="IconDuplicates"
+        message="The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png">
+        <location
+            file="src/main/res/mipmap-hdpi/ic_launcher_round.png"/>
+        <location
+            file="src/main/res/mipmap-hdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconDuplicates"
+        message="The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png">
+        <location
+            file="src/main/res/mipmap-mdpi/ic_launcher_round.png"/>
+        <location
+            file="src/main/res/mipmap-mdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconDuplicates"
+        message="The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png">
+        <location
+            file="src/main/res/mipmap-xhdpi/ic_launcher_round.png"/>
+        <location
+            file="src/main/res/mipmap-xhdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconDuplicates"
+        message="The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png">
+        <location
+            file="src/main/res/mipmap-xxhdpi/ic_launcher_round.png"/>
+        <location
+            file="src/main/res/mipmap-xxhdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconDuplicates"
+        message="The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png">
+        <location
+            file="src/main/res/mipmap-xxxhdpi/ic_launcher_round.png"/>
+        <location
+            file="src/main/res/mipmap-xxxhdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="ReportShortcutUsage"
+        message="Calling this method indicates use of dynamic shortcuts, but there are no calls to methods that track shortcut usage, such as `pushDynamicShortcut` or `reportShortcutUsed`. Calling these methods is recommended, as they track shortcut usage and allow launchers to adjust which shortcuts appear based on activation history. Please see https://developer.android.com/develop/ui/views/launch/shortcuts/managing-shortcuts#track-usage"
+        errorLine1="            ShortcutManagerCompat.setDynamicShortcuts(context, shortcuts)"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/core/shortcut/ShortcutUpdater.kt"
+            line="64"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="            val uri = Uri.parse(raw) ?: return null"
+        errorLine2="                      ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/sync/EnrollmentQrParser.kt"
+            line="24"
+            column="23"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                                Intent(Intent.ACTION_VIEW, Uri.parse(RepositoryUrls.GITHUB))"
+        errorLine2="                                                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/settings/SettingsScreen.kt"
+            line="487"
+            column="60"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                val localUri    = Uri.parse(localUriStr)"
+        errorLine2="                                  ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/service/SftpTransferService.kt"
+            line="87"
+            column="35"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                                    android.net.Uri.parse(url),"
+        errorLine2="                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/browser/TunnelBrowserScreen.kt"
+            line="138"
+            column="37"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toColorInt` instead?"
+        errorLine1="                                setBackgroundColor(android.graphics.Color.parseColor(&quot;#0F0F0F&quot;))"
+        errorLine2="                                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/browser/TunnelBrowserScreen.kt"
+            line="364"
+            column="52"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="            val uri = android.net.Uri.parse(url)"
+        errorLine2="                      ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/browser/TunnelBrowserViewModel.kt"
+            line="115"
+            column="23"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        encryptedPrefs.edit()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/core/vault/VaultManager.kt"
+            line="90"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        encryptedPrefs.edit().remove(&quot;pwd_$credentialId&quot;).apply()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/core/vault/VaultManager.kt"
+            line="104"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        encryptedPrefs.edit()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/core/vault/VaultManager.kt"
+            line="112"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        encryptedPrefs.edit().remove(&quot;key_$keyId&quot;).apply()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/core/vault/VaultManager.kt"
+            line="124"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        encryptedPrefs.edit()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/core/vault/VaultManager.kt"
+            line="132"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        encryptedPrefs.edit().remove(&quot;keypass_$keyId&quot;).apply()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/core/vault/VaultManager.kt"
+            line="146"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        encryptedPrefs.edit()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/core/vault/VaultManager.kt"
+            line="159"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        encryptedPrefs.edit().remove(&quot;cert_$certId&quot;).apply()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/core/vault/VaultManager.kt"
+            line="169"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        encryptedPrefs.edit().clear().apply()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/core/vault/VaultManager.kt"
+            line="181"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="            val editor = v2Prefs.edit()"
+        errorLine2="                         ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/core/vault/VaultMigration.kt"
+            line="104"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="ConstantLocale"
+        message="Assigning `Locale.getDefault()` to a final static field is suspicious; this code will not work correctly if the user changes locale while the app is running"
+        errorLine1="private val DATE_FORMATTER = DateTimeFormatter.ofPattern(&quot;dd MMM yyyy&quot;, Locale.getDefault())"
+        errorLine2="                                                                        ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/fr/techtical/nextsh/ui/sftp/SftpFileItem.kt"
+            line="201"
+            column="73"/>
+    </issue>
+
+</issues>

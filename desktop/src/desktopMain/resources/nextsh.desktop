@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=NextSH
+Comment=Native SSH client with encrypted vault
+Exec=nextsh
+Icon=nextsh
+Terminal=false
+Type=Application
+Categories=Network;RemoteAccess;
+Keywords=SSH;terminal;tunnel;vault;
+StartupWMClass=NextSH

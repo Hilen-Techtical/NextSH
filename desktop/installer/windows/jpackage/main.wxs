@@ -1,0 +1,429 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (c) 2026 Thibaud Maneval - Techtical (https://www.techtical.fr)
+  SPDX-License-Identifier: MIT
+
+  NextSH MSI installer: jpackage `resource-dir` override of the stock
+  (NB: flag names are written WITHOUT their leading double dash anywhere
+  in this file's comments: a literal "- -" pair is illegal inside an XML
+  comment and makes candle.exe fail to parse the whole document.)
+  `main.wxs` jpackage ships internally (extracted from
+  `jdk.jpackage.internal.resources` in `jdk.jpackage.jmod`, JDK 21 /
+  Eclipse Temurin 21.0.11, candle/light WiX 3.11.2, see
+  `desktop/build.gradle.kts` `:downloadWix`). This file is a byte-for-byte
+  copy of that stock template with FOUR additions, each marked "NextSH:"
+  below so a future diff against a newer jpackage's stock main.wxs stays
+  easy:
+
+    1. Four `util:CloseApplication` actions so the MSI can close a running
+       NextSH.exe before copying files: the stock template has none.
+    2. `WixCloseApplications` rescheduled to `After="InstallInitialize"`
+       (so its deferred half lands inside the install transaction) and
+       `RemoveExistingProducts` moved from `Before="CostInitialize"` to
+       `After="InstallValidate"`, position 1 of the four the MSI docs
+       allow. See the sequencing block near the bottom of this file for
+       why those two rows cannot simply be chained onto one another.
+    3. `WixVariable` overrides for the WixUI banner/dialog bitmaps, so the
+       installer wizard is NextSH-branded without a post-build patch step.
+    4. This header comment.
+
+  ⚠️ PINNED to jpackage/JDK 21 + WiX 3.11.2. jpackage regenerates its
+  bundled main.wxs per JDK release and the WiX toolset major version (3 vs
+  4/5) changes the schema substantially (WiX 4/5 dropped `candle`/`light`
+  for a single `wix.exe`, and UI extension bitmap variables changed name).
+  If the Windows packaging toolchain ever moves to JDK ≥ 24 (WiX 4/5),
+  this file MUST be regenerated from that JDK's own stock main.wxs before
+  reapplying the four customizations above. Do not just keep using this
+  copy as-is.
+
+  `util:CloseApplication` and the two `WixVariable` overrides below are
+  proper WixUtilExtension / WixUIExtension surface, no custom action DLL
+  or post-build patching required. `WixUtilExtension` is already linked by
+  jpackage's own WiX invocation (it uses `util:RemoveFolderEx` internally
+  for per-directory cleanup, confirmed via the `-ext WixUtilExtension` flag
+  baked into `jdk.jpackage.internal.WixPipeline`), so no extra `-ext` flag
+  is needed from our side. Verified against the actual `WixUtilExtension.dll`
+  / `WixUIExtension.dll` shipped by `:downloadWix` (`build/wix311/`): the
+  embedded `util:CloseApplication` XSD schema and the `WixUIBannerBmp` /
+  `WixUIDialogBmp` `!(wix.*)` default bindings were extracted directly from
+  those DLLs to confirm the exact attribute/variable names used here.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+
+  <?ifdef JpIsSystemWide ?>
+    <?define JpInstallScope="perMachine"?>
+  <?else?>
+    <?define JpInstallScope="perUser"?>
+  <?endif?>
+
+  <?define JpProductLanguage=1033 ?>
+  <?define JpInstallerVersion=200 ?>
+  <?define JpCompressedMsi=yes ?>
+
+  <?include $(var.JpConfigDir)/overrides.wxi ?>
+
+  <?ifdef JpAllowUpgrades ?>
+    <?define JpUpgradeVersionOnlyDetectUpgrade="no"?>
+  <?else?>
+    <?define JpUpgradeVersionOnlyDetectUpgrade="yes"?>
+  <?endif?>
+  <?ifdef JpAllowDowngrades ?>
+    <?define JpUpgradeVersionOnlyDetectDowngrade="no"?>
+  <?else?>
+    <?define JpUpgradeVersionOnlyDetectDowngrade="yes"?>
+  <?endif?>
+
+  <Product
+    Id="$(var.JpProductCode)"
+    Name="$(var.JpAppName)"
+    Language="$(var.JpProductLanguage)"
+    Version="$(var.JpAppVersion)"
+    Manufacturer="$(var.JpAppVendor)"
+    UpgradeCode="$(var.JpProductUpgradeCode)">
+
+    <Package
+      Description="$(var.JpAppDescription)"
+      Manufacturer="$(var.JpAppVendor)"
+      InstallerVersion="$(var.JpInstallerVersion)"
+      Compressed="$(var.JpCompressedMsi)"
+      InstallScope="$(var.JpInstallScope)" Platform="x64"
+    />
+
+    <Media Id="1" Cabinet="Data.cab" EmbedCab="yes" />
+
+    <Upgrade Id="$(var.JpProductUpgradeCode)">
+      <UpgradeVersion
+        OnlyDetect="$(var.JpUpgradeVersionOnlyDetectUpgrade)"
+        Property="JP_UPGRADABLE_FOUND"
+        Maximum="$(var.JpAppVersion)"
+        MigrateFeatures="yes"
+        IncludeMaximum="$(var.JpUpgradeVersionOnlyDetectUpgrade)" />
+      <UpgradeVersion
+        OnlyDetect="$(var.JpUpgradeVersionOnlyDetectDowngrade)"
+        Property="JP_DOWNGRADABLE_FOUND"
+        Minimum="$(var.JpAppVersion)"
+        MigrateFeatures="yes"
+        IncludeMinimum="$(var.JpUpgradeVersionOnlyDetectDowngrade)" />
+    </Upgrade>
+
+    <?ifndef JpAllowUpgrades ?>
+    <CustomAction Id="JpDisallowUpgrade" Error="!(loc.DisallowUpgradeErrorMessage)" />
+    <?endif?>
+    <?ifndef JpAllowDowngrades ?>
+    <CustomAction Id="JpDisallowDowngrade" Error="!(loc.DowngradeErrorMessage)" />
+    <?endif?>
+
+    <Binary Id="JpCaDll" SourceFile="wixhelper.dll"/>
+
+    <CustomAction Id="JpFindRelatedProducts" BinaryKey="JpCaDll" DllEntry="FindRelatedProductsEx" />
+
+    <!-- ═══ NextSH: close-on-upgrade/uninstall (1/4) ═══════════════════════
+         FOUR `util:CloseApplication` rows, all targeting the same
+         NextSH.exe, explicitly ordered through the `Sequence` column.
+
+         WHY FOUR ROWS RATHER THAN ONE
+         Within a SINGLE row, the WixCloseApplications custom action runs
+         PromptToContinue FIRST, before it sends any message at all,
+         util.xsd says so verbatim ("The prompt occurs before executing
+         any of the other options"), and the WiX 3.11.2 CloseApps.cpp
+         source confirms it. A row that combines PromptToContinue with
+         CloseMessage / EndSessionMessage therefore shows its
+         Abort/Retry/Ignore box to the user BEFORE it has even tried to
+         close the app: the exact opposite of the intended behaviour.
+         Splitting the behaviour across rows and pinning their relative
+         order with `Sequence` is the only way to get "try first, ask
+         only if that failed". The custom action iterates the
+         WixCloseApplication table in `Sequence` order (with the column
+         left empty on every row, as it was before, the order is simply
+         undefined), and it re-snapshots the running processes before
+         each row, so a row whose turn comes after NextSH has already
+         exited does nothing at all.
+
+         SEQUENCE 1, NextSHCloseEndSession (the main path)
+         WM_QUERYENDSESSION carrying ENDSESSION_CLOSEAPP in lParam, then
+         WM_ENDSESSION(TRUE, ENDSESSION_CLOSEAPP) if the window accepted
+         it. This is what arms Main.kt's InstallerCloseWatch hook, which
+         ships from NextSH 0.7.0 onwards and short-circuits both
+         minimize-to-tray and the confirm-quit dialog (neither of which
+         an unattended installer can answer) straight to a clean
+         shutdown. The Elevated* twin is set so the deferred half runs
+         unimpersonated too. 30 s budget, see Timeout below.
+
+         SEQUENCE 2, NextSHCloseWmClose (short safety net)
+         Plain WM_CLOSE, 5 s. Reached only when NextSH is STILL running
+         after sequence 1 (every row re-snapshots first), i.e. a build
+         without the hook, or a window that refused the end-session pair.
+         Deliberately short: the real budget belongs to sequence 1.
+
+         SEQUENCE 3, NextSHClosePrompt (last resort, human in the loop)
+         PromptToContinue alone, with no message attribute whatsoever. A
+         row carrying neither a message, nor TerminateProcess, nor
+         RebootPrompt="yes" contributes NO deferred work: this row
+         exists purely to ask. It is reached only once sequences 1 and 2
+         have both failed to close NextSH. The box is the custom action's
+         OWN Abort/Retry/Ignore message box, showing this row's
+         Description; Windows labels its buttons in the user's own
+         language, which is why the Description no longer names them:
+           * Retry only re-snapshots the process list. It sends NOTHING.
+             The user has to close NextSH by hand first, then press it.
+           * Ignore is the DEFAULT button (MB_DEFBUTTON3) and merely
+             continues the install WITHOUT closing anything, files stay
+             locked, so the install is expected to fail from there.
+           * Abort ends the install as a user cancellation.
+
+         SEQUENCE 4, NextSHCloseForced (opt-in kill, never automatic)
+         See FORCED below.
+
+         Not to be confused with Windows Installer's own MsiRMFilesInUse
+         dialog. That dialog IS present in the package (WixUI_InstallDir
+         pulls it in) and Windows can put it up by itself at
+         InstallValidate, i.e. BEFORE our custom action ever runs, when
+         the Restart Manager notices NextSH holding an installed file.
+         Passing MSIRMSHUTDOWN=1 on the command line makes the Restart
+         Manager close the app itself and suppresses that dialog; it is
+         the recommended lever for silent / CI upgrades (see
+         docs/RELEASE_PROCESS.md) and, unlike NEXTSHFORCECLOSE below, it
+         is scoped to the invoking session.
+
+         Timeout is expressed in SECONDS (candle multiplies it by 1000
+         when it writes the WixCloseApplication table). 30 s is the
+         budget for a clean NextSH stop: JVM shutdown hooks, geometry
+         persistence, SSH/SFTP teardown and tunnel shutdown.
+
+         FORCED (sequence 4, opt-in only, never automatic): identical
+         target, but adds TerminateProcess so a still-running instance is
+         killed outright once every cooperative attempt has failed. Gated
+         on the NEXTSHFORCECLOSE public property (element text = WiX
+         condition): that property is never set by the interactive UI,
+         only by an operator explicitly passing `NEXTSHFORCECLOSE=1` on
+         the msiexec command line (CI / unattended upgrade scripts). A
+         forced kill mid-write risks corrupting the SQLite/SQLDelight
+         desktop vault, so it must stay opt-in, see CLAUDE.md "Sécurité"
+         on data-loss-adjacent choices.
+         Note also that the kill is NOT scoped to the invoking session: it
+         targets every NextSH.exe on the machine, other users' sessions
+         included, so it is forbidden on multi-user / RDS hosts (documented
+         in docs/RELEASE_PROCESS.md).
+         It also carries an explicit Timeout="30": WiX defaults an omitted
+         Timeout to 5 seconds, which would TerminateProcess a NextSH that
+         is merely slow to finish its clean shutdown: the exact
+         mid-write kill this row is supposed to be the last resort for.
+    -->
+    <util:CloseApplication
+      Id="NextSHCloseEndSession"
+      Sequence="1"
+      Target="NextSH.exe"
+      EndSessionMessage="yes"
+      ElevatedEndSessionMessage="yes"
+      RebootPrompt="no"
+      Timeout="30" />
+
+    <util:CloseApplication
+      Id="NextSHCloseWmClose"
+      Sequence="2"
+      Target="NextSH.exe"
+      CloseMessage="yes"
+      ElevatedCloseMessage="yes"
+      RebootPrompt="no"
+      Timeout="5" />
+
+    <util:CloseApplication
+      Id="NextSHClosePrompt"
+      Sequence="3"
+      Target="NextSH.exe"
+      Description="NextSH is still running and could not be closed automatically. Please close it manually before continuing. Continuing while it is running will fail the installation with locked files."
+      PromptToContinue="yes"
+      RebootPrompt="no" />
+
+    <util:CloseApplication
+      Id="NextSHCloseForced"
+      Sequence="4"
+      Target="NextSH.exe"
+      Description="Forcing NextSH to close for an unattended upgrade."
+      CloseMessage="yes"
+      EndSessionMessage="yes"
+      TerminateProcess="1"
+      RebootPrompt="no"
+      Timeout="30">NEXTSHFORCECLOSE = "1"</util:CloseApplication>
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+    <!-- Standard required root -->
+    <Directory Id="TARGETDIR" Name="SourceDir"/>
+
+    <Feature Id="DefaultFeature" Title="!(loc.MainFeatureTitle)" Level="1">
+      <ComponentGroupRef Id="Shortcuts"/>
+      <ComponentGroupRef Id="Files"/>
+      <ComponentGroupRef Id="FileAssociations"/>
+    </Feature>
+
+    <CustomAction Id="JpSetARPINSTALLLOCATION" Property="ARPINSTALLLOCATION" Value="[INSTALLDIR]" />
+    <CustomAction Id="JpSetARPCOMMENTS" Property="ARPCOMMENTS" Value="$(var.JpAppDescription)" />
+    <CustomAction Id="JpSetARPCONTACT" Property="ARPCONTACT" Value="$(var.JpAppVendor)" />
+    <CustomAction Id="JpSetARPSIZE" Property="ARPSIZE" Value="$(var.JpAppSizeKb)" />
+
+    <?ifdef JpHelpURL ?>
+      <CustomAction Id="JpSetARPHELPLINK" Property="ARPHELPLINK" Value="$(var.JpHelpURL)" />
+    <?endif?>
+
+    <?ifdef JpAboutURL ?>
+      <CustomAction Id="JpSetARPURLINFOABOUT" Property="ARPURLINFOABOUT" Value="$(var.JpAboutURL)" />
+    <?endif?>
+
+    <?ifdef JpUpdateURL ?>
+      <CustomAction Id="JpSetARPURLUPDATEINFO" Property="ARPURLUPDATEINFO" Value="$(var.JpUpdateURL)" />
+    <?endif?>
+
+    <?ifdef JpIcon ?>
+    <Property Id="ARPPRODUCTICON" Value="JpARPPRODUCTICON"/>
+    <Icon Id="JpARPPRODUCTICON" SourceFile="$(var.JpIcon)"/>
+    <?endif?>
+
+    <UIRef Id="JpUI"/>
+
+    <!-- ═══ NextSH: WixUI branding (3/4) ════════════════════════════════════
+         Overrides the stock WixUI_InstallDir dialog artwork (banner/dialog
+         bitmaps, `WixUI_Bmp_Banner` / `WixUI_Bmp_Dialog` Binary streams)
+         with the NextSH brand mark. Replaces the old `brandWindowsMsi`
+         Gradle task, which patched the already-compiled MSI's Binary table
+         via the WindowsInstaller COM API after the fact: this is the
+         native WiX mechanism for the same result, applied at compile time.
+
+         `banner.bmp` (493x58) and `dialog.bmp` (493x312) live next to this
+         file. They are referenced via an absolute path built from the
+         NEXTSH_WIX_BRANDING_DIR environment variable rather than a bare
+         relative filename: jpackage stages a (possibly resource-dir
+         overridden) copy of this main.wxs into its OWN internal working
+         directory before invoking candle.exe, confirmed by decompiling
+         `jdk.jpackage.internal.OverridableResource`, which resolves each
+         named resource (main.wxs, overrides.wxi, icon, ...) independently
+         and has no "copy every other file in resource-dir alongside it"
+         step. A bare relative path would silently break depending on
+         where jpackage happens to stage the compile. `$(env.X)` is a
+         standard WiX 3 preprocessor feature (no extension required) and
+         is set on the `packageMsiWithResources` / `packageExeWithResources`
+         Gradle tasks' `exec{}` block, see desktop/build.gradle.kts.
+    -->
+    <WixVariable Id="WixUIBannerBmp" Value="$(env.NEXTSH_WIX_BRANDING_DIR)\banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="$(env.NEXTSH_WIX_BRANDING_DIR)\dialog.bmp" />
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+    <InstallExecuteSequence>
+      <Custom Action="JpSetARPINSTALLLOCATION" After="CostFinalize">Not Installed</Custom>
+      <Custom Action="JpSetARPCOMMENTS" After="CostFinalize">Not Installed</Custom>
+      <Custom Action="JpSetARPCONTACT" After="CostFinalize">Not Installed</Custom>
+      <Custom Action="JpSetARPSIZE" After="CostFinalize">Not Installed</Custom>
+      <?ifdef JpHelpURL ?>
+        <Custom Action="JpSetARPHELPLINK" After="CostFinalize">Not Installed</Custom>
+      <?endif?>
+      <?ifdef JpAboutURL ?>
+        <Custom Action="JpSetARPURLINFOABOUT" After="CostFinalize">Not Installed</Custom>
+      <?endif?>
+      <?ifdef JpUpdateURL ?>
+        <Custom Action="JpSetARPURLUPDATEINFO" After="CostFinalize">Not Installed</Custom>
+      <?endif?>
+
+      <?ifndef JpAllowUpgrades ?>
+      <Custom Action="JpDisallowUpgrade" After="JpFindRelatedProducts">JP_UPGRADABLE_FOUND</Custom>
+      <?endif?>
+      <?ifndef JpAllowDowngrades ?>
+      <Custom Action="JpDisallowDowngrade" After="JpFindRelatedProducts">JP_DOWNGRADABLE_FOUND</Custom>
+      <?endif?>
+
+      <!-- ═══ NextSH: upgrade-with-app-open ordering (2/4) ═════════════════
+           Two independent constraints pin these two rows, and they cannot
+           both be satisfied by chaining one onto the other.
+
+           CONSTRAINT A: WixCloseApplications must run AFTER
+           InstallInitialize. It is only the IMMEDIATE half of the pair (the
+           CA behind the four util:CloseApplication rows above, itself
+           `Overridable="yes"` in WixUtilExtension's own wixlib). It does no
+           closing: it writes the CustomActionData and calls MsiDoAction to
+           INJECT the deferred half (WixCloseApplicationsDeferred, which
+           posts the messages and, if requested, terminates the process)
+           into the running execute script. The binder does NOT sequence
+           that deferred action anywhere in the sequence tables. Before
+           InstallInitialize there is no execute script to append it to, so
+           the close silently never happens and MSI raises 2762 (deferred
+           action outside a transaction).
+
+           CONSTRAINT B: RemoveExistingProducts may sit in only four
+           places (MSI docs, "RemoveExistingProducts action" and ICE63):
+             1. between InstallValidate and InstallInitialize
+             2. immediately after InstallInitialize, provided NOTHING
+                between the two generates script actions
+             3. between InstallExecute/InstallExecuteAgain and InstallFinalize
+             4. after InstallFinalize
+           The RUNTIME re-checks this on every execution, not just the
+           build: a violation aborts the install with error 2613,
+           "RemoveExistingProducts action sequenced incorrectly".
+
+           WHAT WENT WRONG IN 0.7.0
+           REP was chained `After="WixCloseApplications"`, landing at 1502
+           with the custom action at 1501, window 2, but WITH a
+           script-generating action in between. light.exe said so (ICE63,
+           "Some action falls between InstallInitialize and
+           RemoveExistingProducts") and the warning was wrongly filed as
+           expected-and-accepted. The MSI docs are explicit: "Failure to fix
+           a warning or error reported by ICE63 leads to failure of the
+           upgrade." Every 0.7.0 install, upgrade or not, died on 2613.
+
+           WHY POSITION 1 AND NOT THE LATE WINDOW (3)
+           Window 3 also clears ICE63, but it is UNSAFE for this package.
+           jpackage emits a `util:RemoveFolderEx` component targeting
+           INSTALLDIR with On="uninstall" and no UPGRADINGPRODUCTCODE guard.
+           With REP late, the concurrent uninstall of the OLD product runs
+           the OLD package's own WixRemoveFoldersEx (sequence 799 there),
+           which enumerates INSTALLDIR as it stands AT THAT MOMENT, i.e.
+           already full of the NEW files, and injects a RemoveFile row for
+           each one. RemoveFile is purely path-based: it does no component
+           reference counting and no cross-product check (MSI docs,
+           "RemoveFile table"). The old product's uninstall would therefore
+           delete the files the new one just installed. Component GUID
+           stability does not help: it protects components, and
+           RemoveFolderEx bypasses components entirely. The already-shipped
+           0.6.0 and 0.7.0 packages carry that unguarded row, so nothing
+           changed here can neutralise it for the existing installed base.
+
+           Position 1 is the only window that satisfies both constraints and
+           stays clear of that hazard: REP runs before InstallInitialize and
+           therefore before InstallFiles, so the old product is gone before
+           any new file is written: the same ordering every release up to
+           0.6.0 shipped with.
+
+           RESULTING ORDER, read back from the InstallExecuteSequence table
+           of a relinked build of this very package:
+             1200  MigrateFeatureStates   (before REP, MigrateFeatures="yes")
+             1400  InstallValidate
+             1401  RemoveExistingProducts
+             1500  InstallInitialize
+             1501  WixCloseApplications
+             4000  InstallFiles
+
+           WHAT THE CLOSE STILL BUYS US
+           NextSH is now closed after the old product is removed but still
+           before InstallFiles, which is the copy that actually fails on a
+           locked file. The first line of defence against an instance still
+           running at REP time is Windows Installer's own Restart Manager at
+           InstallValidate: it sends the same WM_QUERYENDSESSION pair that
+           Main.kt's InstallerCloseWatch hook answers, and MSIRMSHUTDOWN=1
+           makes it act without prompting (see docs/RELEASE_PROCESS.md).
+           WixCloseApplications stays as the belt-and-braces net for the
+           case where the user dismissed MsiRMFilesInUse without closing.
+
+           ⚠️ light.exe must now report NO ICE63 on this package. If it ever
+           comes back, the sequencing has regressed and the MSI will fail at
+           runtime with 2613: it is never a warning to accept.
+      -->
+      <Custom Action="WixCloseApplications" After="InstallInitialize">VersionNT &gt; 400</Custom>
+      <RemoveExistingProducts After="InstallValidate"/>
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <Custom Action="JpFindRelatedProducts" After="FindRelatedProducts"/>
+    </InstallExecuteSequence>
+
+    <InstallUISequence>
+      <Custom Action="JpFindRelatedProducts" After="FindRelatedProducts"/>
+    </InstallUISequence>
+
+  </Product>
+</Wix>

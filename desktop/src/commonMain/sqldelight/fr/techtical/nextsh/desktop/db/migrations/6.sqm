@@ -1,0 +1,6 @@
+CREATE TABLE known_hosts (
+    hostPort TEXT NOT NULL PRIMARY KEY,
+    algorithm TEXT NOT NULL,
+    publicKeyEncoded BLOB NOT NULL,
+    addedAt INTEGER NOT NULL
+);
