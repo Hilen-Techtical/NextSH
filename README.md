@@ -27,6 +27,8 @@ Built by [Techtical](https://www.techtical.fr).
 
 ---
 
+https://github.com/user-attachments/assets/fd71ba77-e841-4817-b552-afb88129bfc1
+
 ## Features
 
 ### SSH Sessions
