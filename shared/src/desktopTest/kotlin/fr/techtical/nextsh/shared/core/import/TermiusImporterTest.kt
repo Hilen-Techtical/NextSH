@@ -128,6 +128,79 @@ class TermiusImporterTest {
     }
 
     @Test
+    fun `hosts referencing the same ssh key carry the same key identity and the key label`() {
+        val json = """
+            {
+              "ssh_keys": [
+                { "id": "k1", "label": "deploy-key", "private_key": "PEM-1" },
+                { "id": "k2", "label": "other-key", "private_key": "PEM-2" }
+              ],
+              "identities": [ { "id": "i1", "username": "deploy", "ssh_key": "k1" } ],
+              "hosts": [
+                { "id": "h1", "address": "a.example", "identity": "i1" },
+                { "id": "h2", "address": "b.example", "username": "ops", "ssh_key": "k1" },
+                { "id": "h3", "address": "c.example", "username": "ops", "ssh_key": "deploy-key" },
+                { "id": "h4", "address": "d.example", "username": "ops", "ssh_key": "k2" }
+              ]
+            }
+        """.trimIndent()
+
+        val hosts = TermiusImporter.parse(json).associateBy { it.hostname }
+
+        // By identity, by id and by label: all reach the same key object, hence the same identity.
+        assertEquals("k1", hosts.getValue("a.example").keySourceId)
+        assertEquals("k1", hosts.getValue("b.example").keySourceId)
+        assertEquals("k1", hosts.getValue("c.example").keySourceId)
+        assertEquals("deploy-key", hosts.getValue("a.example").keyLabel)
+        assertEquals("k2", hosts.getValue("d.example").keySourceId)
+        assertEquals("other-key", hosts.getValue("d.example").keyLabel)
+    }
+
+    @Test
+    fun `inline key without an id has no identity, a password host has no key at all`() {
+        val json = """
+            {
+              "hosts": [
+                { "address": "inline.example", "username": "me", "ssh_key": { "label": "inline-key", "private_key": "PEM-INLINE" } },
+                { "address": "pw.example", "username": "me", "password": "s3cr3t" }
+              ]
+            }
+        """.trimIndent()
+
+        val hosts = TermiusImporter.parse(json).associateBy { it.hostname }
+
+        assertNull(hosts.getValue("inline.example").keySourceId, "an inline key cannot be matched with another host")
+        assertEquals("inline-key", hosts.getValue("inline.example").keyLabel)
+        assertNull(hosts.getValue("pw.example").keySourceId)
+        assertNull(hosts.getValue("pw.example").keyLabel)
+    }
+
+    @Test
+    fun `key object without an id referenced by label is identified by that label`() {
+        val json = """
+            {
+              "ssh_keys": [
+                { "label": "no-id-key", "private_key": "PEM-NO-ID" },
+                { "label": "other-no-id-key", "private_key": "PEM-OTHER" }
+              ],
+              "hosts": [
+                { "address": "a.example", "username": "me", "ssh_key": "no-id-key" },
+                { "address": "b.example", "username": "me", "key": "no-id-key" },
+                { "address": "c.example", "username": "me", "ssh_key": "other-no-id-key" }
+              ]
+            }
+        """.trimIndent()
+
+        val hosts = TermiusImporter.parse(json).associateBy { it.hostname }
+
+        assertEquals("no-id-key", hosts.getValue("a.example").keySourceId)
+        assertEquals("no-id-key", hosts.getValue("b.example").keySourceId, "same key, same identity")
+        assertEquals("no-id-key", hosts.getValue("a.example").keyLabel)
+        assertEquals("other-no-id-key", hosts.getValue("c.example").keySourceId, "another key, another identity")
+        assertEquals("PEM-NO-ID", hosts.getValue("a.example").privateKeyPem)
+    }
+
+    @Test
     fun `returns empty list for non-json content`() {
         assertTrue(TermiusImporter.parse("this is not json").isEmpty())
         assertTrue(TermiusImporter.parse("").isEmpty())

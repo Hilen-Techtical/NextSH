@@ -11,9 +11,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
@@ -44,8 +47,15 @@ import fr.techtical.nextsh.desktop.navigation.Screen
 import fr.techtical.nextsh.desktop.sessions.HostPickerDialog
 import fr.techtical.nextsh.desktop.sessions.SnippetPickerDialog
 import fr.techtical.nextsh.desktop.window.WindowsDarkTitleBar
+import fr.techtical.nextsh.desktop.window.WindowsFirstFrameReveal
+import fr.techtical.nextsh.desktop.window.WindowsRestoreBounds
+import fr.techtical.nextsh.desktop.window.paintBackdrop
+import fr.techtical.nextsh.desktop.window.screenFor
+import fr.techtical.nextsh.desktop.window.usableScreenBounds
 import fr.techtical.nextsh.shared.domain.model.TunnelStatus
 import fr.techtical.nextsh.shared.util.Logger
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import net.i2p.crypto.eddsa.EdDSASecurityProvider
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.jetbrains.compose.resources.stringResource
@@ -53,10 +63,12 @@ import java.awt.Dimension
 import java.awt.GraphicsEnvironment
 import java.awt.KeyEventDispatcher
 import java.awt.KeyboardFocusManager
+import java.awt.Rectangle
 import java.awt.event.KeyEvent
 import java.security.Security
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 fun main() {
     // **Force Skiko OpenGL renderer on Windows.** Must be set BEFORE any
@@ -108,9 +120,14 @@ fun main() {
     // disk). The JVM splash sidesteps that entirely because the native
     // launcher decodes the PNG before the JVM proper starts up.
     //
-    // The splash is closed from the post-show `LaunchedEffect` of the
-    // main `Window {}` block (see below), exactly when the real Compose
-    // window is themed and visible.
+    // The splash is closed by [closeJvmSplash], from the main `Window {}`
+    // block (see below): once the window is revealed after its first frame
+    // when it is hidden until then (Windows, [WindowsFirstFrameReveal]),
+    // otherwise at the end of its setup effect. Note that AWT closes the
+    // splash by itself when the first window is shown (`Window.show()`, just
+    // before the native show), which no code of ours can defer: when the
+    // window is hidden until its first frame, that comes BEFORE the reveal,
+    // so the explicit close there is then a traced no-op.
     // Touching `java.awt.SplashScreen` is the first reference to the
     // `java.desktop` module from our code, and that triggers the
     // transitive class load of the whole AWT/Swing/ImageIO graph
@@ -173,13 +190,34 @@ fun main() {
     // the user opens the first LOCAL_FORWARD tunnel; subsequent opens are
     // instant thanks to the on-disk cache.
 
-    // Compute initial window geometry from persisted prefs (fallback: default
-    // floating size 1280×800 centered on the primary display, starting
-    // maximized). The user's last floating position + size + maximized
-    // flag survive restart. See [DesktopSettingsStore.WindowGeometry].
+    // Compute initial window geometry from persisted prefs. The app always
+    // starts maximized; the floating geometry matters as the size the OS
+    // restores to AND as the screen it maximizes onto (Windows maximizes a
+    // window on the screen that holds its initial bounds). It is the user's
+    // last floating position + size, or, when nothing usable was saved (first
+    // launch, corrupt prefs, or an old maximized-sized value written by
+    // earlier builds), a default size capped at 80 % of the usable area and
+    // centered. Both the 80 % cap and the centering refer to the LAUNCH
+    // screen: the one the saved geometry sits on, so the app reopens where it
+    // was left, or the primary screen when the prefs are unset or that screen
+    // is gone. See [chooseLaunchScreen], [resolveInitialWindowState] and
+    // [DesktopSettingsStore.WindowGeometry].
     val settingsStore = DesktopContainer.settingsStore
-    val usableBounds = GraphicsEnvironment.getLocalGraphicsEnvironment().maximumWindowBounds
-    val initial = resolveInitialWindowState(settingsStore.settings.value.windowGeometry, usableBounds)
+    val savedGeometry = settingsStore.settings.value.windowGeometry
+    val primaryBounds = GraphicsEnvironment.getLocalGraphicsEnvironment().maximumWindowBounds
+    val launchScreen = chooseLaunchScreen(savedGeometry, usableScreenBounds(), primaryBounds)
+    val initial = resolveInitialWindowState(savedGeometry, launchScreen)
+
+    // Bounds the window is CREATED with (see [openingGeometry]). On Windows
+    // that is the whole usable area of the launch screen, not the floating
+    // geometry: the window is maximized right away, and opening it at a
+    // smaller size makes Windows show it small and enlarge it a few dozen
+    // milliseconds later, before Compose has drawn a frame (a blank flash).
+    // The floating geometry is then installed as the restore rectangle once
+    // the window is maximized: see [WindowsRestoreBounds] and the effect in
+    // the `Window` block. Other platforms get the floating geometry as is.
+    val fixRestoreBounds = initial.maximized && WindowsRestoreBounds.isPlatformSupported
+    val opening = openingGeometry(initial, launchScreen, openAtUsableArea = fixRestoreBounds)
     StartupTrace.mark("geometry resolved → entering application{}")
 
     application {
@@ -219,27 +257,78 @@ fun main() {
         // NearBlack Compose brand strip rendered immediately below it.
         val windowState: WindowState = rememberWindowState(
             placement = if (initial.maximized) WindowPlacement.Maximized else WindowPlacement.Floating,
-            position = initial.floatingPosition,
-            size = initial.floatingSize,
+            position = opening.position,
+            size = opening.size,
         )
 
         // ── Geometry persistence ──────────────────────────────────────────
         // With OS-decorated window the system itself drives the move /
         // resize / placement transitions, and Compose updates
         // `windowState` in response (one-way AWT → Compose). There is no
-        // feedback loop, no tremor, no need for event-driven persistence
-        // hooks. We persist once on close: that's enough because no
-        // intermediate write can ever be wrong; the last value in
-        // `windowState` always reflects the final geometry. A crash
-        // between drag-end and close would lose the most recent
+        // feedback loop and no tremor.
+        //
+        // BUT `windowState.position` / `.size` are NOT a floating-geometry
+        // memory: Compose rewrites them on every AWT componentMoved /
+        // componentResized, so while the window is maximized they hold the
+        // maximized bounds (usable area + the invisible 7 px frame on each
+        // side, e.g. -7,-7 1550×830). Persisting them as-is made the next
+        // launch hand that huge size to the OS as its "restore" rectangle.
+        // We therefore remember the last FLOATING geometry ourselves, only
+        // updated while `placement == Floating` (see [nextFloatingGeometry]),
+        // and persist that instead.
+        var lastFloating by remember {
+            mutableStateOf(FloatingGeometry(initial.floatingPosition, initial.floatingSize))
+        }
+        LaunchedEffect(windowState) {
+            // The AWT events of one native transition (move, resize,
+            // maximize) reach Compose as separate state writes, so a sample
+            // taken between them can pair `Floating` with half-updated
+            // values (e.g. the maximized position while the placement has not
+            // flipped yet). `collectLatest` + `delay` is a debounce: only a
+            // state that stays unchanged for [FLOATING_SETTLE_MS] is trusted.
+            // A minimized window is skipped (Windows parks it at -32000,
+            // -32000 while `placement` stays Floating).
+            snapshotFlow {
+                if (windowState.isMinimized) {
+                    null
+                } else {
+                    Triple(windowState.placement, windowState.position, windowState.size)
+                }
+            }.collectLatest { sample ->
+                if (sample == null) return@collectLatest
+                delay(FLOATING_SETTLE_MS)
+                val (placement, position, size) = sample
+                lastFloating = nextFloatingGeometry(lastFloating, placement, position, size)
+            }
+        }
+
+        // Persisted on every placement transition and once on close. The
+        // maximized flag is read live; the geometry is [lastFloating], so a
+        // write can never replace the floating size with the maximized one.
+        // A crash between a drag-end and the next write loses that last
         // adjustment, an accepted trade-off given how narrow that interval is.
+        //
+        // One live value is still consulted: the screen the window is on NOW.
+        // [lastFloating] only follows moves made while floating, so a
+        // maximized window sent to another screen (Win+Shift+Arrow) would
+        // leave it on the old one and the app would reopen at the wrong
+        // place. [relocateFloatingToScreen] moves the geometry that gets
+        // WRITTEN onto the window's screen. [lastFloating] itself is left
+        // alone on purpose: the relocation is a projection recomputed at every
+        // write from the live window, and Windows carries the restore
+        // rectangle along with a maximized window, so un-maximizing makes the
+        // tracker above observe the real floating bounds anyway.
         val persistFromWindow: () -> Unit = {
+            val floating = relocateFloatingToScreen(
+                floating = lastFloating.toRectangle(),
+                windowRect = liveWindowRect(windowState.isMinimized, windowState.position, windowState.size),
+                screens = usableScreenBounds(),
+            )
             persistGeometry(
                 settingsStore,
                 WindowSnapshot(
-                    position = windowState.position,
-                    size = windowState.size,
-                    placement = windowState.placement,
+                    floating = floating.toFloatingGeometry(),
+                    maximized = windowState.placement == WindowPlacement.Maximized,
                 ),
             )
         }
@@ -426,17 +515,19 @@ fun main() {
         // [requestQuitWithConfirmation] first, which only reaches this lambda
         // when there is nothing active, or once the user confirmed via the
         // "Quitter quand même" button of the quit-confirm dialog below.
+        //
+        // The window is hidden right after the geometry is saved and BEFORE
+        // the teardown, so the user never sees it (see [runExitSequence]).
+        // `closeApp` is defined outside the `Window {}` block, hence the
+        // reference kept in [mainWindowRef].
+        val mainWindowRef = remember { AtomicReference<java.awt.Window?>(null) }
         val closeApp = {
-            persistGeometry(
-                settingsStore,
-                WindowSnapshot(
-                    position = windowState.position,
-                    size = windowState.size,
-                    placement = windowState.placement,
-                ),
+            persistFromWindow()
+            runExitSequence(
+                hide = { mainWindowRef.get()?.let(::hideForExit) },
+                shutdown = { DesktopContainer.shutdown() },
+                exit = { exitApplication() },
             )
-            DesktopContainer.shutdown()
-            exitApplication()
         }
 
         // ── Installer-driven shutdown (MSI upgrade / uninstall) ──────────────
@@ -541,117 +632,193 @@ fun main() {
         Window(
             onCloseRequest = requestClose,
             title = "NextSH",
+            // The icon feeds the taskbar button and Alt+Tab. It must stay
+            // (without it Java shows its coffee cup there), but
+            // [WindowsDarkTitleBar] hides it in the title bar itself.
             icon = painterResource("images/nextsh_logo.png"),
             state = windowState,
             undecorated = false,
             visible = windowVisible,
         ) {
-            remember {
-                StartupTrace.mark("Window{} content composing")
+            // Lets `closeApp`, defined outside this block, hide the window
+            // before the teardown (see [runExitSequence]).
+            DisposableEffect(window) {
+                mainWindowRef.set(window)
+                onDispose { mainWindowRef.compareAndSet(window, null) }
             }
+
+            // `true` when the window is now hidden from DWM until its first
+            // frame (Windows only, see [WindowsFirstFrameReveal]): then the
+            // reveal effect below MUST run, and it owns closing the splash.
+            val windowCloaked = remember {
+                StartupTrace.mark("Window{} content composing")
+
+                // **AWT backdrop = NearBlack, set BEFORE the first show.**
+                // This composition runs while the window is displayable but
+                // still hidden (its background is still the default light
+                // grey, 240/240/240), so the backdrop is in place for the
+                // very first paint. Whenever
+                // the OS resizes the window (the maximize right after the
+                // first show, an edge drag later), the newly exposed pixels
+                // show the AWT/Swing default light grey (seen as white)
+                // until Compose's Skia canvas repaints. With NearBlack as
+                // backdrop there is no visible flash even if Compose lags.
+                // Native Win32 apps draw synchronously (Direct2D/GDI) and
+                // have no such gap; Compose goes Skia -> OpenGL/DirectX. The
+                // frame and every component below it (the panes Swing paints
+                // under the canvas, and the Skia canvas itself if it already
+                // exists) are all set, since any of them can show through.
+                paintBackdrop(window)
+
+                // Windows only: hide the window from DWM until Compose has
+                // presented its first frame. The backdrop above only covers
+                // what Swing paints; the first show still flashed a blank
+                // surface before the first Skia/OpenGL frame. Kept LAST in
+                // this block so nothing can throw between the cloak and the
+                // effect that lifts it (see the reveal effect below, which
+                // lifts it on every path).
+                WindowsFirstFrameReveal.cloak(window).also { cloaked ->
+                    StartupTrace.mark("window cloaked until first frame = $cloaked")
+                }
+            }
+
+            // Windows only: once the window is showing and maximized, install
+            // the floating geometry as the rectangle it restores to. The window
+            // was created at the usable area of its screen so that it opens
+            // without a visible resize (see `opening` in `main`), which left
+            // the OS with the wrong restore rectangle. Polls until the window
+            // is on screen (this effect starts BEFORE the first show) and
+            // applies once; the target is read at that moment. See
+            // [WindowsRestoreBounds.applyWhenMaximized].
+            if (fixRestoreBounds) {
+                LaunchedEffect(Unit) {
+                    WindowsRestoreBounds.applyWhenMaximized(
+                        window = window,
+                        refLogical = launchScreen,
+                        target = { lastFloating.toRectangle() },
+                    )
+                }
+            }
+
+            // Lifts the DWM cloak set in the `remember` above, once the window
+            // is showing AND Compose has rendered its first frame (or after
+            // the safety delay, whichever comes first), then closes the JVM
+            // splash if AWT has not already (see [closeJvmSplash]). The cloak
+            // is lifted on every path, including failure and cancellation, so
+            // the window can never stay invisible; it is set once at startup
+            // and never again, so the tray re-show (`window.isVisible = true`)
+            // is unaffected. `withFrameNanos` is the frame clock of this
+            // window: it resumes when Compose starts a frame, hence the short
+            // settle delay inside the helper. When the window was not cloaked,
+            // nothing happens here and the setup effect below closes the
+            // splash as before.
+            LaunchedEffect(Unit) {
+                WindowsFirstFrameReveal.revealAfterFirstFrame(
+                    window = window,
+                    cloaked = windowCloaked,
+                    awaitFrame = { withFrameNanos { } },
+                    onRevealed = {
+                        if (windowCloaked) {
+                            StartupTrace.mark("window revealed (cloak lifted)")
+                            closeJvmSplash()
+                        }
+                    },
+                    trace = StartupTrace::mark,
+                )
+            }
+
             // Theme the OS title bar to NextSH dark + NearBlack (Win 11
             // 22H2+ for caption color; Win 10 18985+ for dark mode only:
-            // see [WindowsDarkTitleBar]). Must run AFTER the window is
-            // shown so the AWT peer / HWND exists; LaunchedEffect runs
-            // post-first-composition which is post-show.
+            // see [WindowsDarkTitleBar]). The HWND already exists here
+            // because the window is displayable; this effect runs BEFORE the
+            // first show, not after it.
             LaunchedEffect(Unit) {
                 StartupTrace.mark("Window post-show LaunchedEffect entered")
-                WindowsDarkTitleBar.apply(window)
+                try {
+                    WindowsDarkTitleBar.apply(window)
 
-                // Arms the WM_QUERYENDSESSION watcher so an MSI upgrade /
-                // uninstall (Restart Manager) can close us cleanly instead
-                // of hitting minimize-to-tray or a confirmation dialog it
-                // cannot answer. The callback is posted on the EDT by the
-                // hook itself and wins the race against the WM_CLOSE that
-                // arrives first: see [InstallerCloseWatch] and
-                // `closeForInstaller` above.
-                InstallerCloseWatch.install(window, onInstallerClose = closeForInstaller)
+                    // Arms the WM_QUERYENDSESSION watcher so an MSI upgrade /
+                    // uninstall (Restart Manager) can close us cleanly instead
+                    // of hitting minimize-to-tray or a confirmation dialog it
+                    // cannot answer. The callback is posted on the EDT by the
+                    // hook itself and wins the race against the WM_CLOSE that
+                    // arrives first: see [InstallerCloseWatch] and
+                    // `closeForInstaller` above.
+                    InstallerCloseWatch.install(window, onInstallerClose = closeForInstaller)
 
-                // **AWT window background = NearBlack.** During an OS-
-                // driven resize, the new pixels added at the edge are
-                // briefly painted with the JFrame default background
-                // (white) before Compose's Skia canvas repaints to fill
-                // them: the user sees a ~16 ms white flash on the edge
-                // being resized. Setting `window.background` to NearBlack
-                // means those new pixels start out the right color, so
-                // even if Compose's repaint lags, there is no visible
-                // flash. Native Win32 apps don't have this issue because
-                // their content is drawn synchronously via Direct2D/GDI;
-                // a Compose Desktop window goes Skia → DirectX which
-                // adds the repaint gap.
-                window.background = java.awt.Color(0x0F, 0x0F, 0x0F)
+                    // Minimum window size: guarantees grid-of-cards screens
+                    // (Tunnels, Vault, Hosts...) stay legible. 1024 × 600 is the
+                    // tablet/laptop floor we document in the README.
+                    window.minimumSize = Dimension(1024, 600)
 
-                // Minimum window size: guarantees grid-of-cards screens
-                // (Tunnels, Vault, Hosts...) stay legible. 1024 × 600 is the
-                // tablet/laptop floor we document in the README.
-                window.minimumSize = Dimension(1024, 600)
+                    // Register the main AWT window for the hide-from-screen-capture
+                    // feature; on Windows toggles SetWindowDisplayAffinity.
+                    //
+                    // Applied unconditionally (not only when the setting is ON) so
+                    // WindowSecurityState.hideFromCapture is seeded from the
+                    // persisted setting rather than left on its default: every
+                    // secondary window reads that flow to protect its own HWND
+                    // (see window/WindowCaptureProtection.kt), so a stale `false`
+                    // there would silently leak dialog content into captures.
+                    // WDA_NONE is the OS default, so the ON→OFF call is a no-op.
+                    WindowSecurityState.registerMainWindow(window)
+                    WindowSecurityState.apply(
+                        DesktopContainer.settingsStore.settings.value.hideFromScreenCapture
+                    )
 
-                // Register the main AWT window for the hide-from-screen-capture
-                // feature; on Windows toggles SetWindowDisplayAffinity.
-                //
-                // Applied unconditionally (not only when the setting is ON) so
-                // WindowSecurityState.hideFromCapture is seeded from the
-                // persisted setting rather than left on its default: every
-                // secondary window reads that flow to protect its own HWND
-                // (see window/WindowCaptureProtection.kt), so a stale `false`
-                // there would silently leak dialog content into captures.
-                // WDA_NONE is the OS default, so the ON→OFF call is a no-op.
-                WindowSecurityState.registerMainWindow(window)
-                WindowSecurityState.apply(
-                    DesktopContainer.settingsStore.settings.value.hideFromScreenCapture
-                )
-
-                // System clipboard FlavorListener + tray icon: both AWT-
-                // hosted, must wait until the window peer is live.
-                DesktopContainer.clipboardManager.start()
-                DesktopContainer.tunnelTray.start(
-                    onOpen = {
-                        // Handles BOTH cases the tray icon click can recover
-                        // from: the window merely minimized (isMinimized),
-                        // and the window hidden entirely via
-                        // "minimize to tray on close" (windowVisible = false).
-                        // `window.isVisible` is set directly (not just via
-                        // the `windowVisible` state) so the window reappears
-                        // immediately rather than waiting on the next
-                        // recomposition to apply `visible = windowVisible`.
-                        windowVisible = true
-                        windowState.isMinimized = false
-                        window.isVisible = true
-                        window.toFront()
-                        window.requestFocus()
-                    },
-                    onQuit = {
-                        // The tray "Quit" is most often clicked precisely when
-                        // the window is hidden in the tray: the one moment the
-                        // user cannot see what they are about to destroy. So we
-                        // bring the window back FIRST (the confirm dialog is
-                        // rendered inside it and would otherwise be invisible),
-                        // then run the exact same confirmation flow as the
-                        // window's close button. Nothing active → exits
-                        // immediately, no flash of a pointless dialog.
-                        windowVisible = true
-                        windowState.isMinimized = false
-                        window.isVisible = true
-                        window.toFront()
-                        window.requestFocus()
-                        requestQuitWithConfirmation()
-                    },
-                )
-                StartupTrace.mark("post-show LaunchedEffect done (titlebar/tray/clipboard)")
-
-                // Close the JVM-rendered splash now that the real Compose
-                // window is themed, sized and visible. `getSplashScreen()`
-                // returns null if no `-splash:` flag was active (e.g. dev
-                // run without the build.gradle.kts jvmArgs); in that case
-                // the call is a no-op.
-                java.awt.SplashScreen.getSplashScreen()?.close()
-                StartupTrace.mark("splash closed")
+                    // System clipboard FlavorListener + tray icon: both AWT-
+                    // hosted, must wait until the window peer is live.
+                    DesktopContainer.clipboardManager.start()
+                    DesktopContainer.tunnelTray.start(
+                        onOpen = {
+                            // Handles BOTH cases the tray icon click can recover
+                            // from: the window merely minimized (isMinimized),
+                            // and the window hidden entirely via
+                            // "minimize to tray on close" (windowVisible = false).
+                            // `window.isVisible` is set directly (not just via
+                            // the `windowVisible` state) so the window reappears
+                            // immediately rather than waiting on the next
+                            // recomposition to apply `visible = windowVisible`.
+                            windowVisible = true
+                            windowState.isMinimized = false
+                            window.isVisible = true
+                            window.toFront()
+                            window.requestFocus()
+                        },
+                        onQuit = {
+                            // The tray "Quit" is most often clicked precisely when
+                            // the window is hidden in the tray: the one moment the
+                            // user cannot see what they are about to destroy. So we
+                            // bring the window back FIRST (the confirm dialog is
+                            // rendered inside it and would otherwise be invisible),
+                            // then run the exact same confirmation flow as the
+                            // window's close button. Nothing active → exits
+                            // immediately, no flash of a pointless dialog.
+                            windowVisible = true
+                            windowState.isMinimized = false
+                            window.isVisible = true
+                            window.toFront()
+                            window.requestFocus()
+                            requestQuitWithConfirmation()
+                        },
+                    )
+                    StartupTrace.mark("post-show LaunchedEffect done (titlebar/tray/clipboard)")
+                } finally {
+                    // Window NOT cloaked (not Windows, or the cloak was
+                    // refused): there is no reveal to wait for, so the JVM
+                    // splash closes here, once the window is themed and set
+                    // up, as before. Never skipped, even if the setup above
+                    // throws. A cloaked window leaves it to the reveal effect
+                    // above, which closes it once the first frame is out.
+                    if (!windowCloaked) closeJvmSplash()
+                }
             }
 
-            // Persist geometry on every placement transition (floating ↔
-            // maximized ↔ fullscreen). Compose updates `windowState`
-            // synchronously when the OS button is clicked; observing
-            // `placement` directly avoids polling.
+            // Persist on every placement transition (floating ↔ maximized ↔
+            // fullscreen) so the maximized flag is up to date; the geometry
+            // written is [lastFloating], not the (possibly maximized) live
+            // `windowState` bounds. Observing `placement` directly avoids
+            // polling.
             LaunchedEffect(windowState.placement) {
                 persistFromWindow()
             }
@@ -781,54 +948,295 @@ fun main() {
 // Window geometry persistence helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Minimum window size: also enforced by `window.minimumSize` (1024 × 600)
+// in the LaunchedEffect further up. Validated on load so a corrupted prefs
+// entry (e.g. saved 5×5 from a buggy earlier build) can never resurrect a
+// "window invisible on un-maximize" state, and on live tracking so a
+// transient tiny size (minimize animation) is never remembered.
+internal const val MIN_FLOATING_WIDTH_DP = 1024
+internal const val MIN_FLOATING_HEIGHT_DP = 600
+
+/** Default floating size on a roomy screen, before the 80 % cap below. */
+private const val DEFAULT_FLOATING_WIDTH_DP = 1280
+private const val DEFAULT_FLOATING_HEIGHT_DP = 800
+
+/** The default floating size never exceeds this share of the usable area. */
+private const val DEFAULT_FLOATING_MAX_PERCENT = 80
+
 /**
- * Snapshot of the values we persist between sessions. With the OS-decorated
- * window, [position] / [size] reflect the *floating* geometry whenever the
- * window is not currently maximized; when it IS maximized, Compose stores
- * the floating geometry separately and exposes it via the next un-maximize.
- * We deal with that subtlety in [persistGeometry].
+ * A size covering at least this share of the usable area (width OR height) is
+ * treated as a maximized size, not as a real floating size: see [fillsScreen].
+ */
+private const val SAVED_SIZE_FILLS_SCREEN_PERCENT = 95
+
+/**
+ * How long the window state must stay unchanged before the floating geometry
+ * is remembered: see the tracker in [main].
+ */
+private const val FLOATING_SETTLE_MS = 200L
+
+/**
+ * Last known FLOATING (neither maximized nor fullscreen) window geometry.
+ * [position] is absolute by construction: a platform-default or aligned
+ * position is never remembered.
+ */
+internal data class FloatingGeometry(
+    val position: WindowPosition.Absolute,
+    val size: DpSize,
+)
+
+/**
+ * Pure update rule for the remembered floating geometry: returns the new
+ * [FloatingGeometry] when the observed window state is a trustworthy floating
+ * one, [current] otherwise.
+ *
+ * Compose rewrites `windowState.position` / `.size` from every AWT
+ * componentMoved / componentResized, so they hold the maximized bounds while
+ * the window is maximized. Only a [WindowPlacement.Floating] sample can
+ * therefore carry floating geometry. A sample is also ignored when:
+ *  - [position] is not [WindowPosition.Absolute] (platform default / aligned),
+ *    or has an unspecified coordinate;
+ *  - [size] is unspecified or below the window minimum
+ *    ([MIN_FLOATING_WIDTH_DP] × [MIN_FLOATING_HEIGHT_DP], which is also what
+ *    `window.minimumSize` enforces, so a smaller value is a transient state).
+ */
+internal fun nextFloatingGeometry(
+    current: FloatingGeometry,
+    placement: WindowPlacement,
+    position: WindowPosition,
+    size: DpSize,
+): FloatingGeometry {
+    if (placement != WindowPlacement.Floating) return current
+    val absolute = position as? WindowPosition.Absolute ?: return current
+    if (!absolute.x.isSpecified || !absolute.y.isSpecified) return current
+    if (!size.isSpecified) return current
+    if (size.width.value < MIN_FLOATING_WIDTH_DP || size.height.value < MIN_FLOATING_HEIGHT_DP) return current
+    return FloatingGeometry(absolute, size)
+}
+
+/**
+ * Snapshot of the values we persist between sessions: the remembered
+ * [floating] geometry (see [nextFloatingGeometry]) and whether the window is
+ * currently [maximized]. The live `windowState.position` / `.size` are
+ * deliberately NOT part of it: Compose keeps them in sync with the real AWT
+ * bounds, so while the window is maximized they describe the maximized
+ * bounds, not the geometry to restore to.
  */
 private data class WindowSnapshot(
-    val position: WindowPosition,
-    val size: DpSize,
-    val placement: WindowPlacement,
+    val floating: FloatingGeometry,
+    val maximized: Boolean,
 )
 
 /**
  * Initial window state computed before `application { }` from saved prefs.
- * When the prefs are unset (first launch), produces: maximized=true,
- * floating size 1280×800 centered on the primary display.
+ * The window always starts maximized; [floatingPosition] / [floatingSize] are
+ * the geometry the OS restores to on un-maximize, and the screen they sit on
+ * is the one the window is maximized onto. When nothing usable was saved
+ * (first launch, corrupt prefs, or a size that fills the screen), that is the
+ * default size (see [resolveInitialWindowState]) centered on the launch
+ * screen (see [chooseLaunchScreen]).
  */
-private data class InitialWindowState(
+internal data class InitialWindowState(
     val maximized: Boolean,
-    val floatingPosition: WindowPosition,
+    val floatingPosition: WindowPosition.Absolute,
     val floatingSize: DpSize,
 )
 
 /**
- * Compute the initial window state from saved prefs + the OS's usable
- * bounds (screen minus taskbar). First launch fallback: maximized on usable
- * bounds, floating size 1280×800 centered for later restore.
- *
- * When saved prefs place the window off-screen (display unplugged, etc.),
- * we silently fall back to centered/default, losing a position is OK,
- * not opening the window is not.
+ * Position and size the window is CREATED with (what `rememberWindowState`
+ * receives). The window is maximized at once, and the OS only enlarges it
+ * after showing it, so any creation size smaller than the final one makes a
+ * visible resize on top of a not yet painted window. When
+ * [openAtUsableArea] is true (Windows, where [WindowsRestoreBounds] installs
+ * the real restore rectangle afterwards), the creation bounds are therefore
+ * the whole usable area of [launchScreen], which is nearly the maximized
+ * size. Otherwise they are the floating geometry of [initial], which the OS
+ * uses as the restore rectangle directly.
  */
-// Minimum window size: also enforced by `window.minimumSize` (1024 × 600)
-// in the LaunchedEffect below. Validated here on load so a corrupted prefs
-// entry (e.g. saved 5×5 from a buggy earlier build) can never resurrect a
-// "window invisible on un-maximize" state.
-private const val MIN_FLOATING_WIDTH_DP = 1024
-private const val MIN_FLOATING_HEIGHT_DP = 600
+internal fun openingGeometry(
+    initial: InitialWindowState,
+    launchScreen: Rectangle,
+    openAtUsableArea: Boolean,
+): FloatingGeometry =
+    if (openAtUsableArea) {
+        FloatingGeometry(
+            WindowPosition(launchScreen.x.dp, launchScreen.y.dp),
+            DpSize(launchScreen.width.dp, launchScreen.height.dp),
+        )
+    } else {
+        FloatingGeometry(initial.floatingPosition, initial.floatingSize)
+    }
 
-private fun resolveInitialWindowState(
+/**
+ * Closes the JVM-rendered splash (`-splash:`, see `application.jvmArgs` in
+ * desktop/build.gradle.kts) and traces what actually happened. Never throws,
+ * and safe to call more than once.
+ *
+ * There is nothing to close when no `-splash:` flag was active (dev run),
+ * and also when AWT got there first: `Window.show()` closes the splash on
+ * the first window shown, just before the native show. The trace line says
+ * which of the two it was, so it stays factual.
+ */
+private fun closeJvmSplash() {
+    val closed = runCatching {
+        val splash = java.awt.SplashScreen.getSplashScreen()
+        splash?.close()
+        splash != null
+    }.getOrDefault(false)
+    StartupTrace.mark(
+        if (closed) "splash closed" else "splash already closed (AWT at first show) or absent",
+    )
+}
+
+/**
+ * Default floating size for [usableBounds]: 1280×800, capped at 80 % of the
+ * usable area per dimension (integer division, so the result never exceeds
+ * 80 %), raised to the window minimum, then capped at the usable area so the
+ * window never overflows a screen smaller than the minimum.
+ * E.g. a 1536×816 usable area gives 1228×652.
+ */
+internal fun defaultFloatingSize(usableBounds: Rectangle): DpSize {
+    val width = minOf(DEFAULT_FLOATING_WIDTH_DP, usableBounds.width * DEFAULT_FLOATING_MAX_PERCENT / 100)
+        .coerceAtLeast(MIN_FLOATING_WIDTH_DP)
+        .coerceAtMost(usableBounds.width)
+    val height = minOf(DEFAULT_FLOATING_HEIGHT_DP, usableBounds.height * DEFAULT_FLOATING_MAX_PERCENT / 100)
+        .coerceAtLeast(MIN_FLOATING_HEIGHT_DP)
+        .coerceAtMost(usableBounds.height)
+    return DpSize(width.dp, height.dp)
+}
+
+/** Top-left corner that centers a window of [size] in [usableBounds]. */
+internal fun centeredIn(usableBounds: Rectangle, size: DpSize): WindowPosition.Absolute =
+    WindowPosition(
+        (usableBounds.x + (usableBounds.width - size.width.value.toInt()) / 2).dp,
+        (usableBounds.y + (usableBounds.height - size.height.value.toInt()) / 2).dp,
+    )
+
+/**
+ * True when a [width] × [height] window covers (nearly) the whole of
+ * [usableBounds]: width OR height >= 95 % of it, compared in integer percent.
+ * Such a size is a maximized size, not a real floating one. Shared by the
+ * launch repair ([resolveInitialWindowState]) and the move to another screen
+ * ([relocateFloatingToScreen]), so both agree on what "fills the screen" means.
+ */
+internal fun fillsScreen(width: Int, height: Int, usableBounds: Rectangle): Boolean =
+    width * 100 >= usableBounds.width * SAVED_SIZE_FILLS_SCREEN_PERCENT ||
+        height * 100 >= usableBounds.height * SAVED_SIZE_FILLS_SCREEN_PERCENT
+
+/**
+ * The screen the app should open on: the one of [screens] holding most of the
+ * saved floating rectangle ([screenFor]), so NextSH reopens where the user
+ * left it. Falls back to [primary] (the usable area of the primary screen)
+ * when:
+ *  - no geometry was ever saved ([DesktopSettingsStore.WindowGeometry.isUnset]);
+ *  - the saved rectangle overlaps no connected screen, e.g. the second screen
+ *    was unplugged since: [resolveInitialWindowState] then recenters on
+ *    [primary];
+ *  - [screens] is empty (enumeration failed or headless).
+ *
+ * Pure: [screens] and [primary] come from the caller, no AWT global access.
+ */
+internal fun chooseLaunchScreen(
     saved: DesktopSettingsStore.WindowGeometry,
-    usableBounds: java.awt.Rectangle,
+    screens: List<Rectangle>,
+    primary: Rectangle,
+): Rectangle {
+    if (saved.isUnset) return primary
+    return screenFor(Rectangle(saved.x, saved.y, saved.width, saved.height), screens) ?: primary
+}
+
+/** [FloatingGeometry] as a plain rectangle: 1 dp = 1 AWT unit, like in [persistGeometry]. */
+private fun FloatingGeometry.toRectangle(): Rectangle = Rectangle(
+    position.x.value.toInt(),
+    position.y.value.toInt(),
+    size.width.value.toInt(),
+    size.height.value.toInt(),
+)
+
+private fun Rectangle.toFloatingGeometry(): FloatingGeometry =
+    FloatingGeometry(WindowPosition(x.dp, y.dp), DpSize(width.dp, height.dp))
+
+/**
+ * Live bounds of the window, from the values Compose mirrors from AWT, or
+ * null when they cannot be trusted: the window is [minimized] (Windows parks
+ * it at -32000,-32000), [position] is not [WindowPosition.Absolute] with both
+ * coordinates specified, or [size] is unspecified. While maximized these are
+ * the maximized bounds (usable area + the 7 px invisible frame), which is
+ * exactly what [screenFor] needs to tell which screen the window is on.
+ */
+internal fun liveWindowRect(minimized: Boolean, position: WindowPosition, size: DpSize): Rectangle? {
+    if (minimized) return null
+    val absolute = position as? WindowPosition.Absolute ?: return null
+    if (!absolute.x.isSpecified || !absolute.y.isSpecified) return null
+    if (!size.isSpecified) return null
+    return Rectangle(
+        absolute.x.value.toInt(),
+        absolute.y.value.toInt(),
+        size.width.value.toInt(),
+        size.height.value.toInt(),
+    )
+}
+
+/**
+ * Keeps the geometry that gets persisted on the screen the window really is
+ * on. The floating tracker ([nextFloatingGeometry]) only sees moves made while
+ * floating, so a MAXIMIZED window sent to another screen (Win+Shift+Arrow)
+ * would leave [floating] on the old one and the next launch would reopen
+ * there.
+ *
+ * Returns [floating] unchanged when [windowRect] is null (unknown or
+ * minimized: see [liveWindowRect]), when it overlaps none of [screens], or
+ * when its screen ([screenFor]) is the same as the one of [floating]. Else
+ * [floating] is replaced by a geometry on the window's screen: its size is
+ * kept unless it would fill that screen ([fillsScreen]), in which case the
+ * default size of that screen is used ([defaultFloatingSize]); it is centered
+ * there ([centeredIn]), since an absolute position on one screen means nothing
+ * on another.
+ */
+internal fun relocateFloatingToScreen(
+    floating: Rectangle,
+    windowRect: Rectangle?,
+    screens: List<Rectangle>,
+): Rectangle {
+    if (windowRect == null) return floating
+    val target = screenFor(windowRect, screens) ?: return floating
+    if (target == screenFor(floating, screens)) return floating
+    val size = if (fillsScreen(floating.width, floating.height, target)) {
+        defaultFloatingSize(target)
+    } else {
+        DpSize(floating.width.dp, floating.height.dp)
+    }
+    return FloatingGeometry(centeredIn(target, size), size).toRectangle()
+}
+
+/**
+ * Compute the initial window state from saved prefs + the OS's usable
+ * bounds (screen minus taskbar) of the launch screen, [usableBounds] (see
+ * [chooseLaunchScreen]: the screen the app was left on, else the primary one).
+ *
+ * The window always launches maximized. The floating geometry is what the OS
+ * restores to, and it is chosen as follows:
+ *  - prefs unset, corrupt (below the 1024×600 minimum), or describing a size
+ *    that fills the screen ([fillsScreen]: width OR height >= 95 % of
+ *    [usableBounds]): the default size of [defaultFloatingSize], centered on
+ *    [usableBounds]. The 95 % rule repairs prefs written by earlier builds,
+ *    which persisted the MAXIMIZED bounds (usable area + the invisible 7 px
+ *    frame, e.g. -7,-7 1550×830) as if they were the floating geometry;
+ *    handed back to the OS, that size became the "restore" rectangle and
+ *    un-maximizing changed nothing.
+ *  - otherwise the saved size, kept as is, at the saved position if it still
+ *    intersects the usable area, else centered. A lost position is OK, not
+ *    opening the window is not.
+ */
+internal fun resolveInitialWindowState(
+    saved: DesktopSettingsStore.WindowGeometry,
+    usableBounds: Rectangle,
 ): InitialWindowState {
-    val defaultFloatingSize = DpSize(1280.dp, 800.dp)
-    val centeredFloatingPos = WindowPosition(
-        (usableBounds.x + (usableBounds.width - 1280) / 2).coerceAtLeast(0).dp,
-        (usableBounds.y + (usableBounds.height - 800) / 2).coerceAtLeast(0).dp,
+    val defaultSize = defaultFloatingSize(usableBounds)
+    val defaultState = InitialWindowState(
+        maximized = true,
+        floatingPosition = centeredIn(usableBounds, defaultSize),
+        floatingSize = defaultSize,
     )
 
     // Defense: corrupted-tiny saved geometry (only a buggy earlier
@@ -837,20 +1245,22 @@ private fun resolveInitialWindowState(
     val isCorrupt = (saved.width > 0 && saved.width < MIN_FLOATING_WIDTH_DP) ||
         (saved.height > 0 && saved.height < MIN_FLOATING_HEIGHT_DP)
 
-    if (saved.isUnset || isCorrupt) {
-        return InitialWindowState(
-            maximized = true,
-            floatingPosition = centeredFloatingPos,
-            floatingSize = defaultFloatingSize,
-        )
-    }
+    // A "floating" size covering (nearly) the whole usable area is in fact a
+    // leftover maximized size: see the KDoc. Compared in integer percent.
+    val isMaximizedLeftover = !saved.isUnset && fillsScreen(saved.width, saved.height, usableBounds)
 
-    // Position must place at least part of the window on a connected
-    // display, otherwise re-center.
-    val savedRect = java.awt.Rectangle(saved.x, saved.y, saved.width, saved.height)
-    val onScreen = usableBounds.intersects(savedRect)
-    val floatingPos = if (onScreen) WindowPosition(saved.x.dp, saved.y.dp) else centeredFloatingPos
+    if (saved.isUnset || isCorrupt || isMaximizedLeftover) return defaultState
+
+    // Position must place at least part of the window on the launch screen,
+    // otherwise re-center (for a saved screen that is still connected this
+    // always holds, [chooseLaunchScreen] picked it from the saved rectangle).
+    val savedRect = Rectangle(saved.x, saved.y, saved.width, saved.height)
     val floatingSize = DpSize(saved.width.dp, saved.height.dp)
+    val floatingPos = if (usableBounds.intersects(savedRect)) {
+        WindowPosition(saved.x.dp, saved.y.dp)
+    } else {
+        centeredIn(usableBounds, floatingSize)
+    }
 
     // **Always launch maximized**, regardless of `saved.maximized`. The
     // user spec'd "Ouverture de l'application par défaut en 'agrandi'":
@@ -866,34 +1276,25 @@ private fun resolveInitialWindowState(
 }
 
 /**
- * Persist the current window geometry. Compose's [WindowState] keeps the
- * floating position/size separately from the maximized bounds, so calling
- * `windowState.position` / `.size` while maximized still returns the LAST
- * floating values (not the maximized ones). That is the contract we rely
- * on here: we write `.position` / `.size` directly along with the current
- * `.placement`, and on restart [resolveInitialWindowState] feeds them back
- * as the floating fallback when the user un-maximizes.
+ * Persist the remembered floating geometry plus the current maximized flag.
+ * The geometry comes from [WindowSnapshot.floating] (tracked by
+ * [nextFloatingGeometry]), never from the live `windowState`: Compose keeps
+ * that one in sync with the real window bounds, so reading it while maximized
+ * would overwrite the floating size with the maximized one. On restart
+ * [resolveInitialWindowState] feeds the values back as the geometry the OS
+ * restores to when the user un-maximizes.
  */
 private fun persistGeometry(
     settingsStore: DesktopSettingsStore,
     snap: WindowSnapshot,
 ) {
-    val absPos = snap.position as? WindowPosition.Absolute
-    val (x, y) = if (absPos != null) {
-        absPos.x.value.toInt() to absPos.y.value.toInt()
-    } else {
-        // PlatformDefault: happens only before Compose has resolved a real
-        // coordinate. We write a sentinel that load() interprets as "use
-        // default centered position".
-        -1 to -1
-    }
     settingsStore.updateWindowGeometry(
         DesktopSettingsStore.WindowGeometry(
-            x = x,
-            y = y,
-            width = snap.size.width.value.toInt(),
-            height = snap.size.height.value.toInt(),
-            maximized = snap.placement == WindowPlacement.Maximized,
+            x = snap.floating.position.x.value.toInt(),
+            y = snap.floating.position.y.value.toInt(),
+            width = snap.floating.size.width.value.toInt(),
+            height = snap.floating.size.height.value.toInt(),
+            maximized = snap.maximized,
         ),
     )
 }
@@ -948,6 +1349,38 @@ internal fun resolveCloseAction(
     minimizeToTrayOnClose && trayRegistered -> CloseAction.HIDE_TO_TRAY
     activeSessionCount > 0 || activeTunnelCount > 0 -> CloseAction.CONFIRM_QUIT
     else -> CloseAction.CLOSE_DIRECT
+}
+
+/**
+ * The real exit, in an order the user never sees: [hide] first, so the window
+ * disappears at once instead of showing the teardown (the vault locking back
+ * to its unlock screen, sessions closing, the OpenGL surface destroyed during
+ * the OS close animation), then [shutdown], then [exit].
+ *
+ * [exit] runs even if [shutdown] throws: the window is already hidden by then,
+ * and a failure must not leave an invisible process behind. The exception is
+ * still rethrown after [exit]. A failing [hide] is logged and ignored: the
+ * exit goes on, at worst with the teardown visible as before.
+ */
+internal fun runExitSequence(hide: () -> Unit, shutdown: () -> Unit, exit: () -> Unit) {
+    try {
+        hide()
+    } catch (e: Exception) {
+        Logger.w("ExitSequence", "hiding the window before exit failed: ${e.javaClass.simpleName}")
+    }
+    try {
+        shutdown()
+    } finally {
+        exit()
+    }
+}
+
+/**
+ * Hides [window] for [runExitSequence]: cloaked by DWM on Windows (instant,
+ * no close animation), plain AWT hide elsewhere or if the cloak is refused.
+ */
+private fun hideForExit(window: java.awt.Window) {
+    if (!WindowsFirstFrameReveal.cloakForExit(window)) window.isVisible = false
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

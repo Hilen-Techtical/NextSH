@@ -17,6 +17,7 @@ import fr.techtical.nextsh.shared.core.ssh.fido2.SkKeyType
 import fr.techtical.nextsh.shared.util.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.lang.ref.Reference
 import java.security.SecureRandom
 import java.util.Arrays
 
@@ -331,22 +332,19 @@ class WindowsWebAuthnProvider(
     /**
      * Signe un challenge SSH via Windows WebAuthn GetAssertion.
      *
-     * ## Astuce SSH clientDataHash
-     * WebAuthn API calcule SHA-256 sur `pbClientDataJSON` avec `pwszHashAlgId`.
-     * Pour SSH, on passe directement les bytes du challenge dans `pbClientDataJSON`
-     * avec `pwszHashAlgId = "SHA-256"`. Windows calcule SHA-256(challengeBytes)
-     * et l'utilise comme clientDataHash dans l'assertion : exactement ce que
-     * CTAP2 GetAssertion attend pour SSH.
+     * `webauthn.dll` hache lui-même `pbClientDataJSON` en SHA-256 pour obtenir le
+     * clientDataHash CTAP2 : on lui passe donc le challenge BRUT (comme le backend winhello
+     * de libfido2), jamais son hash. Voir [buildSshClientData] et [Fido2Signer.signChallenge].
      *
      * @param rpId         RP-ID de la clé SK (ex. "ssh:")
-     * @param clientDataHash SHA-256 du challenge SSH (32 bytes)
+     * @param challenge    Données SSH brutes à signer, NON hachées
      * @param credentialId  ID de la credential FIDO2
      * @param requireUv    Ignoré sur Windows : Hello gère l'UV nativement
      * @param timeoutMs    Timeout en ms
      */
     suspend fun signChallenge(
         rpId: String,
-        clientDataHash: ByteArray,
+        challenge: ByteArray,
         credentialId: ByteArray,
         requireUv: Boolean = false,
         timeoutMs: Long = 30_000,
@@ -355,19 +353,12 @@ class WindowsWebAuthnProvider(
         return withContext(Dispatchers.IO) {
             onTouchRequired("Windows WebAuthn")
             var assertionPtr: Pointer? = null
+            var sshClientData: SshClientData? = null
             try {
-                // ── 1. clientData : les bytes du challenge SSH ────────────────
-                // Windows hashera ces bytes en SHA-256 → clientDataHash SSH.
-                val clientDataMem = Memory(clientDataHash.size.toLong())
-                clientDataMem.write(0, clientDataHash, 0, clientDataHash.size)
-
-                val clientData = WinWebAuthnClientData().apply {
-                    dwVersion = 1
-                    cbClientDataJSON = clientDataHash.size
-                    pbClientDataJSON = clientDataMem
-                    pwszHashAlgId = WString("SHA-256")
-                }
-                clientData.write()
+                // ── 1. clientData : le challenge brut (webauthn.dll le hache) ─
+                val builtClientData = buildSshClientData(challenge)
+                sshClientData = builtClientData
+                val clientData = builtClientData.struct
 
                 // ── 2. Allow-list : un seul credential ───────────────────────
                 val credHolder = buildCredentialList(credentialId)
@@ -469,6 +460,8 @@ class WindowsWebAuthnProvider(
                 assertionPtr?.let {
                     runCatching { localLib.WebAuthNFreeAssertion(it) }
                 }
+                // Garde la mémoire native du client data vivante jusqu'après l'appel Windows.
+                sshClientData?.let { Reference.reachabilityFence(it) }
                 onTouchDone()
             }
         }
@@ -478,11 +471,11 @@ class WindowsWebAuthnProvider(
 
     override suspend fun signChallenge(
         rpId: String,
-        clientDataHash: ByteArray,
+        challenge: ByteArray,
         credentialId: ByteArray,
     ): Fido2Signer.Assertion = signChallenge(
         rpId = rpId,
-        clientDataHash = clientDataHash,
+        challenge = challenge,
         credentialId = credentialId,
         requireUv = false,
     )
@@ -768,6 +761,41 @@ class WindowsWebAuthnProvider(
          */
         val isPlatformSupported: Boolean =
             System.getProperty("os.name")?.lowercase()?.contains("windows") == true
+
+        /**
+         * Client data natif pour un GetAssertion SSH, avec la mémoire qui porte ses octets.
+         *
+         * @property struct  `WEBAUTHN_CLIENT_DATA` prête à être passée à webauthn.dll
+         * @property memory  Bloc natif pointé par `struct.pbClientDataJSON` : doit rester
+         *                   référencé jusqu'après l'appel Windows
+         */
+        internal class SshClientData(
+            val struct: WinWebAuthnClientData,
+            val memory: Memory,
+        )
+
+        /**
+         * Construit le client data d'un GetAssertion SSH à partir du challenge BRUT.
+         *
+         * `webauthn.dll` hache `pbClientDataJSON` lui-même (`pwszHashAlgId = "SHA-256"`) :
+         * les octets copiés doivent être strictement ceux du challenge, jamais son hash
+         * (voir [Fido2Signer.signChallenge]). Isolé ici pour être testable sans appel natif.
+         *
+         * @param challenge Données SSH brutes, non hachées (non vides)
+         */
+        internal fun buildSshClientData(challenge: ByteArray): SshClientData {
+            require(challenge.isNotEmpty()) { "SSH signing data must not be empty" }
+            val memory = Memory(challenge.size.toLong())
+            memory.write(0, challenge, 0, challenge.size)
+            val struct = WinWebAuthnClientData().apply {
+                dwVersion = 1
+                cbClientDataJSON = challenge.size
+                pbClientDataJSON = memory
+                pwszHashAlgId = WString("SHA-256")
+            }
+            struct.write()
+            return SshClientData(struct, memory)
+        }
 
         /**
          * Retourne le HWND de la fenêtre au premier plan, ou null si aucune.

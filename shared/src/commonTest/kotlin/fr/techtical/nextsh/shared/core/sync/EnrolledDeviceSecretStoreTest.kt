@@ -21,12 +21,13 @@ class EnrolledDeviceSecretStoreTest {
         override suspend fun getPassword(credentialId: String): CharArray? =
             passwords[credentialId]?.copyOf()
 
-        override suspend fun deleteCredential(credentialId: String) {
+        override suspend fun deletePassword(credentialId: String) {
             passwords.remove(credentialId)
         }
 
         override suspend fun storePrivateKey(keyId: String, privateKeyPem: String) = Unit
         override suspend fun getPrivateKey(keyId: String): String? = null
+        override suspend fun deletePrivateKey(keyId: String) = Unit
         override suspend fun storeCertificate(certId: String, certPem: String) = Unit
         override suspend fun getCertificate(certId: String): String? = null
         override suspend fun deleteCertificate(certId: String) = Unit

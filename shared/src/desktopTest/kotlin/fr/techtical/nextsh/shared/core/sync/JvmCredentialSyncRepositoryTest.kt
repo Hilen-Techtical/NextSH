@@ -33,16 +33,25 @@ class JvmCredentialSyncRepositoryTest {
             passwords[credentialId] = password.copyOf()
         }
         override suspend fun getPassword(credentialId: String): CharArray? = passwords[credentialId]?.copyOf()
+        /** When true, every typed delete throws (vault locked, Android auth expired). */
+        var failDeletes = false
+        private fun maybeFailDelete() {
+            if (failDeletes) throw IllegalStateException("simulated vault failure")
+        }
+
+        override suspend fun deletePassword(credentialId: String) {
+            maybeFailDelete()
+            passwords.remove(credentialId)
+        }
         override suspend fun storePrivateKey(keyId: String, privateKeyPem: String) { privateKeys[keyId] = privateKeyPem }
         override suspend fun getPrivateKey(keyId: String): String? = privateKeys[keyId]
+        override suspend fun deletePrivateKey(keyId: String) {
+            maybeFailDelete()
+            privateKeys.remove(keyId)
+        }
         override suspend fun storeCertificate(certId: String, certPem: String) { certificates[certId] = certPem }
         override suspend fun getCertificate(certId: String): String? = certificates[certId]
         override suspend fun deleteCertificate(certId: String) { certificates.remove(certId) }
-        override suspend fun deleteCredential(credentialId: String) {
-            passwords.remove(credentialId)
-            privateKeys.remove(credentialId)
-            certificates.remove(credentialId)
-        }
         override suspend fun wipeVault() { passwords.clear(); privateKeys.clear(); certificates.clear() }
         override suspend fun isInitialized(): Boolean = true
         override suspend fun listStoredCredentialIds(): List<String> = passwords.keys.toList()
@@ -223,6 +232,160 @@ class JvmCredentialSyncRepositoryTest {
         val result = rB.applyRemoteEntries(tombstoneEntries, sharedSecret)
         assertEquals(1, result.cleanApplied, "tombstone apply must be clean (dominates local)")
         assertNull(vaultB.getPassword("host-9"), "vault must have the credential removed")
+    }
+
+    // ─── Typed tombstones (regression: a tombstone must not erase other types) ─
+
+    /** Vault with all four types stored under the SAME raw id (a host switched from key to password). */
+    private fun vaultWithEveryTypeUnder(id: String) = FakeVault().apply {
+        passwords[id] = "pw".toCharArray()
+        privateKeys[id] = "PEM"
+        certificates[id] = "CERT"
+        passphrases[id] = "pass".toCharArray()
+    }
+
+    private fun tombstone(syncId: String) = SyncEntry<CredentialEntry>(
+        id = syncId,
+        payload = null,
+        clock = VectorClock.EMPTY.tick("peer-A", 9_999),
+        deleted = true,
+        deletedAt = 9_999,
+        updatedAt = 9_999,
+    )
+
+    /** Snapshot of which types are still stored under [id]. */
+    private fun FakeVault.typesUnder(id: String): Set<String> = buildSet {
+        if (id in passwords) add("pwd")
+        if (id in privateKeys) add("key")
+        if (id in certificates) add("cert")
+        if (id in passphrases) add("keypass")
+    }
+
+    @Test
+    fun `password tombstone keeps private key, certificate and passphrase stored under the same id`() = runTest {
+        val vault = vaultWithEveryTypeUnder("X")
+        val (r, _, _) = repo(vault = vault, deviceId = "peer-B")
+
+        val result = r.applyRemoteEntries(listOf(tombstone("pwd:X")), sharedSecret)
+
+        assertEquals(1, result.cleanApplied)
+        assertEquals(setOf("key", "cert", "keypass"), vault.typesUnder("X"))
+        assertEquals("PEM", vault.getPrivateKey("X"))
+        assertEquals("CERT", vault.getCertificate("X"))
+        assertContentEquals("pass".toCharArray(), vault.getKeyPassphrase("X"))
+    }
+
+    @Test
+    fun `each tombstone prefix deletes only its own type`() = runTest {
+        val expectedRemaining = mapOf(
+            "pwd:X" to setOf("key", "cert", "keypass"),
+            "key:X" to setOf("pwd", "cert", "keypass"),
+            "cert:X" to setOf("pwd", "key", "keypass"),
+            "keypass:X" to setOf("pwd", "key", "cert"),
+        )
+        for ((syncId, remaining) in expectedRemaining) {
+            val vault = vaultWithEveryTypeUnder("X")
+            val (r, _, _) = repo(vault = vault, deviceId = "peer-B")
+
+            r.applyRemoteEntries(listOf(tombstone(syncId)), sharedSecret)
+
+            assertEquals(remaining, vault.typesUnder("X"), "tombstone $syncId must delete only its own type")
+        }
+    }
+
+    @Test
+    fun `forced tombstone is typed too`() = runTest {
+        val vault = vaultWithEveryTypeUnder("X")
+        val (r, _, _) = repo(vault = vault, deviceId = "peer-B")
+
+        assertTrue(r.applyRemoteCredentialForced(tombstone("key:X"), sharedSecret))
+
+        assertEquals(setOf("pwd", "cert", "keypass"), vault.typesUnder("X"))
+    }
+
+    @Test
+    fun `tombstone with an unknown prefix deletes nothing`() = runTest {
+        val vault = vaultWithEveryTypeUnder("X")
+        val (r, _, _) = repo(vault = vault, deviceId = "peer-B")
+
+        r.applyRemoteEntries(listOf(tombstone("totp:X"), tombstone("X")), sharedSecret)
+
+        assertEquals(setOf("pwd", "key", "cert", "keypass"), vault.typesUnder("X"))
+    }
+
+    @Test
+    fun `a failing vault delete skips the tombstone, keeps the meta live and the next sync retries`() = runTest {
+        // A creates, B pulls, A deletes: B receives the tombstone while its vault delete fails.
+        val vaultA = FakeVault().apply { passwords["host-9"] = "tmp".toCharArray() }
+        val (rA, _, _) = repo(vault = vaultA, deviceId = "peer-A", nowMs = 1000)
+        val firstExport = rA.exportEncryptedEntries(sharedSecret)
+
+        val vaultB = FakeVault()
+        val metaB = InMemoryMetaStore()
+        val (rB, _, _) = repo(vault = vaultB, metaStore = metaB, deviceId = "peer-B", nowMs = 2000)
+        rB.applyRemoteEntries(firstExport, sharedSecret)
+        val liveMeta = metaB.get("pwd:host-9")!!
+
+        vaultA.passwords.remove("host-9")
+        val tombstones = rA.exportEncryptedEntries(sharedSecret)
+        assertTrue(tombstones.single().deleted)
+
+        vaultB.failDeletes = true
+        val failed = rB.applyRemoteEntries(tombstones, sharedSecret)
+
+        assertEquals(0, failed.cleanApplied)
+        assertEquals(1, failed.skipped, "a tombstone whose vault delete failed is skipped, not clean")
+        assertContentEquals("tmp".toCharArray(), vaultB.getPassword("host-9"), "the credential is still stored")
+        val metaAfterFailure = metaB.get("pwd:host-9")!!
+        assertFalse(metaAfterFailure.deleted, "meta must not be stamped deleted over a stored credential")
+        assertEquals(liveMeta.vectorClock, metaAfterFailure.vectorClock)
+
+        // B's next export must not re-publish it with a clock that beats the tombstone.
+        val exported = rB.exportEncryptedEntries(sharedSecret).single { it.id == "pwd:host-9" }
+        assertFalse(exported.deleted)
+        assertFalse(exported.clock.dominates(tombstones.single().clock), "the remote tombstone must still win")
+
+        // The vault is back: the same tombstone now applies cleanly.
+        vaultB.failDeletes = false
+        val retry = rB.applyRemoteEntries(tombstones, sharedSecret)
+        assertEquals(1, retry.cleanApplied)
+        assertNull(vaultB.getPassword("host-9"))
+        assertTrue(metaB.get("pwd:host-9")!!.deleted)
+    }
+
+    @Test
+    fun `forced tombstone reports false and stamps nothing when the vault delete fails`() = runTest {
+        val vault = vaultWithEveryTypeUnder("X").apply { failDeletes = true }
+        val metaStore = InMemoryMetaStore()
+        val (r, _, _) = repo(vault = vault, metaStore = metaStore, deviceId = "peer-B")
+
+        assertFalse(r.applyRemoteCredentialForced(tombstone("pwd:X"), sharedSecret))
+
+        assertEquals(setOf("pwd", "key", "cert", "keypass"), vault.typesUnder("X"))
+        assertNull(metaStore.get("pwd:X"), "no meta may be stamped when the delete failed")
+    }
+
+    @Test
+    fun `export after a local password delete emits only the pwd tombstone and keeps the key live`() = runTest {
+        // Wire-format guard: tombstones stay typed per syncId, so a peer never receives
+        // a tombstone for a type the user did not delete.
+        val vault = FakeVault().apply {
+            passwords["X"] = "pw".toCharArray()
+            privateKeys["X"] = "PEM"
+        }
+        val (r, _, _) = repo(vault = vault)
+        r.exportEncryptedEntries(sharedSecret)
+
+        vault.deletePassword("X")
+        val entries = r.exportEncryptedEntries(sharedSecret)
+
+        assertEquals(setOf("pwd:X", "key:X"), entries.map { it.id }.toSet())
+        val pwd = entries.single { it.id == "pwd:X" }
+        assertTrue(pwd.deleted)
+        assertNull(pwd.payload)
+        val key = entries.single { it.id == "key:X" }
+        assertFalse(key.deleted, "the private key under the same id stays live")
+        assertEquals(CredentialType.SSH_PRIVATE_KEY, key.payload?.type)
     }
 
     // ─── Equality / hash behavior ──────────────────────────────────────────

@@ -20,14 +20,30 @@ import java.util.concurrent.atomic.AtomicBoolean
  * SFTP pane uses the same `SSHClient`, so disposing the terminal widget
  * must not kill SFTP. Full session teardown (shell + `SSHClient`) is done
  * explicitly via [DesktopSshTerminalSession.shutdown].
+ *
+ * The incoming stream is also scanned for OSC 52 (remote clipboard write)
+ * sequences before JediTerm sees it: they are stripped and the decoded text is
+ * passed to [onRemoteClipboardWrite], see [Osc52Filter].
  */
 class SshTtyConnector(
     private val shell: Session.Shell,
+    onRemoteClipboardWrite: (String) -> Unit = {},
 ) : TtyConnector {
 
     private val reader = InputStreamReader(shell.inputStream, StandardCharsets.UTF_8)
     private val output = shell.outputStream
     private val connected = AtomicBoolean(true)
+    private val osc52Filter = Osc52Filter(onRemoteClipboardWrite)
+
+    // Raw (unfiltered) characters read from the shell, reused across calls.
+    private var rawBuf = CharArray(0)
+
+    // Overflow for the degenerate case where the caller's buffer is no larger
+    // than the characters the filter holds back (see [read]). Never used with
+    // a realistic read size.
+    private val spill = CharArray(Osc52Filter.MAX_HELD_CHARS + 1)
+    private var spillStart = 0
+    private var spillEnd = 0
 
     override fun init(q: com.jediterm.terminal.Questioner?): Boolean = true
 
@@ -39,9 +55,45 @@ class SshTtyConnector(
     override fun getName(): String = "SSH"
 
     override fun read(buf: CharArray, offset: Int, length: Int): Int {
-        val n = reader.read(buf, offset, length)
-        if (n > 0) downgradeAltScreenMode(buf, offset, n)
-        return n
+        if (length <= 0) return 0
+        if (spillEnd > spillStart) return drainSpill(buf, offset, length)
+        if (rawBuf.size < length) rawBuf = CharArray(length)
+        while (true) {
+            // The filter may release up to heldCount characters it kept from the
+            // previous chunk, so read that much less to keep the output within
+            // `length`.
+            val room = length - osc52Filter.heldCount
+            val n = reader.read(rawBuf, 0, if (room >= 1) room else 1)
+            // End of stream: characters the filter still holds (an unfinished
+            // OSC 52 prefix or payload) are dropped, as JediTerm would never
+            // have rendered an unterminated sequence either.
+            if (n < 0) return -1
+            if (n == 0) continue
+            if (room >= 1) {
+                val produced = osc52Filter.filter(rawBuf, 0, n, buf, offset)
+                if (produced > 0) {
+                    downgradeAltScreenMode(buf, offset, produced)
+                    return produced
+                }
+            } else {
+                val produced = osc52Filter.filter(rawBuf, 0, n, spill, 0)
+                if (produced > 0) {
+                    spillStart = 0
+                    spillEnd = produced
+                    return drainSpill(buf, offset, length)
+                }
+            }
+            // The whole chunk was swallowed by an OSC 52 sequence (or held
+            // back as a prefix candidate): never report 0, read again.
+        }
+    }
+
+    private fun drainSpill(buf: CharArray, offset: Int, length: Int): Int {
+        val count = minOf(length, spillEnd - spillStart)
+        System.arraycopy(spill, spillStart, buf, offset, count)
+        spillStart += count
+        downgradeAltScreenMode(buf, offset, count)
+        return count
     }
 
     override fun write(bytes: ByteArray) {
@@ -57,7 +109,7 @@ class SshTtyConnector(
 
     override fun waitFor(): Int = 0
 
-    override fun ready(): Boolean = reader.ready()
+    override fun ready(): Boolean = spillEnd > spillStart || reader.ready()
 
     override fun resize(size: TermSize) {
         try {

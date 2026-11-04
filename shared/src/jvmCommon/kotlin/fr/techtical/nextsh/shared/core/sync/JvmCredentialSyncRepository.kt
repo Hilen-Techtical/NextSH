@@ -6,6 +6,7 @@ package fr.techtical.nextsh.shared.core.sync
 import fr.techtical.nextsh.shared.domain.vault.VaultManager
 import fr.techtical.nextsh.shared.util.Logger
 import fr.techtical.nextsh.shared.util.randomUuid
+import kotlinx.coroutines.CancellationException
 import java.util.Arrays
 
 private const val TAG = "CredentialSync"
@@ -174,9 +175,12 @@ class JvmCredentialSyncRepository(
                         // Apply to vault + meta based on whether the accepted entry is
                         // a tombstone (delete locally) or a fresh payload (write to vault).
                         if (accepted.deleted) {
-                            applyTombstone(syncId, accepted, existing?.type)
-                            pendingConflictRepository.deleteByEntity(SyncableEntityType.CREDENTIAL, syncId)
-                            clean++
+                            if (applyTombstone(syncId, accepted, existing?.type)) {
+                                pendingConflictRepository.deleteByEntity(SyncableEntityType.CREDENTIAL, syncId)
+                                clean++
+                            } else {
+                                skipped++
+                            }
                         } else {
                             val remotePayload = accepted.payload
                             if (remotePayload == null) {
@@ -322,7 +326,7 @@ class JvmCredentialSyncRepository(
             // Tombstone: drop local vault entry, stamp meta as deleted with remote clock.
             val existing = metaStore.get(entry.id)
             val type = existing?.type ?: payload?.type ?: CredentialType.HOST_PASSWORD
-            applyTombstone(entry.id, entry, type)
+            if (!applyTombstone(entry.id, entry, type)) return false
             pendingConflictRepository.deleteByEntity(SyncableEntityType.CREDENTIAL, entry.id)
             return true
         }
@@ -365,19 +369,42 @@ class JvmCredentialSyncRepository(
         )
     }
 
+    /**
+     * Applies an accepted tombstone: typed vault delete, then the deleted meta.
+     * Returns false, with the meta left untouched, when the vault delete failed (vault
+     * locked, Android auth expired): stamping `deleted` over a credential that is still
+     * stored would let the next export re-publish it with a clock that wins. The remote
+     * tombstone keeps dominating the unchanged local meta, so the next sync retries.
+     */
     private suspend fun applyTombstone(
         syncId: String,
         accepted: SyncEntry<CredentialEntry>,
         knownType: CredentialType?,
-    ) {
-        // Best-effort vault delete. The vault interface only exposes
-        // deleteCredential(id) which (Android) removes the password slot; private
-        // keys and certificates don't have dedicated delete methods on the shared
-        // contract: write an empty value is not safe, so we rely on the vault
-        // impl being forgiving. For now just call deleteCredential and let the
-        // repository impl handle the rest.
+    ): Boolean {
+        // Typed vault delete. The syncId carries the credential type
+        // (see currentVaultSnapshot), and one raw local id can hold several types at
+        // once (a host switched from key to password keeps the key id as its
+        // credentialId): only the slot named by the prefix may be removed, never the
+        // other types stored under the same id. An unknown prefix deletes nothing.
         val localId = stripPrefix(syncId)
-        runCatching { vault.deleteCredential(localId) }
+        try {
+            when {
+                syncId.startsWith(KEY_PREFIX_PASSWORD) -> vault.deletePassword(localId)
+                syncId.startsWith(KEY_PREFIX_PRIVATE_KEY) -> vault.deletePrivateKey(localId)
+                syncId.startsWith(KEY_PREFIX_CERTIFICATE) -> vault.deleteCertificate(localId)
+                syncId.startsWith(KEY_PREFIX_KEY_PASSPHRASE) -> vault.deleteKeyPassphrase(localId)
+                else -> {
+                    // Log the type prefix only: the rest of the id is not ours to print.
+                    val prefix = syncId.substringBefore(':', "").take(16).filter { it.isLetterOrDigit() }
+                    Logger.w(TAG, "Tombstone ignored, unknown credential type prefix \"$prefix\"")
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.w(TAG, "Tombstone vault delete failed (${e::class.simpleName})")
+            return false
+        }
         metaStore.put(
             syncId,
             CredentialMeta(
@@ -389,6 +416,7 @@ class JvmCredentialSyncRepository(
                 contentHashBase64 = "",
             ),
         )
+        return true
     }
 
     // ── UTF-8 / char helpers (avoid String intermediate that can't be wiped) ───

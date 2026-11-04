@@ -32,15 +32,32 @@ interface Fido2Signer {
     /**
      * Effectue un GetAssertion FIDO2.
      *
+     * ## Contrat du challenge : données BRUTES, jamais pré-hachées
+     * OpenSSH vérifie la signature de l'authenticator sur `authData || SHA-256(data)`,
+     * où `data` est le tampon de signature SSH (RFC 4252 §7 pour l'authentification
+     * publickey). Le clientDataHash CTAP2 doit donc valoir `SHA-256(data)`, et c'est
+     * l'implémentation qui le dérive, pas l'appelant :
+     * - [YubiKitFido2Signer] (Linux/macOS, et Windows en repli si WebAuthn est indisponible) :
+     *   calcule SHA-256(challenge) puis l'envoie tel quel en CTAP2 GetAssertion ;
+     * - [fr.techtical.nextsh.desktop.core.auth.fido2.winwebauthn.WindowsWebAuthnProvider] :
+     *   place le challenge brut dans `pbClientDataJSON` et laisse `webauthn.dll`
+     *   le hacher en SHA-256.
+     * Un appelant qui passerait déjà SHA-256(data) provoquerait un double hachage et
+     * un rejet `incorrect signature` côté serveur.
+     *
+     * Les implémentations ne doivent pas conserver de référence au tableau [challenge] :
+     * l'appelant peut l'effacer dès le retour de l'appel.
+     *
      * @param rpId         RP-ID (ex. "ssh:")
-     * @param clientDataHash SHA-256 du challenge SSH (32 bytes)
+     * @param challenge    Données brutes signées par l'authenticator, NON hachées
+     *                     (pour SSH : le tampon de signature RFC 4252 reçu de SSHJ)
      * @param credentialId Credential id de la clé SK-*
      * @return [Assertion] avec authData et signature brute
      * @throws [YubiKitFidoManager.FidoError] si l'opération échoue
      */
     suspend fun signChallenge(
         rpId: String,
-        clientDataHash: ByteArray,
+        challenge: ByteArray,
         credentialId: ByteArray,
     ): Assertion
 }

@@ -24,7 +24,7 @@ plugins {
 // le même produit et répond « déjà installé » au lieu de mettre à jour.
 // L'upgradeUuid (voir bloc `windows {}`) reste lui STABLE entre les releases.
 // ─────────────────────────────────────────────────────────────────────────
-val desktopVersion = "1.0.0"
+val desktopVersion = "1.0.1"
 
 // X11 WM_CLASS the running Compose/AWT window reports. AWT derives it from
 // the main class FQN (fr.techtical.nextsh.desktop.MainKt → dots become
@@ -143,9 +143,9 @@ compose.desktop {
         // JVM-native splash: the launcher decodes this PNG and shows it
         // BEFORE `main()` is invoked, so the user sees the brand mark
         // within ~100 ms of double-clicking the installed .exe. Closed
-        // from Main.kt via `SplashScreen.getSplashScreen()?.close()` in
-        // the post-show LaunchedEffect, once the real Compose window is
-        // themed and visible.
+        // from Main.kt (`closeJvmSplash`) once the real Compose window has
+        // rendered its first frame; AWT itself closes it earlier, when the
+        // first window is shown, if Main.kt has not.
         //
         // Why not draw the splash from a `JWindow` inside main()? An
         // earlier attempt cost 6.3 s on the first run after MSI install

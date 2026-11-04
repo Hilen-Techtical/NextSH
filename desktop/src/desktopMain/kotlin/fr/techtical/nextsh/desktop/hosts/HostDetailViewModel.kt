@@ -6,6 +6,7 @@ package fr.techtical.nextsh.desktop.hosts
 import fr.techtical.nextsh.desktop.data.di.DesktopContainer
 import fr.techtical.nextsh.shared.domain.model.AuthType
 import fr.techtical.nextsh.shared.domain.model.CustomTerminalTheme
+import fr.techtical.nextsh.shared.domain.model.Fido2Mode
 import fr.techtical.nextsh.shared.domain.model.Host
 import fr.techtical.nextsh.shared.domain.model.SshKey
 import fr.techtical.nextsh.shared.domain.model.SshKeyType
@@ -222,18 +223,23 @@ class HostDetailViewModel(
         _state.value = s.copy(isSaving = true, error = null)
         appScope.coroutineScope.launch {
             try {
-                val host = Host(
-                    id = s.hostId ?: randomUuid(),
-                    label = s.label.trim(),
-                    hostname = s.hostname.trim(),
-                    port = s.port.toInt(),
-                    username = s.username.trim(),
-                    authType = s.authType,
-                    credentialId = s.credentialId,
-                    group = s.group.trim().takeIf { it.isNotBlank() },
-                    terminalTheme = s.terminalTheme,
-                )
-                if (s.isExisting) repository.update(host) else repository.save(host)
+                // Re-read the stored host so fields the form does not own are current.
+                // Null means it was deleted meanwhile: write nothing (host or vault);
+                // the `finally` still wipes the password.
+                val storedId = s.hostId
+                val stored = if (storedId != null) {
+                    repository.getById(storedId) ?: run {
+                        _state.value = _state.value.copy(
+                            isSaving = false,
+                            error = "Cet hôte a été supprimé entre-temps, rien n'a été enregistré.",
+                        )
+                        return@launch
+                    }
+                } else {
+                    null
+                }
+                val host = buildHost(s, stored, randomUuid())
+                if (stored != null) repository.update(host) else repository.save(host)
 
                 when (s.authType) {
                     AuthType.PASSWORD -> {
@@ -263,14 +269,16 @@ class HostDetailViewModel(
         val id = s.hostId ?: return
         appScope.coroutineScope.launch {
             repository.delete(id)
-            // SECURITY: only purge the vault entry if this host *owned* the credential.
-            // For SSH_KEY / CERTIFICATE the credentialId points to a shared SshKey used
-            // by potentially many hosts: deleting that entry here would orphan the
-            // other hosts silently. Only password credentials are owned 1:1 by the host.
+            // SECURITY: only purge what this host *owns*, and only that type. A PASSWORD
+            // host owns its password slot, and nothing else: its credentialId may be the
+            // id of an SSH key (a host created on Android and switched from key to
+            // password keeps it), so the private key, passphrase and certificate stored
+            // under the same id must survive. For SSH_KEY / CERTIFICATE the credentialId
+            // points to a SshKey shared by potentially many hosts, and the certificate is
+            // stored under that same key id: they belong to the key in the vault, deleting
+            // them here would orphan the other hosts silently.
             if (s.authType == AuthType.PASSWORD) {
-                vaultManager.deleteCredential(s.credentialId)
-            } else if (s.authType == AuthType.CERTIFICATE) {
-                vaultManager.deleteCertificate(s.credentialId)
+                vaultManager.deletePassword(s.credentialId)
             }
             onDone()
         }
@@ -300,4 +308,45 @@ class HostDetailViewModel(
             AuthType.PASSWORD -> null
         }
     }
+}
+
+/**
+ * Builds the [Host] to persist from the Desktop form. On edit ([stored] non-null)
+ * only the form-owned fields are overwritten: rebuilding from scratch would reset
+ * the others (favorite, keep-alive, ...) and the newest CRDT write would push that
+ * reset to Android. `fido2Mode` is null unless FIDO2; for FIDO2 it is kept only if
+ * the stored host is FIDO2 with the same credential, else [Fido2Mode.HARDWARE_KEY].
+ */
+internal fun buildHost(
+    form: HostDetailFormState,
+    stored: Host?,
+    newId: String,
+): Host {
+    // New host: blank base, the form-owned fields are overwritten below.
+    val base = stored ?: Host(
+        id = newId,
+        label = "",
+        hostname = "",
+        username = "",
+        authType = form.authType,
+        credentialId = "",
+    )
+    return base.copy(
+        label = form.label.trim(),
+        hostname = form.hostname.trim(),
+        port = form.port.toInt(),
+        username = form.username.trim(),
+        authType = form.authType,
+        credentialId = form.credentialId,
+        group = form.group.trim().takeIf { it.isNotBlank() },
+        terminalTheme = form.terminalTheme,
+        fido2Mode = if (form.authType == AuthType.FIDO2) {
+            stored
+                ?.takeIf { it.authType == AuthType.FIDO2 && it.credentialId == form.credentialId }
+                ?.fido2Mode
+                ?: Fido2Mode.HARDWARE_KEY
+        } else {
+            null
+        },
+    )
 }

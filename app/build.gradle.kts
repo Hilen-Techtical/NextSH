@@ -66,8 +66,8 @@ android {
         applicationId = "fr.techtical.nextsh"
         minSdk = 29
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.0.0"
+        versionCode = 9
+        versionName = "1.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -237,4 +237,28 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+
+    // ProguardRulesGuardTest lit proguard-rules.pro a l execution : sans declarer le fichier comme
+    // entree, supprimer la seule regle keep laisse les classes inchangees, donc la tache Test
+    // reste UP-TO-DATE ou FROM-CACHE (org.gradle.caching=true) et le garde ne tourne jamais.
+    // Le chemin est aussi passe au test, qui echoue (au lieu de s ignorer) si le fichier manque.
+    inputs.file("proguard-rules.pro")
+        .withPropertyName("proguardRules")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("proguardRules", file("proguard-rules.pro").absolutePath)
+
+    // Les gardes de source des champs secrets (HostDetailPasswordFieldGuardTest,
+    // SecretFieldsKeyboardGuardTest) lisent les sources de l ecran et les strings.xml a l
+    // execution. Sans les declarer comme entrees, une modification qui ne change pas les classes
+    // compilees (ressource, ou retrait d une option deja sans effet sur le bytecode) laisserait la
+    // tache Test UP-TO-DATE ou FROM-CACHE (org.gradle.caching=true) et le garde ne tournerait pas.
+    inputs.file("src/main/res/values/strings.xml")
+        .withPropertyName("guardStringsFr")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file("src/main/res/values-en/strings.xml")
+        .withPropertyName("guardStringsEn")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir("src/main/kotlin/fr/techtical/nextsh/ui")
+        .withPropertyName("guardUiSources")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }

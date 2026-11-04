@@ -178,7 +178,13 @@ class VaultScreenViewModel(
 
     fun deleteKey(key: SshKey) {
         appScope.coroutineScope.launch {
-            vaultManager.deleteCredential(key.id)
+            // A key owns its private key, its passphrase and its certificate (stored
+            // under the key id). Not the password stored under the same id: a host
+            // switched from key to password keeps the key id as its credentialId, and
+            // that password belongs to the host.
+            vaultManager.deletePrivateKey(key.id)
+            vaultManager.deleteKeyPassphrase(key.id)
+            vaultManager.deleteCertificate(key.id)
             keyRepository.delete(key.id)
         }
     }

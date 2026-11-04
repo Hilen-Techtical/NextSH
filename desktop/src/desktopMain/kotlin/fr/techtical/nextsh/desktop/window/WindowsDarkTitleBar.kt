@@ -39,6 +39,13 @@ internal interface Dwmapi : Library {
     companion object {
         val INSTANCE: Dwmapi by lazy { Native.load("dwmapi", Dwmapi::class.java) }
 
+        /**
+         * Cloaking: the window stays shown as far as the application is
+         * concerned (`isVisible`, `isShowing`, placement) but DWM composes
+         * nothing of it on screen. BOOL, 4 bytes. See [WindowsFirstFrameReveal].
+         */
+        const val DWMWA_CLOAK = 13
+
         /** Dark mode title bar: Windows 10 build 18985+ / Windows 11. */
         const val DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 
@@ -47,6 +54,42 @@ internal interface Dwmapi : Library {
 
         /** Title bar fill color: Windows 11 22H2+. COLORREF (0x00BBGGRR). */
         const val DWMWA_CAPTION_COLOR = 35
+    }
+}
+
+/**
+ * Minimal JNA binding for `SetWindowThemeAttribute` (`uxtheme.dll`), used
+ * to stop the OS from drawing the window icon in the title bar. Same
+ * pattern as [Dwmapi].
+ */
+internal interface Uxtheme : Library {
+    /**
+     * [pvAttribute] models the `WTA_OPTIONS { DWORD dwFlags; DWORD dwMask; }`
+     * struct as two ints (8 bytes): JNA passes a primitive array as a pointer
+     * to its contents.
+     *
+     * @return `S_OK` (0) on success, an `HRESULT` error code otherwise.
+     *   Same soft-failure handling as [Dwmapi.DwmSetWindowAttribute].
+     */
+    fun SetWindowThemeAttribute(
+        hwnd: Pointer,
+        eAttribute: Int,
+        pvAttribute: IntArray,
+        cbAttribute: Int,
+    ): Int
+
+    companion object {
+        val INSTANCE: Uxtheme by lazy { Native.load("uxtheme", Uxtheme::class.java) }
+
+        /** `WINDOWTHEMEATTRIBUTETYPE` selecting the non-client area options. */
+        const val WTA_NONCLIENT = 1
+
+        /**
+         * Do not draw the window icon in the title bar (Uxtheme.h). Not 0x1:
+         * that bit is `WTNCA_NODRAWCAPTION`, which hides the title text and
+         * keeps the icon, the exact opposite of what we want.
+         */
+        const val WTNCA_NODRAWICON = 0x2
     }
 }
 
@@ -72,6 +115,14 @@ internal interface Dwmapi : Library {
  * (0x0F0F0F) so the OS title bar is visually continuous with the Compose
  * brand strip rendered directly underneath. The user perceives a single
  * unified bar with min/max/close handled natively by the OS.
+ *
+ * ## Title bar icon
+ * The helper also hides the window icon in the title bar. The window keeps
+ * its `icon` (the 512 px NextSH logo PNG) because the taskbar button and
+ * Alt+Tab need it, but AWT downscales that same image to 16 px for the title
+ * bar, where it renders pixelated; the "NextSH" title alone is enough there.
+ * Only the icon drawing is suppressed (`WTNCA_NODRAWICON`); `WTNCA_NOSYSMENU`
+ * is deliberately left off so the system menu functionality is not touched.
  */
 object WindowsDarkTitleBar {
 
@@ -80,8 +131,9 @@ object WindowsDarkTitleBar {
         System.getProperty("os.name", "").lowercase(Locale.US).contains("windows")
 
     /**
-     * Apply dark mode + NextSH NearBlack to [window]. Idempotent: calling
-     * twice is harmless.
+     * Apply dark mode + NextSH NearBlack to [window] and hide its title bar
+     * icon (taskbar / Alt+Tab icon untouched). Idempotent: calling twice is
+     * harmless.
      */
     fun apply(window: Window) {
         if (!isPlatformSupported) return
@@ -137,6 +189,35 @@ object WindowsDarkTitleBar {
                 IntByReference(nearBlackColorRef),
                 4,
             )
+        }
+
+        // 3. Hide the title bar icon (see "Title bar icon" above).
+        //    WTA_OPTIONS = { dwFlags, dwMask }: the same bit in both turns
+        //    the flag on. SWP_FRAMECHANGED makes the already shown window
+        //    repaint its non-client area right away.
+        runCatching {
+            val hr = Uxtheme.INSTANCE.SetWindowThemeAttribute(
+                hwnd,
+                Uxtheme.WTA_NONCLIENT,
+                intArrayOf(Uxtheme.WTNCA_NODRAWICON, Uxtheme.WTNCA_NODRAWICON),
+                8,
+            )
+            if (hr != 0) {
+                Logger.w(TAG, "WTNCA_NODRAWICON rejected: HRESULT 0x${Integer.toHexString(hr)}")
+                return@runCatching
+            }
+            User32.INSTANCE.SetWindowPos(
+                hwnd,
+                null,
+                0,
+                0,
+                0,
+                0,
+                User32.SWP_NOMOVE or User32.SWP_NOSIZE or User32.SWP_NOZORDER or
+                    User32.SWP_NOACTIVATE or User32.SWP_FRAMECHANGED,
+            )
+        }.onFailure { e ->
+            Logger.w(TAG, "Hiding the title bar icon failed: ${e.message}")
         }
     }
 

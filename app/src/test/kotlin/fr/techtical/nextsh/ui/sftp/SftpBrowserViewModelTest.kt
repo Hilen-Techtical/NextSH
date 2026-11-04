@@ -3,6 +3,10 @@
 
 package fr.techtical.nextsh.ui.sftp
 
+import android.content.Intent
+import android.net.Uri
+import androidx.core.content.ContextCompat
+import fr.techtical.nextsh.R
 import fr.techtical.nextsh.core.ssh.SftpManager
 import fr.techtical.nextsh.core.ssh.TransferTracker
 import fr.techtical.nextsh.domain.model.SftpFile
@@ -15,10 +19,16 @@ import fr.techtical.nextsh.domain.usecase.DeleteFileUseCase
 import fr.techtical.nextsh.domain.usecase.ListDirectoryUseCase
 import fr.techtical.nextsh.domain.usecase.PreviewFileUseCase
 import fr.techtical.nextsh.domain.usecase.RenameFileUseCase
+import fr.techtical.nextsh.service.SftpTransferService
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
+import io.mockk.mockk
+import io.mockk.mockkConstructor
+import io.mockk.mockkStatic
+import io.mockk.unmockkConstructor
+import io.mockk.unmockkStatic
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -97,6 +107,8 @@ class SftpBrowserViewModelTest {
 
     @AfterEach
     fun tearDown() {
+        unmockkConstructor(Intent::class)
+        unmockkStatic(ContextCompat::class)
         Dispatchers.resetMain()
     }
 
@@ -530,10 +542,116 @@ class SftpBrowserViewModelTest {
         assertEquals(SortOrder.DATE_DESC, viewModel.uiState.value.sortOrder)
     }
 
+    // ── uploadFile() : nom fourni par le sélecteur de fichiers ────────────────────
+
+    @Test
+    fun `uploadFile refuses a dotdot name and starts no service`() = runTest {
+        assertUploadRefused("..")
+    }
+
+    @Test
+    fun `uploadFile refuses a dot name and starts no service`() = runTest {
+        assertUploadRefused(".")
+    }
+
+    @Test
+    fun `uploadFile refuses a blank name and starts no service`() = runTest {
+        assertUploadRefused("   ")
+    }
+
+    @Test
+    fun `uploadFile refuses an empty name and starts no service`() = runTest {
+        assertUploadRefused("")
+    }
+
+    @Test
+    fun `uploadFile neutralises a traversal name before building the remote path`() = runTest {
+        val extras = captureTransferIntentExtras()
+
+        viewModel.uploadFile(
+            sessionId   = "session-1",
+            remoteDir   = "/home/user",
+            sourceUri   = mockk<Uri>(),
+            displayName = "../.ssh/authorized_keys",
+            fileSize    = 10L,
+        )
+
+        assertEquals("/home/user/.._.ssh_authorized_keys", extras[SftpTransferService.EXTRA_REMOTE_PATH])
+        assertEquals(".._.ssh_authorized_keys", extras[SftpTransferService.EXTRA_DISPLAY_NAME])
+        io.mockk.verify(exactly = 1) { ContextCompat.startForegroundService(any(), any()) }
+        val state = viewModel.uiState.value
+        assertFalse(state.messageIsError)
+        // Le message annonce le nom assaini, jamais le nom brut du fournisseur.
+        assertTrue(state.message!!.contains(".._.ssh_authorized_keys"), state.message)
+        assertFalse(state.message!!.contains("../.ssh"), state.message)
+    }
+
+    @Test
+    fun `uploadFile keeps an ordinary name and a trailing slash directory`() = runTest {
+        val extras = captureTransferIntentExtras()
+
+        viewModel.uploadFile(
+            sessionId   = "session-1",
+            remoteDir   = "/home/user/",
+            sourceUri   = mockk<Uri>(),
+            displayName = "rapport.pdf",
+            fileSize    = 10L,
+        )
+
+        assertEquals("/home/user/rapport.pdf", extras[SftpTransferService.EXTRA_REMOTE_PATH])
+        assertEquals("rapport.pdf", extras[SftpTransferService.EXTRA_DISPLAY_NAME])
+        io.mockk.verify(exactly = 1) { ContextCompat.startForegroundService(any(), any()) }
+        assertEquals("Envoi de rapport.pdf démarré", viewModel.uiState.value.message)
+    }
+
     // Note: onCleared() is protected and cannot be tested directly from outside the ViewModel.
     // It is tested implicitly through the lifecycle tearDown in integration tests.
 
     // ── Helper ────────────────────────────────────────────────────────────────────
+
+    /**
+     * Intercepte l'Intent du service de transfert (le JAR Android des tests n'implémente ni
+     * `Intent` ni `ContextCompat`) et renvoie les extras de type texte qui y sont posés.
+     * Le service n'est pas démarré.
+     */
+    private fun captureTransferIntentExtras(): Map<String, String?> {
+        val extras = mutableMapOf<String, String?>()
+        mockkConstructor(Intent::class)
+        mockkStatic(ContextCompat::class)
+        io.mockk.every { anyConstructed<Intent>().putExtra(any<String>(), any<String>()) } answers {
+            extras[firstArg()] = secondArg()
+            self as Intent
+        }
+        io.mockk.every { anyConstructed<Intent>().putExtra(any<String>(), any<Long>()) } answers {
+            self as Intent
+        }
+        io.mockk.justRun { ContextCompat.startForegroundService(any(), any()) }
+        return extras
+    }
+
+    /**
+     * Un envoi avec un nom inexploitable doit s'arrêter avant toute création d'Intent :
+     * message d'erreur pour l'utilisateur, et aucun service démarré.
+     */
+    private fun assertUploadRefused(displayName: String) {
+        val invalidNameMessage = "Nom de fichier invalide"
+        io.mockk.every { context.getString(R.string.sftp_error_name_invalid) } returns invalidNameMessage
+
+        viewModel.uploadFile(
+            sessionId   = "session-1",
+            remoteDir   = "/home/user",
+            sourceUri   = mockk<Uri>(),
+            displayName = displayName,
+            fileSize    = 10L,
+        )
+
+        val state = viewModel.uiState.value
+        assertEquals(invalidNameMessage, state.message)
+        assertTrue(state.messageIsError)
+        // ContextCompat.startForegroundService appelle l'une ou l'autre selon l'API.
+        io.mockk.verify(exactly = 0) { context.startForegroundService(any()) }
+        io.mockk.verify(exactly = 0) { context.startService(any()) }
+    }
 
     private suspend fun setupInitialState(sessionId: String, testFiles: List<SftpFile>) {
         coEvery { sftpManager.openSftp(sessionId) } returns SshResult.Success(Unit)

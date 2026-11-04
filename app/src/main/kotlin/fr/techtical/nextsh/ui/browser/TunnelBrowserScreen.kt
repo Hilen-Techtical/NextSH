@@ -66,7 +66,12 @@ fun BrowserOverlay(
 
     BackHandler(enabled = isVisible) {
         val wv = webView
-        if (wv != null && wv.canGoBack()) wv.goBack() else sessionHolder.hide()
+        if (wv != null && wv.canGoBack()) {
+            viewModel.onUserNavigation()
+            wv.goBack()
+        } else {
+            sessionHolder.hide()
+        }
     }
 
     if (uiState.showExternalNavWarning) {
@@ -163,6 +168,18 @@ fun BrowserOverlay(
         )
     }
 
+    // Jamais affiché tant que le navigateur est réduit : un dialogue qui prend le
+    // focus par-dessus un autre écran pourrait capter ce que l'utilisateur y tape.
+    // Le défi reste en attente et le dialogue réapparaît à la restauration.
+    val authPrompt = uiState.authPrompt
+    if (authPrompt != null && isVisible) {
+        HttpAuthDialog(
+            prompt   = authPrompt,
+            onSubmit = viewModel::submitAuth,
+            onCancel = viewModel::cancelAuth,
+        )
+    }
+
     if (activeTunnelId != null) {
         Box(
             modifier = Modifier
@@ -184,6 +201,7 @@ fun BrowserOverlay(
                                 },
                                 onMinimize  = { sessionHolder.hide() },
                                 onBack      = {
+                                    viewModel.onUserNavigation()
                                     webView?.let { wv ->
                                         wv.goBack()
                                         wv.postDelayed({
@@ -192,6 +210,7 @@ fun BrowserOverlay(
                                     }
                                 },
                                 onForward   = {
+                                    viewModel.onUserNavigation()
                                     webView?.let { wv ->
                                         wv.goForward()
                                         wv.postDelayed({
@@ -199,7 +218,10 @@ fun BrowserOverlay(
                                         }, 300)
                                     }
                                 },
-                                onRefresh   = { webView?.reload() },
+                                onRefresh   = {
+                                    viewModel.onUserNavigation()
+                                    webView?.reload()
+                                },
                             )
 
                             if (uiState.isLoading) {
@@ -233,6 +255,9 @@ fun BrowserOverlay(
                 if (uiState.initialUrl.isNotEmpty()) {
                     AndroidView(
                         factory = { ctx ->
+                            // Une WebView (réutilisée ou neuve) va être rattachée :
+                            // ses défis d'authentification peuvent à nouveau être traités.
+                            viewModel.onWebViewAttached()
                             sessionHolder.acquireWebView(ctx)?.also {
                                 webView = it
                                 Timber.d("WebView reused from session holder")
@@ -321,8 +346,31 @@ fun BrowserOverlay(
                                     ) {
                                         Timber.e("WebView onReceivedHttpError: ${errorResponse.statusCode} ${errorResponse.reasonPhrase} url=${request.url}")
                                         if (request.isForMainFrame) {
-                                            viewModel.onWebError("HTTP ${errorResponse.statusCode}: ${errorResponse.reasonPhrase}")
+                                            // Un 401 vient d'identifiants absents ou refusés :
+                                            // message localisé plutôt que « HTTP 401 ».
+                                            val message = if (errorResponse.statusCode == 401) {
+                                                ctx.getString(R.string.browser_auth_error_banner)
+                                            } else {
+                                                "HTTP ${errorResponse.statusCode}: ${errorResponse.reasonPhrase}"
+                                            }
+                                            viewModel.onWebError(message)
                                         }
+                                    }
+
+                                    // Défi HTTP Basic/Digest d'un service tunnelé. Pas
+                                    // d'appel à super : il annule la requête, ce qui
+                                    // laissait la page 401 seule. Rien n'est jamais
+                                    // mémorisé par NextSH (ni WebViewDatabase, ni disque) :
+                                    // on ne s'appuie pas sur useHttpAuthUsernamePassword()
+                                    // pour retrouver des identifiants, seulement pour savoir
+                                    // si la saisie précédente a été refusée.
+                                    override fun onReceivedHttpAuthRequest(
+                                        view: WebView,
+                                        handler: HttpAuthHandler,
+                                        host: String?,
+                                        realm: String?,
+                                    ) {
+                                        viewModel.onAuthRequested(host, realm, view.url, handler.asResponder())
                                     }
 
                                     override fun onReceivedSslError(
@@ -378,7 +426,15 @@ fun BrowserOverlay(
                         // Détacher sans détruire : le WebView est conservé par
                         // le singleton pour survivre à une réduction puis
                         // restauration sans recharger la page.
-                        onRelease = { sessionHolder.detachWebView() },
+                        onRelease = {
+                            // La WebView s'en va (fermeture, recréation de l'activité) :
+                            // un HttpAuthHandler en attente ne peut plus recevoir de
+                            // réponse, et le ViewModel, lui, survit à la rotation.
+                            // On l'annule et on refuse les défis jusqu'au prochain
+                            // rattachement.
+                            viewModel.onWebViewReleased()
+                            sessionHolder.detachWebView()
+                        },
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(padding)
@@ -505,5 +561,34 @@ private fun BrowserBanner(text: String, accent: androidx.compose.ui.graphics.Col
             maxLines   = 2,
             overflow   = TextOverflow.Ellipsis,
         )
+    }
+}
+
+// ── Authentification HTTP ────────────────────────────────────────────────────
+
+/**
+ * Enveloppe un [HttpAuthHandler] pour le ViewModel. Un handler peut être devenu
+ * invalide (WebView détruite entre-temps) : l'échec est avalé, avec un message
+ * générique, jamais l'identifiant, le mot de passe, le realm ni l'URL.
+ *
+ * [HttpAuthResponder.isRetry] vient de la plateforme : useHttpAuthUsernamePassword()
+ * vaut false quand des identifiants ont déjà été refusés pour cette requête, c'est
+ * donc une nouvelle tentative.
+ */
+private fun HttpAuthHandler.asResponder(): HttpAuthResponder {
+    val handler = this
+    val retry = runCatching { !handler.useHttpAuthUsernamePassword() }.getOrDefault(false)
+    return object : HttpAuthResponder {
+        override val isRetry: Boolean = retry
+
+        override fun proceed(username: String, password: String) {
+            runCatching { handler.proceed(username, password) }
+                .onFailure { Timber.w("WebView HTTP auth: answer failed") }
+        }
+
+        override fun cancel() {
+            runCatching { handler.cancel() }
+                .onFailure { Timber.w("WebView HTTP auth: cancel failed") }
+        }
     }
 }

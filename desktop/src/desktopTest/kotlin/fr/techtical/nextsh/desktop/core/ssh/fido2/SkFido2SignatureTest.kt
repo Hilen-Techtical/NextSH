@@ -15,6 +15,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 
 /**
@@ -42,8 +43,12 @@ class SkFido2SignatureTest {
         private val counter: UInt = 42u,
     ) : Fido2Signer {
 
-        /** Stocke le dernier clientDataHash reçu pour vérification. */
-        var lastClientDataHash: ByteArray? = null
+        /** Stocke le dernier challenge BRUT reçu pour vérification. */
+        var lastChallenge: ByteArray? = null
+            private set
+
+        /** Nombre d'appels à [signChallenge]. */
+        var callCount: Int = 0
             private set
 
         val fakeAuthData: ByteArray = ByteArray(37).also { buf ->
@@ -61,10 +66,11 @@ class SkFido2SignatureTest {
 
         override suspend fun signChallenge(
             rpId: String,
-            clientDataHash: ByteArray,
+            challenge: ByteArray,
             credentialId: ByteArray,
         ): Fido2Signer.Assertion {
-            lastClientDataHash = clientDataHash.copyOf()
+            callCount++
+            lastChallenge = challenge.copyOf()
             return Fido2Signer.Assertion(
                 authData = fakeAuthData.copyOf(),
                 signature = fakeSignature.copyOf(),
@@ -122,40 +128,51 @@ class SkFido2SignatureTest {
         assertEquals(42L, counter.toLong(), "counter should be 42")
     }
 
-    /**
-     * Vérifie que le clientDataHash transmis au signer = SHA-256 du challenge accumulé.
-     */
+    /** Le signer reçoit le challenge brut, une seule fois (contrat de [Fido2Signer.signChallenge]). */
     @Test
-    fun `sign passes SHA256 of accumulated buffer as clientDataHash`() {
+    fun `sign passes the raw accumulated buffer to the signer without hashing it`() {
         val challenge = "SSH-test-challenge".toByteArray()
         skFido2Sig.update(challenge)
         skFido2Sig.sign()
 
-        val expected = MessageDigest.getInstance("SHA-256").digest(challenge)
-        val actual = fakeSigner.lastClientDataHash
-
-        assertNotNull(actual, "lastClientDataHash should not be null after sign()")
-        assertContentEquals(expected, actual, "clientDataHash should be SHA-256 of challenge")
+        val actual = fakeSigner.lastChallenge
+        assertNotNull(actual, "lastChallenge should not be null after sign()")
+        assertEquals(1, fakeSigner.callCount, "signer must be called exactly once")
+        assertContentEquals(challenge, actual, "signer must receive the raw challenge bytes")
+        assertFalse(
+            MessageDigest.getInstance("SHA-256").digest(challenge).contentEquals(actual),
+            "challenge must NOT be pre-hashed by the caller",
+        )
     }
 
     /**
      * Vérifie le comportement avec multi-update (plusieurs appels à update).
-     * Le hash doit couvrir la concaténation de tous les chunks.
+     * Le signer reçoit la concaténation brute de tous les chunks.
      */
     @Test
-    fun `sign with multi-update accumulates all bytes`() {
+    fun `sign with multi-update passes the raw concatenation of all chunks`() {
         val part1 = "part-one".toByteArray()
         val part2 = "part-two".toByteArray()
         skFido2Sig.update(part1)
         skFido2Sig.update(part2)
         skFido2Sig.sign()
 
-        val combined = part1 + part2
-        val expected = MessageDigest.getInstance("SHA-256").digest(combined)
-        val actual = fakeSigner.lastClientDataHash
+        val actual = fakeSigner.lastChallenge
 
         assertNotNull(actual)
-        assertContentEquals(expected, actual, "multi-update hash should cover concatenated bytes")
+        assertContentEquals(part1 + part2, actual, "multi-update should forward the raw concatenated bytes")
+    }
+
+    /**
+     * update(H, off, len) n'accumule que la tranche demandée, brute.
+     */
+    @Test
+    fun `sign with ranged update forwards only the requested raw slice`() {
+        val data = "xxHELLOyy".toByteArray()
+        skFido2Sig.update(data, 2, 5)
+        skFido2Sig.sign()
+
+        assertContentEquals("HELLO".toByteArray(), fakeSigner.lastChallenge)
     }
 
     /**

@@ -58,6 +58,15 @@ class ParsedHost(
     val keyPassphrase: CharArray? = null,
     /** Stable id from the source export, if any, useful for de-dup / diagnostics. */
     val sourceId: String? = null,
+    /**
+     * Identity, within the source export, of the SSH key this entry references (the
+     * Termius key id). Hosts of one import run that carry the same value share ONE key:
+     * [HostImportService] stores it once and links them all to it. Null when the source
+     * has no shared keys (KeePassXC, NextSH) or the key has no identity (an inline key).
+     */
+    val keySourceId: String? = null,
+    /** Display label of the referenced key in the source export, if any; names the SshKey row. */
+    val keyLabel: String? = null,
 ) {
     /** True when this entry carries any secret material the vault must store. */
     val hasSecret: Boolean
@@ -82,6 +91,8 @@ class ParsedHost(
         if (privateKeyPem != other.privateKeyPem) return false
         if (!contentEqualsNullable(keyPassphrase, other.keyPassphrase)) return false
         if (sourceId != other.sourceId) return false
+        if (keySourceId != other.keySourceId) return false
+        if (keyLabel != other.keyLabel) return false
         return true
     }
 
@@ -96,6 +107,8 @@ class ParsedHost(
         result = 31 * result + (privateKeyPem?.hashCode() ?: 0)
         result = 31 * result + (keyPassphrase?.contentHashCode() ?: 0)
         result = 31 * result + (sourceId?.hashCode() ?: 0)
+        result = 31 * result + (keySourceId?.hashCode() ?: 0)
+        result = 31 * result + (keyLabel?.hashCode() ?: 0)
         return result
     }
 
@@ -104,7 +117,7 @@ class ParsedHost(
         "ParsedHost(label=$label, hostname=$hostname, port=$port, username=$username, " +
             "authType=$authType, group=$group, hasPassword=${password != null}, " +
             "hasPrivateKey=${privateKeyPem != null}, hasKeyPassphrase=${keyPassphrase != null}, " +
-            "sourceId=$sourceId)"
+            "sourceId=$sourceId, hasKeyIdentity=${keySourceId != null}, keyLabel=$keyLabel)"
 
     private fun contentEqualsNullable(a: CharArray?, b: CharArray?): Boolean = when {
         a == null && b == null -> true

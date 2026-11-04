@@ -6,6 +6,8 @@ package fr.techtical.nextsh.core.ssh
 import fr.techtical.nextsh.shared.domain.model.SshResult
 import fr.techtical.nextsh.domain.model.SshErrorCode
 import fr.techtical.nextsh.domain.model.TunnelConfig
+import fr.techtical.nextsh.domain.model.TunnelPortProblem
+import fr.techtical.nextsh.domain.model.TunnelPortRules
 import fr.techtical.nextsh.domain.model.TunnelState
 import fr.techtical.nextsh.domain.model.TunnelStatus
 import fr.techtical.nextsh.domain.model.TunnelType
@@ -33,7 +35,7 @@ import javax.inject.Singleton
  * Représente un tunnel actif en mémoire.
  *
  * Selon le type de tunnel, différents champs sont renseignés :
- *  - LOCAL_FORWARD  : [forwarder] + [serverSocket]
+ *  - LOCAL_FORWARD  : [forwarder] + [serverSocket] + [listenerThread]
  *  - REMOTE_FORWARD : [remoteForwarder] + [remoteForward]
  *  - DYNAMIC_SOCKS5 : [socks5Server]
  */
@@ -53,6 +55,8 @@ data class ActiveTunnel(
     // LOCAL_FORWARD
     val forwarder       : LocalPortForwarder?             = null,
     val serverSocket    : ServerSocket?                   = null,
+    /** Thread qui exécute `forwarder.listen()`, à interrompre avant de fermer [serverSocket]. */
+    val listenerThread  : Thread?                         = null,
     // REMOTE_FORWARD
     val remoteForwarder : RemotePortForwarder?            = null,
     val remoteForward   : RemotePortForwarder.Forward?    = null,
@@ -124,9 +128,12 @@ class SshTunnelManager @Inject constructor(
      * Bascule un tunnel en [TunnelStatus.ERROR] après une panne, en le retirant
      * des tunnels actifs (ses ressources sont mortes).
      *
-     * Sans effet si le tunnel a été arrêté manuellement ou n'est plus actif :
-     * la fermeture volontaire d'une ServerSocket fait aussi sortir la boucle
-     * d'écoute, et il ne faut pas la confondre avec une panne.
+     * Sans effet si le tunnel a été arrêté manuellement ou n'est plus actif.
+     * L'arrêt voulu d'un LOCAL_FORWARD (interruption du thread d'écoute, puis
+     * fermeture de la ServerSocket) fait aussi sortir la boucle d'écoute, qui
+     * s'efface alors sans appeler cette fonction : celui qui arrête possède
+     * les transitions d'état, et il ne faut pas confondre cette sortie avec
+     * une panne.
      *
      * C'est cette transition qui rend le tunnel visible pour
      * [getTunnelsForReconnect] et donc éligible à la reconnexion automatique.
@@ -158,7 +165,7 @@ class SshTunnelManager @Inject constructor(
     private fun closeTunnelResources(active: ActiveTunnel) {
         try {
             when (active.config.type) {
-                TunnelType.LOCAL_FORWARD  -> active.serverSocket?.close()
+                TunnelType.LOCAL_FORWARD  -> stopLocalListener(active.listenerThread, active.serverSocket)
                 TunnelType.REMOTE_FORWARD -> {
                     val forwarder = active.remoteForwarder
                     val forward   = active.remoteForward
@@ -169,6 +176,28 @@ class SshTunnelManager @Inject constructor(
         } catch (e: Exception) {
             Timber.w("Erreur fermeture tunnel ${active.config.id} : ${e.message}")
         }
+    }
+
+    /**
+     * Arrête la boucle d'écoute d'un LOCAL_FORWARD.
+     *
+     * Fermer la ServerSocket ne suffit pas : `LocalPortForwarder.listen()` de
+     * SSHJ boucle sur `while (!thread.isInterrupted())` et avale la
+     * SocketException d'`accept()` quand la socket est fermée. Sans
+     * interruption, le thread retourne aussitôt dans un `accept()` qui échoue
+     * à nouveau, sans fin, à 100 % d'un coeur.
+     *
+     * L'interruption passe AVANT la fermeture : l'`accept()` réveillé par la
+     * fermeture trouve alors l'interruption et la boucle se termine. On évite
+     * `forwarder.close()`, qui fait la même chose mais lève une NPE tant que
+     * `listen()` n'a pas posé son thread.
+     *
+     * Prend le thread et la socket plutôt qu'un [ActiveTunnel] : un démarrage
+     * qui échoue en cours de route les possède avant que le tunnel existe.
+     */
+    private fun stopLocalListener(listenerThread: Thread?, serverSocket: ServerSocket?) {
+        listenerThread?.interrupt()
+        serverSocket?.close()
     }
 
     /**
@@ -223,6 +252,8 @@ class SshTunnelManager @Inject constructor(
             return@withContext SshResult.Error(SshErrorCode.UNKNOWN, msg)
         }
 
+        refusePortProblem(config)?.let { return@withContext it }
+
         if (isPortInUse(config.localPort)) {
             val msg = "Port ${config.localPort} déjà utilisé localement"
             _tunnelStates.update { it + (config.id to TunnelState(config, TunnelStatus.ERROR, errorMessage = msg)) }
@@ -232,6 +263,11 @@ class SshTunnelManager @Inject constructor(
         _tunnelStates.update { it + (config.id to TunnelState(config, TunnelStatus.STARTING)) }
         manuallyStoppedIds.remove(config.id)
 
+        // Hors du try : un echec apres leur creation doit pouvoir les liberer,
+        // sinon la socket reste liee au port et le thread reste en ecoute.
+        var createdSocket: ServerSocket? = null
+        var createdThread: Thread? = null
+
         return@withContext try {
             val params = Parameters(
                 "127.0.0.1",
@@ -240,36 +276,24 @@ class SshTunnelManager @Inject constructor(
                 config.remotePort
             )
             val serverSocket = ServerSocket()
+            createdSocket = serverSocket
             serverSocket.reuseAddress = true
             serverSocket.bind(InetSocketAddress(params.localHost, params.localPort))
 
             val forwarder = sshClient.newLocalPortForwarder(params, serverSocket)
             val instanceId = instanceCounter.incrementAndGet()
 
-            Thread {
-                var failure: String? = null
-                try {
-                    forwarder.listen()
-                } catch (e: IOException) {
-                    Timber.w("Tunnel ${config.id} stopped: ${e.message}")
-                    failure = e.message ?: "Erreur d'écoute locale"
-                }
-                // listen() rend la main aussi bien sur arrêt manuel (ServerSocket
-                // fermée) que sur panne : markUnexpectedStop filtre le premier cas.
-                markUnexpectedStop(config.id, instanceId, failure ?: "Tunnel local interrompu")
-            }.apply {
-                name = "tunnel-${config.label}"
-                isDaemon = true
-                start()
-            }
+            val listenerThread = startListenerThread(config, instanceId, forwarder)
+            createdThread = listenerThread
 
             _activeTunnels.update { it + (config.id to
                 ActiveTunnel(
-                    config       = config,
-                    sessionId    = sessionId,
-                    instanceId   = instanceId,
-                    forwarder    = forwarder,
-                    serverSocket = serverSocket,
+                    config         = config,
+                    sessionId      = sessionId,
+                    instanceId     = instanceId,
+                    forwarder      = forwarder,
+                    serverSocket   = serverSocket,
+                    listenerThread = listenerThread,
                 )) }
 
             registerDisconnectListener(sshClient, sessionId)
@@ -283,10 +307,42 @@ class SshTunnelManager @Inject constructor(
 
         } catch (e: Exception) {
             Timber.e(e, "Échec démarrage tunnel LOCAL ${config.label}")
+            try {
+                stopLocalListener(createdThread, createdSocket)
+            } catch (closeError: Exception) {
+                Timber.w("Erreur fermeture tunnel ${config.id} (${closeError::class.java.simpleName})")
+            }
             val msg = e.message ?: "Erreur inconnue"
             _tunnelStates.update { it + (config.id to TunnelState(config, TunnelStatus.ERROR, errorMessage = msg)) }
             SshResult.Error(SshErrorCode.UNKNOWN, msg)
         }
+    }
+
+    /** Lance le thread daemon qui exécute `forwarder.listen()` pour un LOCAL_FORWARD. */
+    private fun startListenerThread(
+        config: TunnelConfig,
+        instanceId: Long,
+        forwarder: LocalPortForwarder,
+    ): Thread = Thread {
+        var failure: String? = null
+        try {
+            forwarder.listen()
+        } catch (e: IOException) {
+            // Le message est garde pour l'etat du tunnel, pas pour le journal.
+            Timber.w("Tunnel local arrete (${e::class.java.simpleName})")
+            failure = e.message ?: "Erreur d'écoute locale"
+        }
+        // Seul stopLocalListener interrompt ce thread, et SSHJ remet le drapeau
+        // quand il transforme une interruption en exception : un thread
+        // interrompu a donc été arrêté volontairement, et celui qui l'a arrêté
+        // possède les transitions d'état (ne pas les refaire, ni écraser son
+        // message). Une vraie panne d'écoute ne positionne pas le drapeau.
+        if (Thread.currentThread().isInterrupted) return@Thread
+        markUnexpectedStop(config.id, instanceId, failure ?: "Tunnel local interrompu")
+    }.apply {
+        name = "tunnel-listener"
+        isDaemon = true
+        start()
     }
 
     // ── Remote forward ────────────────────────────────────────────────────────────
@@ -309,6 +365,8 @@ class SshTunnelManager @Inject constructor(
             _tunnelStates.update { it + (config.id to TunnelState(config, TunnelStatus.ERROR, errorMessage = msg)) }
             return@withContext SshResult.Error(SshErrorCode.UNKNOWN, msg)
         }
+
+        refusePortProblem(config)?.let { return@withContext it }
 
         _tunnelStates.update { it + (config.id to TunnelState(config, TunnelStatus.STARTING)) }
         manuallyStoppedIds.remove(config.id)
@@ -370,6 +428,8 @@ class SshTunnelManager @Inject constructor(
             _tunnelStates.update { it + (config.id to TunnelState(config, TunnelStatus.ERROR, errorMessage = msg)) }
             return@withContext SshResult.Error(SshErrorCode.UNKNOWN, msg)
         }
+
+        refusePortProblem(config)?.let { return@withContext it }
 
         if (isPortInUse(config.localPort)) {
             val msg = "Port ${config.localPort} déjà utilisé localement"
@@ -440,7 +500,7 @@ class SshTunnelManager @Inject constructor(
         return@withContext try {
             when (active.config.type) {
                 TunnelType.LOCAL_FORWARD -> {
-                    active.serverSocket?.close()
+                    stopLocalListener(active.listenerThread, active.serverSocket)
                 }
                 TunnelType.REMOTE_FORWARD -> {
                     val forwarder = active.remoteForwarder
@@ -490,11 +550,16 @@ class SshTunnelManager @Inject constructor(
     /**
      * Retourne les tunnels en erreur qui n'ont pas été arrêtés manuellement,
      * éligibles à une tentative de reconnexion automatique.
+     *
+     * Un tunnel dont un port est inutilisable n'en fait pas partie : aucune reconnexion ne
+     * réussira, et la série de tentatives remplacerait le message du refus par « Reconnexion
+     * échouée ».
      */
     fun getTunnelsForReconnect(): List<TunnelConfig> {
         return _tunnelStates.value
             .filter { (id, state) ->
-                state.status == TunnelStatus.ERROR && id !in manuallyStoppedIds
+                state.status == TunnelStatus.ERROR && id !in manuallyStoppedIds &&
+                    TunnelPortRules.problemOf(state.config) == null
             }
             .map { it.value.config }
     }
@@ -539,10 +604,41 @@ class SshTunnelManager @Inject constructor(
 
     // ── Private ───────────────────────────────────────────────────────────────────
 
+    /**
+     * Refuse un démarrage dont les ports ne passent pas [TunnelPortRules], ou rend null.
+     *
+     * Appelé en premier, avant toute socket : un tunnel peut arriver avec un port hors plage par
+     * la synchro ou un import sans être passé par le formulaire, et `ServerSocket` lève alors une
+     * IllegalArgumentException, pas une IOException. Rien n'est créé à ce stade, donc rien à
+     * libérer, ni socket ni session SSH (la session reçue reste à l'appelant). Le tunnel passe
+     * en ERREUR avec un message fixe, sans numéro de port, et le code est UNKNOWN : PORT_IN_USE
+     * dirait « déjà utilisé », ce qui est faux (c'est le défaut que cette règle corrige), et les
+     * autres codes désignent l'authentification, le réseau ou le délai.
+     *
+     * Les messages restent courts (environ 80 caractères au plus) : la bannière d'erreur de la
+     * carte du tunnel les coupe après deux lignes.
+     */
+    private fun refusePortProblem(config: TunnelConfig): SshResult.Error? {
+        val problem = TunnelPortRules.problemOf(config) ?: return null
+        val msg = when (problem) {
+            TunnelPortProblem.LOCAL_OUT_OF_RANGE  -> "Port local invalide : choisissez un port entre 1 et 65535"
+            TunnelPortProblem.LOCAL_RESERVED      -> "Android interdit les ports locaux sous 1024. Choisissez un port plus élevé."
+            TunnelPortProblem.REMOTE_OUT_OF_RANGE -> "Port distant invalide : choisissez un port entre 1 et 65535"
+        }
+        Timber.w("Tunnel refusé : port inutilisable (${problem.name})")
+        _tunnelStates.update { it + (config.id to TunnelState(config, TunnelStatus.ERROR, errorMessage = msg)) }
+        return SshResult.Error(SshErrorCode.UNKNOWN, msg)
+    }
+
+    /**
+     * Vrai quand le port local ne peut pas être pris. Toute exception compte comme « pris », pas
+     * seulement l'IOException du bind : un port hors plage lève une IllegalArgumentException, que
+     * [refusePortProblem] écarte déjà en amont, et rien ne doit faire planter l'appelant ici.
+     */
     private fun isPortInUse(port: Int): Boolean {
         return try {
             ServerSocket(port).use { false }
-        } catch (e: IOException) {
+        } catch (e: Exception) {
             true
         }
     }

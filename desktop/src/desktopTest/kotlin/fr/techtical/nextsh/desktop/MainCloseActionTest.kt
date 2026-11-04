@@ -22,6 +22,43 @@ private const val SECOND_NANOS = 1_000_000_000L
  */
 class MainCloseActionTest {
 
+    // ── runExitSequence ───────────────────────────────────────────────────────
+
+    @Test
+    fun `exit sequence hides the window before the teardown, then exits`() {
+        val steps = mutableListOf<String>()
+        runExitSequence(
+            hide = { steps += "hide" },
+            shutdown = { steps += "shutdown" },
+            exit = { steps += "exit" },
+        )
+        assertEquals(listOf("hide", "shutdown", "exit"), steps)
+    }
+
+    @Test
+    fun `exit sequence still exits when the shutdown throws, and rethrows`() {
+        val steps = mutableListOf<String>()
+        kotlin.test.assertFailsWith<IllegalStateException> {
+            runExitSequence(
+                hide = { steps += "hide" },
+                shutdown = { steps += "shutdown"; throw IllegalStateException("boom") },
+                exit = { steps += "exit" },
+            )
+        }
+        assertEquals(listOf("hide", "shutdown", "exit"), steps)
+    }
+
+    @Test
+    fun `exit sequence goes on when hiding the window fails`() {
+        val steps = mutableListOf<String>()
+        runExitSequence(
+            hide = { throw IllegalStateException("no native peer") },
+            shutdown = { steps += "shutdown" },
+            exit = { steps += "exit" },
+        )
+        assertEquals(listOf("shutdown", "exit"), steps)
+    }
+
     @Test
     fun `hides to tray when the setting is on and the tray icon is registered`() {
         val action = resolveCloseAction(

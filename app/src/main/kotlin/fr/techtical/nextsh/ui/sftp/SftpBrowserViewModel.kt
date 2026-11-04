@@ -17,6 +17,7 @@ import fr.techtical.nextsh.core.ssh.TransferDirection
 import fr.techtical.nextsh.core.ssh.TransferStatus
 import fr.techtical.nextsh.core.ssh.TransferState
 import fr.techtical.nextsh.core.ssh.TransferTracker
+import fr.techtical.nextsh.core.ssh.uploadEntryName
 import fr.techtical.nextsh.domain.model.SftpFile
 import fr.techtical.nextsh.domain.model.SortOrder
 import fr.techtical.nextsh.shared.domain.model.SshResult
@@ -640,7 +641,9 @@ class SftpBrowserViewModel @Inject constructor(
      * Démarre [SftpTransferService] via un Intent foreground service.
      *
      * @param sourceUri   URI SAF (content://) du fichier source local.
-     * @param displayName nom de fichier affiché (depuis les métadonnées SAF).
+     * @param displayName nom donné par le fournisseur de documents, assaini par
+     *                    [uploadEntryName] avant usage. Un nom inexploitable
+     *                    affiche « Nom de fichier invalide » sans démarrer le service.
      * @param fileSize    taille du fichier en octets (0 si inconnue).
      */
     fun uploadFile(sourceUri: Uri, displayName: String, fileSize: Long = 0L) =
@@ -653,6 +656,10 @@ class SftpBrowserViewModel @Inject constructor(
      * recréation de l'activité, ni l'identifiant de session ni le répertoire
      * courant de ce ViewModel ne sont encore renseignés. Le répertoire vaudrait
      * la racine et le fichier atterrirait au mauvais endroit.
+     *
+     * @param displayName nom donné par le fournisseur de documents, assaini par
+     *                    [uploadEntryName] avant usage. Un nom inexploitable
+     *                    affiche « Nom de fichier invalide » sans démarrer le service.
      */
     fun uploadFile(
         sessionId: String,
@@ -662,10 +669,20 @@ class SftpBrowserViewModel @Inject constructor(
         fileSize: Long = 0L,
     ) {
         if (!ensureSession(sessionId)) return
+        // Le nom vient du fournisseur de documents, donc d'une autre application :
+        // on ne le colle jamais tel quel au dossier distant (voir uploadEntryName).
+        val name = uploadEntryName(displayName)
+        if (name == null) {
+            Timber.w("SftpBrowserViewModel: envoi refusé, nom de fichier inexploitable")
+            _uiState.update {
+                it.copy(message = context.getString(R.string.sftp_error_name_invalid), messageIsError = true)
+            }
+            return
+        }
         val remotePath = if (remoteDir.endsWith('/')) {
-            "$remoteDir$displayName"
+            "$remoteDir$name"
         } else {
-            "$remoteDir/$displayName"
+            "$remoteDir/$name"
         }
         val intent = Intent(context, SftpTransferService::class.java).apply {
             putExtra(SftpTransferService.EXTRA_SESSION_ID,   sessionId)
@@ -673,11 +690,11 @@ class SftpBrowserViewModel @Inject constructor(
             putExtra(SftpTransferService.EXTRA_LOCAL_URI,    sourceUri.toString())
             putExtra(SftpTransferService.EXTRA_DIRECTION,    TransferDirection.UPLOAD.name)
             putExtra(SftpTransferService.EXTRA_FILE_SIZE,    fileSize)
-            putExtra(SftpTransferService.EXTRA_DISPLAY_NAME, displayName)
+            putExtra(SftpTransferService.EXTRA_DISPLAY_NAME, name)
         }
         if (!startTransferService(intent)) return
-        Timber.i("SftpBrowserViewModel: upload lancé pour '$displayName' → '$remotePath'")
-        _uiState.update { it.copy(message = "Envoi de $displayName démarré") }
+        Timber.i("SftpBrowserViewModel: upload started ($fileSize bytes)")
+        _uiState.update { it.copy(message = "Envoi de $name démarré") }
     }
 
     /**

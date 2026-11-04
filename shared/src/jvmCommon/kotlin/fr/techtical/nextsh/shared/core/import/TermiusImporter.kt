@@ -159,8 +159,19 @@ object TermiusImporter {
         val passwordStr = firstString(identity ?: host, PASSWORD_KEYS)
             ?: firstString(host, PASSWORD_KEYS)
 
-        val keyObject = resolveRef(host, KEY_REF_KEYS, keys)
-            ?: identity?.let { resolveRef(it, KEY_REF_KEYS, keys) }
+        val keyMatch = resolveRefMatch(host, KEY_REF_KEYS, keys)
+            ?: identity?.let { resolveRefMatch(it, KEY_REF_KEYS, keys) }
+        val keyObject = keyMatch?.obj
+
+        // Identity of the key inside the export, so that the hosts sharing one key can be
+        // linked to a single stored copy. The key's own id wins (a reference by label and a
+        // reference by id reach the same object); failing that, the scalar it was looked up
+        // by. An inline key without an id has no identity and stays private to its host.
+        val keySourceId = keyMatch?.let { firstString(it.obj, listOf("id")) ?: it.scalarRef }
+        val keyLabel = keyObject
+            ?.let { ImportSanitizer.sanitizeLabel(firstString(it, LABEL_KEYS), fallback = "") }
+            ?.takeIf { it.isNotEmpty() }
+
         val privateKeyPem = keyObject?.let { firstString(it, PRIVATE_KEY_KEYS) }?.takeIf { it.isNotBlank() }
         val keyPassphraseStr = keyObject?.let { firstString(it, PASSPHRASE_KEYS) }
 
@@ -183,6 +194,8 @@ object TermiusImporter {
             privateKeyPem = privateKeyPem,
             keyPassphrase = keyPassphraseStr?.takeIf { it.isNotEmpty() }?.toCharArray(),
             sourceId = sourceId,
+            keySourceId = keySourceId,
+            keyLabel = keyLabel,
         )
     }
 
@@ -197,14 +210,24 @@ object TermiusImporter {
         owner: JsonObject,
         refKeys: List<String>,
         collection: Map<String, JsonObject>,
-    ): JsonObject? {
+    ): JsonObject? = resolveRefMatch(owner, refKeys, collection)?.obj
+
+    /** A resolved reference: the object, plus the scalar id/name it was looked up by (null when inline). */
+    private class RefMatch(val obj: JsonObject, val scalarRef: String?)
+
+    /** Same resolution as [resolveRef], but also reports the scalar the object was found by. */
+    private fun resolveRefMatch(
+        owner: JsonObject,
+        refKeys: List<String>,
+        collection: Map<String, JsonObject>,
+    ): RefMatch? {
         for (key in refKeys) {
             val element = owner[key] ?: continue
             when (element) {
-                is JsonObject -> return element
+                is JsonObject -> return RefMatch(element, null)
                 is JsonPrimitive -> {
                     val id = element.contentOrNull ?: continue
-                    collection[id]?.let { return it }
+                    collection[id]?.let { return RefMatch(it, id) }
                 }
                 else -> Unit
             }

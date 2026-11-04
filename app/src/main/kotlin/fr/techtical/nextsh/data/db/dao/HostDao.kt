@@ -9,6 +9,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Upsert
 import fr.techtical.nextsh.data.db.entity.HostEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -51,13 +52,23 @@ interface HostDao {
     @Query("SELECT * FROM hosts WHERE isFavorite = 1 AND deleted = 0 ORDER BY label ASC")
     fun observeFavorites(): Flow<List<HostEntity>>
 
-    @Query("UPDATE hosts SET isFavorite = :isFavorite WHERE id = :id")
-    suspend fun updateFavorite(id: String, isFavorite: Boolean)
+    // The favorite flag is part of the synced payload: the clock and updatedAt must move with it.
+    @Query("UPDATE hosts SET isFavorite = :isFavorite, vectorClock = :vectorClock, updatedAt = :updatedAt WHERE id = :id AND deleted = 0")
+    suspend fun updateFavorite(id: String, isFavorite: Boolean, vectorClock: String, updatedAt: Long)
 
     // Sync: all rows including soft-deleted.
     @Query("SELECT * FROM hosts ORDER BY label ASC")
     suspend fun getAllIncludingDeleted(): List<HostEntity>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    // Sync: one row by id, tombstones included (getById hides them).
+    @Query("SELECT * FROM hosts WHERE id = :id")
+    suspend fun getByIdIncludingDeleted(id: String): HostEntity?
+
+    /**
+     * Insert, or UPDATE in place on primary-key conflict. Never REPLACE a host that may exist:
+     * REPLACE is delete + insert and tunnels.hostId is a CASCADE foreign key, so its tunnels
+     * would be wiped. [insert] is REPLACE: only safe for a new id.
+     */
+    @Upsert
     suspend fun upsert(host: HostEntity)
 }

@@ -261,13 +261,21 @@ fun ComposeTerminalRenderer(
     // 150 = ~5× une fenêtre typique de 30 lignes, sans le surcoût de lookup
     // LRU sur 500 entrées qu'on ne réutilise jamais (top/htop invalide tout
     // à chaque refresh). Évite aussi les re-creates inutiles sur resize.
-    val layoutCache = remember { TextLayoutCache(capacity = 150) }
-    // Invalidate all cached layouts when the palette changes (theme swap) or
-    // the font size changes. We detect palette identity via the background
-    // colour as a cheap proxy: a palette change always changes the
-    // background. A stale-size layout would keep drawing glyphs measured at
-    // the old fontSizeSp on top of cells now advancing at the new cellW/cellH.
-    LaunchedEffect(palette.background, fontSizeSp) { layoutCache.clear() }
+    //
+    // The hash only covers the line content, so anything that changes how a
+    // line measures must replace the cache: a stale layout keeps drawing
+    // glyphs at the old size on top of cells now advancing at the new
+    // cellW/cellH. Keyed on the font size and on `textMeasurer`, which
+    // `rememberTextMeasurer` recreates when the density changes (window moved
+    // to a monitor with another Windows scale factor): without it, unchanged
+    // lines such as a returning prompt stayed at the previous scale. Replaced
+    // during composition, so not a single frame is drawn from the stale cache.
+    val layoutCache = remember(textMeasurer, fontSizeSp) { TextLayoutCache(capacity = 150) }
+    // Theme swap: the palette is read in the draw phase, not here, so clear
+    // the cache when it changes. We detect palette identity via the
+    // background colour as a cheap proxy: a palette change always changes
+    // the background.
+    LaunchedEffect(palette.background) { layoutCache.clear() }
 
     // Track the last-reported terminal size to avoid spamming resize().
     var lastTermSize by remember { mutableStateOf(IntSize(80, 24)) }

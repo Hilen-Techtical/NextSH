@@ -187,9 +187,10 @@ class WinWebAuthnCoseCredentialParameters : Structure() {
  *
  * Ref: webauthn.h, WEBAUTHN_CLIENT_DATA_VERSION_1 (seule version)
  *
- * Pour SSH : on passe les bytes du challenge SSH dans `pbClientDataJSON` et
- * `pwszHashAlgId = "SHA-256"`. Windows calcule SHA-256(challenge) et l'utilise
- * comme clientDataHash dans l'assertion CTAP2 : exactement ce que SSH SK attend.
+ * Windows hache lui-même `pbClientDataJSON` (avec `pwszHashAlgId`) pour obtenir le
+ * clientDataHash : il ne faut donc pas y mettre un hash. Pour SSH, voir
+ * [WindowsWebAuthnProvider.buildSshClientData] et
+ * [fr.techtical.nextsh.desktop.core.auth.fido2.Fido2Signer.signChallenge].
  *
  * ```c
  * typedef struct _WEBAUTHN_CLIENT_DATA {

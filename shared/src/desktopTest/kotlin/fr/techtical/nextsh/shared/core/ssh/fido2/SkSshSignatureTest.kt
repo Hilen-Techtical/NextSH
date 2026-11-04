@@ -40,6 +40,7 @@ class SkSshSignatureTest {
         sig.close()
     }
 
+    @Suppress("DEPRECATION")
     @Test
     fun `encodeInner produces correct wire format`() {
         val rawSig = byteArrayOf(1, 2, 3, 4)

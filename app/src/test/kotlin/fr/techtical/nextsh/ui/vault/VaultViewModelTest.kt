@@ -4,6 +4,7 @@
 package fr.techtical.nextsh.ui.vault
 
 import fr.techtical.nextsh.core.ssh.SshKeyManager
+import fr.techtical.nextsh.core.vault.VaultAuthExpiredException
 import fr.techtical.nextsh.core.vault.VaultManager
 import fr.techtical.nextsh.domain.model.SshKey
 import fr.techtical.nextsh.domain.repository.SshKeyRepository
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -113,7 +115,7 @@ class VaultViewModelTest {
     }
 
     @Test
-    fun `deleteKey calls vaultManager deletePrivateKey and sshKeyRepository delete`() = runTest {
+    fun `deleteKey removes the private key, its passphrase and its certificate but never the password`() = runTest {
         val testKey = SshKey(
             id = "key-1",
             label = "My Key",
@@ -125,6 +127,8 @@ class VaultViewModelTest {
 
         coEvery { sshKeyRepository.getById(testKey.id) } returns testKey
         every { vaultManager.deletePrivateKey(testKey.id) } returns Unit
+        every { vaultManager.deleteKeyPassphrase(testKey.id) } returns Unit
+        every { vaultManager.deleteCertificate(testKey.id) } returns Unit
         coEvery { sshKeyRepository.delete(testKey.id) } returns Unit
 
         viewModel.deleteKey(testKey.id)
@@ -134,8 +138,39 @@ class VaultViewModelTest {
         // are unchanged, only the timing race is removed.
         awaitVerified {
             verify(exactly = 1) { vaultManager.deletePrivateKey(testKey.id) }
+            verify(exactly = 1) { vaultManager.deleteKeyPassphrase(testKey.id) }
+            verify(exactly = 1) { vaultManager.deleteCertificate(testKey.id) }
+            // Le mot de passe sous le même id peut appartenir à un hôte PASSWORD : intouchable.
+            verify(exactly = 0) { vaultManager.deletePassword(any()) }
             coVerify(exactly = 1) { sshKeyRepository.delete(testKey.id) }
             assertNotNull(viewModel.uiState.value.successMessage)
+        }
+    }
+
+    @Test
+    fun `deleteKey surfaces the error and keeps the key row when the passphrase deletion fails`() = runTest {
+        val testKey = SshKey(
+            id = "key-1",
+            label = "My Key",
+            keyType = fr.techtical.nextsh.domain.model.SshKeyType.ED25519,
+            publicKey = "ssh-ed25519 AAAA...",
+            isBiometric = false,
+            keystoreAlias = null,
+        )
+
+        coEvery { sshKeyRepository.getById(testKey.id) } returns testKey
+        every { vaultManager.deletePrivateKey(testKey.id) } returns Unit
+        every { vaultManager.deleteKeyPassphrase(testKey.id) } throws VaultAuthExpiredException()
+        coEvery { sshKeyRepository.delete(testKey.id) } returns Unit
+
+        viewModel.deleteKey(testKey.id)
+
+        awaitVerified {
+            assertNotNull(viewModel.uiState.value.error)
+            assertNull(viewModel.uiState.value.successMessage)
+            // La ligne de la clé reste : la suppression, idempotente, peut être relancée.
+            coVerify(exactly = 0) { sshKeyRepository.delete(any()) }
+            verify(exactly = 0) { vaultManager.deletePassword(any()) }
         }
     }
 }

@@ -84,7 +84,9 @@ class DesktopClipboardManager(
 
     private fun onClipboardChanged(newText: String?) {
         if (newText.isNullOrEmpty()) return
-        if (!isOriginatedFromUs()) {
+        // An OSC 52 copy from a background pane can land while no NextSH
+        // window is focused: [RemoteClipboardWriter] vouches for it.
+        if (!RemoteClipboardWriter.claim(newText) && !isOriginatedFromUs()) {
             // External app's copy: cancel any pending clear so we don't
             // wipe the user's external content at our timer's expiry.
             clearJob?.cancel()

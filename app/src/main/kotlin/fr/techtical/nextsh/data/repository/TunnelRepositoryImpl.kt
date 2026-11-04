@@ -72,7 +72,13 @@ class TunnelRepositoryImpl @Inject constructor(
         tunnelDao.observeFavorites().map { list -> list.map { it.toDomain() } }
 
     override suspend fun setFavorite(id: String, isFavorite: Boolean) {
-        tunnelDao.updateFavorite(id, isFavorite)
+        // isFavorite is synced: an un-ticked write never wins a sync, so a favorite change is a
+        // regular edit. getById ignores tombstones, a deleted row stays untouched.
+        val existing = tunnelDao.getById(id) ?: return
+        if (existing.isFavorite == isFavorite) return
+        val now = System.currentTimeMillis()
+        val newClock = VectorClockCodec.decode(existing.vectorClock).tick(DeviceIdentity.deviceId(), now)
+        tunnelDao.updateFavorite(id, isFavorite, VectorClockCodec.encode(newClock), now)
     }
 
     // Sync primitives
@@ -90,9 +96,11 @@ class TunnelRepositoryImpl @Inject constructor(
         }
 
     override suspend fun upsertSyncEntry(entry: SyncEntry<TunnelConfig>) {
+        // Update in place (see HostDao.upsert, same rule). The local-only createdAt is read,
+        // tombstones included, and kept.
+        val existing = tunnelDao.getByIdIncludingDeleted(entry.id)
         val payload = entry.payload
         if (payload == null) {
-            val existing = tunnelDao.getAllIncludingDeleted().firstOrNull { it.id == entry.id }
             if (existing != null) {
                 tunnelDao.upsert(
                     existing.copy(
@@ -104,8 +112,10 @@ class TunnelRepositoryImpl @Inject constructor(
                 )
             }
         } else {
+            val fresh = TunnelEntity.fromDomain(payload)
             tunnelDao.upsert(
-                TunnelEntity.fromDomain(payload).copy(
+                fresh.copy(
+                    createdAt = existing?.createdAt ?: fresh.createdAt,
                     vectorClock = VectorClockCodec.encode(entry.clock),
                     deleted = entry.deleted,
                     deletedAt = entry.deletedAt,

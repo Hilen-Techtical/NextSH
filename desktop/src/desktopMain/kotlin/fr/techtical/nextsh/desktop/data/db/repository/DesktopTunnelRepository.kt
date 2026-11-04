@@ -93,7 +93,19 @@ class DesktopTunnelRepository(db: NextShDatabase) : TunnelRepository {
         q.selectFavorites().asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map(::toDomain) }
 
     override suspend fun setFavorite(id: String, isFavorite: Boolean) = withContext(Dispatchers.IO) {
-        q.setFavorite(if (isFavorite) 1L else 0L, id)
+        // isFavorite is part of the synced payload: a write that does not tick the vector clock
+        // never wins a sync and is overwritten by the next edit coming from the other device.
+        val existing = q.selectById(id).executeAsOneOrNull() ?: return@withContext
+        val target = if (isFavorite) 1L else 0L
+        if (existing.isFavorite == target) return@withContext
+        val now = System.currentTimeMillis()
+        val newClock = VectorClockCodec.decode(existing.vectorClock).tick(DeviceIdentity.deviceId(), now)
+        q.setFavorite(
+            isFavorite = target,
+            vectorClock = VectorClockCodec.encode(newClock),
+            updatedAt = now,
+            id = id,
+        )
     }
 
     // Sync primitives
@@ -112,36 +124,59 @@ class DesktopTunnelRepository(db: NextShDatabase) : TunnelRepository {
     }
 
     override suspend fun upsertSyncEntry(entry: SyncEntry<TunnelConfig>) = withContext(Dispatchers.IO) {
-        val payload = entry.payload
-        if (payload == null) {
-            val existing = q.selectAllIncludingDeleted().executeAsList().firstOrNull { it.id == entry.id }
-            if (existing != null) {
-                q.markDeleted(
-                    deletedAt = entry.deletedAt ?: System.currentTimeMillis(),
-                    updatedAt = entry.updatedAt,
+        // INSERT OR REPLACE is a DELETE then an INSERT and resets createdAt on every sync. Update the row
+        // in place when it exists (live or tombstoned), insert otherwise.
+        q.transaction {
+            val payload = entry.payload
+            val rowId = payload?.id ?: entry.id
+            val existing = q.selectByIdIncludingDeleted(rowId).executeAsOneOrNull()
+            if (payload == null) {
+                if (existing != null) {
+                    q.markDeleted(
+                        deletedAt = entry.deletedAt ?: System.currentTimeMillis(),
+                        updatedAt = entry.updatedAt,
+                        vectorClock = VectorClockCodec.encode(entry.clock),
+                        id = entry.id,
+                    )
+                }
+            } else if (existing != null) {
+                q.updateFromSync(
+                    label = payload.label,
+                    hostId = payload.hostId,
+                    type = payload.type.name,
+                    localPort = payload.localPort.toLong(),
+                    remoteHost = payload.remoteHost,
+                    remotePort = payload.remotePort.toLong(),
+                    autoStart = if (payload.autoStart) 1L else 0L,
+                    openBrowserOnConnect = if (payload.openBrowserOnConnect) 1L else 0L,
+                    keepAliveAfterBrowserClose = if (payload.keepAliveAfterBrowserClose) 1L else 0L,
+                    isFavorite = if (payload.isFavorite) 1L else 0L,
                     vectorClock = VectorClockCodec.encode(entry.clock),
-                    id = entry.id,
+                    deleted = if (entry.deleted) 1L else 0L,
+                    deletedAt = entry.deletedAt,
+                    updatedAt = entry.updatedAt,
+                    id = payload.id,
+                )
+            } else {
+                q.insert(
+                    id = payload.id,
+                    label = payload.label,
+                    hostId = payload.hostId,
+                    type = payload.type.name,
+                    localPort = payload.localPort.toLong(),
+                    remoteHost = payload.remoteHost,
+                    remotePort = payload.remotePort.toLong(),
+                    autoStart = if (payload.autoStart) 1L else 0L,
+                    openBrowserOnConnect = if (payload.openBrowserOnConnect) 1L else 0L,
+                    keepAliveAfterBrowserClose = if (payload.keepAliveAfterBrowserClose) 1L else 0L,
+                    isFavorite = if (payload.isFavorite) 1L else 0L,
+                    createdAt = System.currentTimeMillis(),
+                    vectorClock = VectorClockCodec.encode(entry.clock),
+                    deleted = if (entry.deleted) 1L else 0L,
+                    deletedAt = entry.deletedAt,
+                    updatedAt = entry.updatedAt,
                 )
             }
-        } else {
-            q.insert(
-                id = payload.id,
-                label = payload.label,
-                hostId = payload.hostId,
-                type = payload.type.name,
-                localPort = payload.localPort.toLong(),
-                remoteHost = payload.remoteHost,
-                remotePort = payload.remotePort.toLong(),
-                autoStart = if (payload.autoStart) 1L else 0L,
-                openBrowserOnConnect = if (payload.openBrowserOnConnect) 1L else 0L,
-                keepAliveAfterBrowserClose = if (payload.keepAliveAfterBrowserClose) 1L else 0L,
-                isFavorite = if (payload.isFavorite) 1L else 0L,
-                createdAt = System.currentTimeMillis(),
-                vectorClock = VectorClockCodec.encode(entry.clock),
-                deleted = if (entry.deleted) 1L else 0L,
-                deletedAt = entry.deletedAt,
-                updatedAt = entry.updatedAt,
-            )
         }
     }
 

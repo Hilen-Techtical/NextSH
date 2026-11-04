@@ -76,7 +76,13 @@ class HostRepositoryImpl @Inject constructor(
         hostDao.observeFavorites().map { list -> list.map { it.toDomain() } }
 
     override suspend fun setFavorite(id: String, isFavorite: Boolean) {
-        hostDao.updateFavorite(id, isFavorite)
+        // isFavorite is synced: an un-ticked write never wins a sync, so a favorite change is a
+        // regular edit. getById ignores tombstones, a deleted row stays untouched.
+        val existing = hostDao.getById(id) ?: return
+        if (existing.isFavorite == isFavorite) return
+        val now = System.currentTimeMillis()
+        val newClock = VectorClockCodec.decode(existing.vectorClock).tick(DeviceIdentity.deviceId(), now)
+        hostDao.updateFavorite(id, isFavorite, VectorClockCodec.encode(newClock), now)
     }
 
     // Sync primitives
@@ -94,10 +100,12 @@ class HostRepositoryImpl @Inject constructor(
         }
 
     override suspend fun upsertSyncEntry(entry: SyncEntry<Host>) {
+        // Update in place (see HostDao.upsert): REPLACE would cascade-delete the tunnels.
+        // Local-only columns are read, tombstones included, and kept.
+        val existing = hostDao.getByIdIncludingDeleted(entry.id)
         val payload = entry.payload
         if (payload == null) {
             // Propagating a remote soft-delete: keep metadata, null payload.
-            val existing = hostDao.getAllIncludingDeleted().firstOrNull { it.id == entry.id }
             if (existing != null) {
                 hostDao.upsert(
                     existing.copy(
@@ -109,8 +117,11 @@ class HostRepositoryImpl @Inject constructor(
                 )
             }
         } else {
+            val fresh = HostEntity.fromDomain(payload)
             hostDao.upsert(
-                HostEntity.fromDomain(payload).copy(
+                fresh.copy(
+                    createdAt = existing?.createdAt ?: fresh.createdAt,
+                    lastConnectedAt = existing?.lastConnectedAt,
                     vectorClock = VectorClockCodec.encode(entry.clock),
                     deleted = entry.deleted,
                     deletedAt = entry.deletedAt,

@@ -1,6 +1,6 @@
 # NextSH
 
-[![Version](https://img.shields.io/badge/version-1.0.0-8B1A2F)](https://github.com/Hilen-Techtical/NextSH/releases)
+[![Version](https://img.shields.io/badge/version-1.0.1-8B1A2F)](https://github.com/Hilen-Techtical/NextSH/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-C9A84C)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Windows%20%7C%20Linux-blue)](https://github.com/Hilen-Techtical/NextSH/releases)
 
@@ -18,16 +18,14 @@ Built by [Techtical](https://www.techtical.fr).
 
 | Platform | Format | File |
 |---|---|---|
-| Android | APK | [NextSH-1.0.0.apk](https://github.com/Hilen-Techtical/NextSH/releases/download/android-v1.0.0/NextSH-1.0.0.apk) |
-| Windows | MSI installer | [NextSH-1.0.0.msi](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.0.0/NextSH-1.0.0.msi) |
-| Windows | EXE installer | [NextSH-1.0.0-setup.exe](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.0.0/NextSH-1.0.0-setup.exe) |
-| Linux | AppImage | [NextSH-1.0.0.AppImage](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.0.0/NextSH-1.0.0.AppImage) |
-| Linux | .deb | [NextSH_1.0.0-1_amd64.deb](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.0.0/NextSH_1.0.0-1_amd64.deb) |
+| Android | APK | [NextSH-1.0.1.apk](https://github.com/Hilen-Techtical/NextSH/releases/download/android-v1.0.1/NextSH-1.0.1.apk) |
+| Windows | MSI installer | [NextSH-1.0.1.msi](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.0.1/NextSH-1.0.1.msi) |
+| Windows | EXE installer | [NextSH-1.0.1-setup.exe](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.0.1/NextSH-1.0.1-setup.exe) |
+| Linux | AppImage | [NextSH-1.0.1.AppImage](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.0.1/NextSH-1.0.1.AppImage) |
+| Linux | .deb | [NextSH_1.0.1-1_amd64.deb](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.0.1/NextSH_1.0.1-1_amd64.deb) |
 
 
 ---
-
-https://github.com/user-attachments/assets/fd71ba77-e841-4817-b552-afb88129bfc1
 
 ## Features
 

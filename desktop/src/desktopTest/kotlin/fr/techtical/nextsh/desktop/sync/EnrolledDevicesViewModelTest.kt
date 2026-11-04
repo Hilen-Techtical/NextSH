@@ -74,21 +74,20 @@ class EnrolledDevicesViewModelTest {
             passwordStore[credentialId] = password
         }
         override suspend fun getPassword(credentialId: String): CharArray? = passwordStore[credentialId]
+        override suspend fun deletePassword(credentialId: String) {
+            deletedKeys.add(credentialId)
+            passwordStore.remove(credentialId)
+        }
         override suspend fun storePrivateKey(keyId: String, privateKeyPem: String) {
             keyStore[keyId] = privateKeyPem
         }
         override suspend fun getPrivateKey(keyId: String): String? = keyStore[keyId]
+        override suspend fun deletePrivateKey(keyId: String) { keyStore.remove(keyId) }
         override suspend fun storeCertificate(certId: String, certPem: String) {
             certStore[certId] = certPem
         }
         override suspend fun getCertificate(certId: String): String? = certStore[certId]
         override suspend fun deleteCertificate(certId: String) { certStore.remove(certId) }
-        override suspend fun deleteCredential(credentialId: String) {
-            deletedKeys.add(credentialId)
-            passwordStore.remove(credentialId)
-            keyStore.remove(credentialId)
-            certStore.remove(credentialId)
-        }
         override suspend fun wipeVault() {
             passwordStore.clear()
             keyStore.clear()

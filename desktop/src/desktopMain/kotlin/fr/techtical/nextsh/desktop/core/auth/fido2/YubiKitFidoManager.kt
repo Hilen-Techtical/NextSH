@@ -306,7 +306,7 @@ class YubiKitFidoManager(
      * Stratégie : HID FIDO d'abord, PC/SC en fallback.
      *
      * @param rpId Domaine logique de la clé SSH (ex. "ssh:")
-     * @param clientDataHash SHA-256 du challenge SSH (32 bytes)
+     * @param clientDataHash clientDataHash CTAP2 déjà calculé (32 bytes), voir [Fido2Signer.signChallenge]
      * @param credentialId Id de la credential FIDO2 (depuis la clé publique sk-*)
      * @param requireUv true si la clé exige user-verification (PIN)
      * @param timeoutMs Timeout en ms avant [FidoError.TouchTimeout] (défaut 30s)

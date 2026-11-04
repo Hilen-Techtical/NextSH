@@ -7,10 +7,12 @@ import fr.techtical.nextsh.domain.model.SftpFile
 import fr.techtical.nextsh.domain.model.SshErrorCode
 import fr.techtical.nextsh.shared.domain.model.SshResult
 import io.mockk.coEvery
+import io.mockk.Runs
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
+import io.mockk.just
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import net.schmizz.sshj.SSHClient
@@ -214,6 +216,28 @@ class SftpManagerTest {
         assertEquals(SshErrorCode.AUTH_FAILED, (result as SshResult.Error).code)
     }
 
+    @Test
+    fun `listDirectory passes paths with plus and percent to the SFTP client unchanged`() = runTest {
+        val sessionId = "session-1"
+        val paths = listOf("/home/u/x+y", "/home/u/100%", "/home/u/%2e%2e", "/home/u/a%20b")
+        val mockSSHClient = mockk<SSHClient>()
+        val mockSftpClient = mockk<SFTPClient>()
+        val received = mutableListOf<String>()
+
+        every { mockSSHClient.newSFTPClient() } returns mockSftpClient
+        coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
+        every { mockSftpClient.ls(capture(received)) } returns emptyList()
+
+        sftpManager.openSftp(sessionId)
+        for (path in paths) {
+            val result = sftpManager.listDirectory(sessionId, path)
+            assertTrue(result is SshResult.Success, "listDirectory($path) doit réussir")
+        }
+
+        // Argument exact reçu par le client : ni "+" en espace, ni "%XX" décodé.
+        assertEquals(paths, received)
+    }
+
     // ── sanitizePath tests ───────────────────────────────────────────────────────
 
     @Test
@@ -223,10 +247,11 @@ class SftpManagerTest {
     }
 
     @Test
-    fun `sanitizePath converts Windows backslashes to forward slashes`() {
-        val result = sftpManager.sanitizePath("C:\\home\\user")
-        // Windows drive letter with colon becomes part of the path
-        assertEquals("/C:/home/user", result)
+    fun `sanitizePath keeps backslashes as part of the name`() {
+        // Sur un serveur POSIX « \ » est un caractère de nom : « x\..\.. » ne doit pas
+        // remonter de deux dossiers.
+        assertEquals("/home/u/x\\..\\..", sftpManager.sanitizePath("/home/u/x\\..\\.."))
+        assertEquals("/home/u/..\\.bashrc", sftpManager.sanitizePath("/home/u/..\\.bashrc"))
     }
 
     @Test
@@ -309,17 +334,34 @@ class SftpManagerTest {
     }
 
     @Test
-    fun `sanitizePath rejects URL-encoded traversal`() {
-        // %2e%2e = ".." URL-encoded
+    fun `sanitizePath keeps percent-encoded dots as literal names`() {
+        // Un chemin SFTP n'est pas une URL : "%2e%2e" est un nom de dossier
+        // littéral, pas une remontée. Le serveur ne le décode pas non plus.
         val result = sftpManager.sanitizePath("/%2e%2e/%2e%2e/etc/passwd")
-        assertNull(result)
+        assertEquals("/%2e%2e/%2e%2e/etc/passwd", result)
     }
 
     @Test
-    fun `sanitizePath decodes URL-encoded null byte`() {
-        // %00 = null byte URL-encoded
+    fun `sanitizePath keeps percent-encoded null as literal text`() {
+        // "%00" n'est que du texte : seul un vrai null-byte est rejeté (voir
+        // le test d'injection null-byte plus haut).
         val result = sftpManager.sanitizePath("/home/user%00/file")
-        assertNull(result)
+        assertEquals("/home/user%00/file", result)
+    }
+
+    @Test
+    fun `sanitizePath keeps plus sign literal`() {
+        // "+" ne doit jamais devenir une espace (décodage application/x-www-form-urlencoded)
+        assertEquals("/home/u/x+y", sftpManager.sanitizePath("/home/u/x+y"))
+        assertEquals("/home/u/a b+c", sftpManager.sanitizePath("/home/u/a b+c"))
+    }
+
+    @Test
+    fun `sanitizePath keeps percent sequences literal`() {
+        assertEquals("/home/u/100%", sftpManager.sanitizePath("/home/u/100%"))
+        assertEquals("/home/u/50%zz", sftpManager.sanitizePath("/home/u/50%zz"))
+        assertEquals("/home/u/a%20b", sftpManager.sanitizePath("/home/u/a%20b"))
+        assertEquals("/home/u/%2e%2e", sftpManager.sanitizePath("/home/u/%2e%2e"))
     }
 
     // ── permissionsString tests ────────────────────────────────────────────────────
@@ -615,6 +657,27 @@ class SftpManagerTest {
         assertTrue(result is SshResult.Error)
     }
 
+    @Test
+    fun `createDirectory keeps plus and percent in the path literal`() = runTest {
+        val sessionId = "session-1"
+        val paths = listOf("/home/u/x+y", "/home/u/100%")
+        val mockSSHClient = mockk<SSHClient>()
+        val mockSftpClient = mockk<SFTPClient>()
+        val created = mutableListOf<String>()
+
+        every { mockSSHClient.newSFTPClient() } returns mockSftpClient
+        coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
+        every { mockSftpClient.mkdir(capture(created)) } just Runs
+
+        sftpManager.openSftp(sessionId)
+        for (path in paths) {
+            val result = sftpManager.createDirectory(sessionId, path)
+            assertTrue(result is SshResult.Success, "createDirectory($path) doit réussir")
+        }
+
+        assertEquals(paths, created)
+    }
+
     // ── delete tests ─────────────────────────────────────────────────────────────
 
     @Test
@@ -668,6 +731,30 @@ class SftpManagerTest {
 
         assertTrue(result is SshResult.Error)
         assertEquals("Impossible de supprimer un dossier avec cette opération", (result as SshResult.Error).message)
+    }
+
+    @Test
+    fun `delete passes paths with plus and percent to the SFTP client unchanged`() = runTest {
+        val sessionId = "session-1"
+        val paths = listOf(
+            "/home/u/x+y", "/home/u/100%", "/home/u/%2e%2e", "/home/u/a%20b",
+            "/home/u/x\\..\\..", "/home/u/..\\.bashrc",
+        )
+        val mockSSHClient = mockk<SSHClient>()
+        val mockSftpClient = mockk<SFTPClient>()
+        val removed = mutableListOf<String>()
+
+        every { mockSSHClient.newSFTPClient() } returns mockSftpClient
+        coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
+        every { mockSftpClient.rm(capture(removed)) } just Runs
+
+        sftpManager.openSftp(sessionId)
+        for (path in paths) {
+            val result = sftpManager.delete(sessionId, path)
+            assertTrue(result is SshResult.Success, "delete($path) doit réussir")
+        }
+
+        assertEquals(paths, removed)
     }
 
     // ── deleteRecursive tests ────────────────────────────────────────────────────
@@ -731,6 +818,45 @@ class SftpManagerTest {
 
         assertTrue(result is SshResult.Error)
         assertEquals("Permission refusée", (result as SshResult.Error).message)
+    }
+
+    @Test
+    fun `deleteRecursive on a folder with a plus sign only touches that folder`() = runTest {
+        val sessionId = "session-1"
+        val basePath = "/home/u/x+y"
+        val mockSSHClient = mockk<SSHClient>()
+        val mockSftpClient = mockk<SFTPClient>()
+        val fileInfo = mockk<RemoteResourceInfo>()
+        val dirInfo = mockk<RemoteResourceInfo>()
+        val mockAttrs = mockk<net.schmizz.sshj.sftp.FileAttributes>()
+        val removedFiles = mutableListOf<String>()
+        val removedDirs = mutableListOf<String>()
+
+        every { mockSSHClient.newSFTPClient() } returns mockSftpClient
+        coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
+        every { fileInfo.name } returns "a.txt"
+        every { fileInfo.path } returns "$basePath/a.txt"
+        every { fileInfo.isDirectory } returns false
+        every { fileInfo.attributes } returns mockAttrs
+        every { dirInfo.name } returns "sub+dir"
+        every { dirInfo.path } returns "$basePath/sub+dir"
+        every { dirInfo.isDirectory } returns true
+        every { dirInfo.attributes } returns mockAttrs
+        every { mockAttrs.type } returns FileMode.Type.REGULAR
+
+        // Seuls les chemins littéraux sont stubbés : un décodage (cible "/home/u/x y")
+        // ferait lever le mock strict, donc échouer le test.
+        every { mockSftpClient.ls(basePath) } returns listOf(fileInfo, dirInfo)
+        every { mockSftpClient.ls("$basePath/sub+dir") } returns emptyList()
+        every { mockSftpClient.rm(capture(removedFiles)) } just Runs
+        every { mockSftpClient.rmdir(capture(removedDirs)) } just Runs
+
+        sftpManager.openSftp(sessionId)
+        val result = sftpManager.deleteRecursive(sessionId, basePath)
+
+        assertTrue(result is SshResult.Success)
+        assertEquals(listOf("$basePath/a.txt"), removedFiles)
+        assertEquals(listOf("$basePath/sub+dir", basePath), removedDirs)
     }
 
     // ── rename tests ─────────────────────────────────────────────────────────────
@@ -810,6 +936,26 @@ class SftpManagerTest {
 
         assertTrue(result is SshResult.Error)
         assertEquals("Un fichier portant ce nom existe déjà", (result as SshResult.Error).message)
+    }
+
+    @Test
+    fun `rename keeps plus and percent literal in the old and new paths`() = runTest {
+        val sessionId = "session-1"
+        val mockSSHClient = mockk<SSHClient>()
+        val mockSftpClient = mockk<SFTPClient>()
+        val oldPaths = mutableListOf<String>()
+        val newPaths = mutableListOf<String>()
+
+        every { mockSSHClient.newSFTPClient() } returns mockSftpClient
+        coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
+        every { mockSftpClient.rename(capture(oldPaths), capture(newPaths)) } just Runs
+
+        sftpManager.openSftp(sessionId)
+        val result = sftpManager.rename(sessionId, "/home/u/x+y", "100%41")
+
+        assertTrue(result is SshResult.Success)
+        assertEquals(listOf("/home/u/x+y"), oldPaths)
+        assertEquals(listOf("/home/u/100%41"), newPaths)
     }
 
     // ── chmod tests ──────────────────────────────────────────────────────────────

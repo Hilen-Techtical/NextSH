@@ -20,6 +20,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -49,9 +52,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -59,6 +66,7 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Save
 import com.composables.icons.lucide.Trash2
 import fr.techtical.nextsh.R
+import fr.techtical.nextsh.domain.model.TunnelPortProblem
 import fr.techtical.nextsh.domain.model.TunnelType
 import fr.techtical.nextsh.ui.components.ConfirmDeleteDialog
 import fr.techtical.nextsh.ui.components.NextShTextField
@@ -98,6 +106,11 @@ fun TunnelConfigScreen(
     val isEditing = tunnelId != null
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showHostDropdown by remember { mutableStateOf(false) }
+    // Which port field the user is typing in: it decides when a message may show (see
+    // TunnelFormState.localPortProblemToShow). Per type, so a field that leaves the screen when
+    // the type changes cannot keep a stale "focused".
+    var localPortFocused by remember(form.type) { mutableStateOf(false) }
+    var remotePortFocused by remember(form.type) { mutableStateOf(false) }
 
     LaunchedEffect(tunnelId) {
         if (tunnelId != null) viewModel.loadTunnelForEdit(tunnelId) else viewModel.resetForm()
@@ -161,6 +174,11 @@ fun TunnelConfigScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // La marge basse de padding est la barre Enregistrer, qui passe
+                // sous le clavier ouvert. Non consommee, imePadding l ajoutait a
+                // la hauteur du clavier : une bande noire de la hauteur de la
+                // barre restait au-dessus du clavier et masquait le formulaire.
+                .consumeWindowInsets(padding)
                 .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.Lg, vertical = Spacing.Md),
@@ -255,60 +273,82 @@ fun TunnelConfigScreen(
             ) {
                 when (form.type) {
                     TunnelType.LOCAL_FORWARD -> {
-                        NextShTextField(
-                            value = form.localPort,
-                            onValueChange = { v -> viewModel.updateForm { copy(localPort = v) } },
-                            label = stringResource(R.string.label_local_port),
-                            placeholder = stringResource(R.string.placeholder_local_port),
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
-                            NextShTextField(
-                                value = form.remoteHost,
-                                onValueChange = { v -> viewModel.updateForm { copy(remoteHost = v) } },
-                                label = stringResource(R.string.label_remote_host),
-                                placeholder = stringResource(R.string.placeholder_remote_host),
-                                modifier = Modifier.weight(2f),
+                        PortField(problem = form.localPortProblemToShow(localPortFocused)) { isError ->
+                            PortTextField(
+                                value = form.localPort,
+                                onValueChange = { v -> viewModel.updateForm { copy(localPort = v) } },
+                                label = stringResource(R.string.label_local_port),
+                                placeholder = stringResource(R.string.placeholder_local_port),
+                                isError = isError,
+                                onFocusChange = { localPortFocused = it },
                             )
-                            NextShTextField(
-                                value = form.remotePort,
-                                onValueChange = { v -> viewModel.updateForm { copy(remotePort = v) } },
-                                label = stringResource(R.string.label_remote_port),
-                                placeholder = stringResource(R.string.placeholder_remote_port),
-                                modifier = Modifier.weight(1f),
-                            )
+                        }
+                        // Le message du port distant passe sous la rangee entiere : dans
+                        // la colonne etroite du port il se casserait mot a mot.
+                        PortField(problem = form.remotePortProblemToShow(remotePortFocused)) { isError ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
+                                NextShTextField(
+                                    value = form.remoteHost,
+                                    onValueChange = { v -> viewModel.updateForm { copy(remoteHost = v) } },
+                                    label = stringResource(R.string.label_remote_host),
+                                    placeholder = stringResource(R.string.placeholder_remote_host),
+                                    modifier = Modifier.weight(2f),
+                                )
+                                PortTextField(
+                                    value = form.remotePort,
+                                    onValueChange = { v -> viewModel.updateForm { copy(remotePort = v) } },
+                                    label = stringResource(R.string.label_remote_port),
+                                    placeholder = stringResource(R.string.placeholder_remote_port),
+                                    isError = isError,
+                                    onFocusChange = { remotePortFocused = it },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
                         }
                     }
                     TunnelType.REMOTE_FORWARD -> {
-                        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
-                            NextShTextField(
-                                value = form.remoteHost,
-                                onValueChange = { v -> viewModel.updateForm { copy(remoteHost = v) } },
-                                label = stringResource(R.string.label_remote_host),
-                                placeholder = "0.0.0.0",
-                                modifier = Modifier.weight(2f),
-                            )
-                            NextShTextField(
-                                value = form.remotePort,
-                                onValueChange = { v -> viewModel.updateForm { copy(remotePort = v) } },
-                                label = stringResource(R.string.label_remote_port),
-                                placeholder = stringResource(R.string.placeholder_local_port),
-                                modifier = Modifier.weight(1f),
+                        PortField(problem = form.remotePortProblemToShow(remotePortFocused)) { isError ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
+                                NextShTextField(
+                                    value = form.remoteHost,
+                                    onValueChange = { v -> viewModel.updateForm { copy(remoteHost = v) } },
+                                    label = stringResource(R.string.label_remote_host),
+                                    placeholder = "0.0.0.0",
+                                    modifier = Modifier.weight(2f),
+                                )
+                                PortTextField(
+                                    value = form.remotePort,
+                                    onValueChange = { v -> viewModel.updateForm { copy(remotePort = v) } },
+                                    label = stringResource(R.string.label_remote_port),
+                                    placeholder = stringResource(R.string.placeholder_local_port),
+                                    isError = isError,
+                                    onFocusChange = { remotePortFocused = it },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                        PortField(problem = form.localPortProblemToShow(localPortFocused)) { isError ->
+                            PortTextField(
+                                value = form.localPort,
+                                onValueChange = { v -> viewModel.updateForm { copy(localPort = v) } },
+                                label = stringResource(R.string.label_local_port),
+                                placeholder = "3000",
+                                isError = isError,
+                                onFocusChange = { localPortFocused = it },
                             )
                         }
-                        NextShTextField(
-                            value = form.localPort,
-                            onValueChange = { v -> viewModel.updateForm { copy(localPort = v) } },
-                            label = stringResource(R.string.label_local_port),
-                            placeholder = "3000",
-                        )
                     }
                     TunnelType.DYNAMIC_SOCKS5 -> {
-                        NextShTextField(
-                            value = form.localPort,
-                            onValueChange = { v -> viewModel.updateForm { copy(localPort = v) } },
-                            label = stringResource(R.string.label_local_socks5_port),
-                            placeholder = stringResource(R.string.placeholder_socks5_port),
-                        )
+                        PortField(problem = form.localPortProblemToShow(localPortFocused)) { isError ->
+                            PortTextField(
+                                value = form.localPort,
+                                onValueChange = { v -> viewModel.updateForm { copy(localPort = v) } },
+                                label = stringResource(R.string.label_local_socks5_port),
+                                placeholder = stringResource(R.string.placeholder_socks5_port),
+                                isError = isError,
+                                onFocusChange = { localPortFocused = it },
+                            )
+                        }
                         HelperText(
                             text = "Proxy SOCKS5 exposé sur localhost:${form.localPort.ifBlank { "?" }}.",
                         )
@@ -383,8 +423,65 @@ private fun FormSection(
 }
 
 @Composable
-private fun HelperText(text: String) {
-    Text(text = text, color = TextDisabled, fontSize = 11.sp)
+private fun HelperText(text: String, color: Color = TextDisabled) {
+    Text(text = text, color = color, fontSize = 11.sp)
+}
+
+/**
+ * Champ de port qui signale à [onFocusChange] quand il prend ou perd le focus.
+ *
+ * Le bouton Terminé du clavier lui retire le focus : sans cela le champ le garde clavier fermé,
+ * et le message qui attend la fin de la saisie ne s'afficherait pas, alors que Enregistrer reste
+ * inactif sans explication.
+ */
+@Composable
+private fun PortTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    isError: Boolean,
+    onFocusChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val focusManager = LocalFocusManager.current
+    NextShTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = label,
+        placeholder = placeholder,
+        isError = isError,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+        modifier = modifier.onFocusChanged { onFocusChange(it.isFocused) },
+    )
+}
+
+/**
+ * Un ou plusieurs champs de port suivis du message de [problem], en rouge, quand il y en a un.
+ * Le contenu recoit true quand le champ concerne doit s'afficher en erreur.
+ */
+@Composable
+private fun PortField(
+    problem: TunnelPortProblem?,
+    content: @Composable (isError: Boolean) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.Xs)) {
+        content(problem != null)
+        if (problem != null) {
+            HelperText(
+                text = stringResource(
+                    when (problem) {
+                        TunnelPortProblem.LOCAL_RESERVED -> R.string.error_tunnel_local_port_reserved
+                        TunnelPortProblem.LOCAL_OUT_OF_RANGE,
+                        TunnelPortProblem.REMOTE_OUT_OF_RANGE,
+                        -> R.string.error_tunnel_port_out_of_range
+                    },
+                ),
+                color = ErrorRed,
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

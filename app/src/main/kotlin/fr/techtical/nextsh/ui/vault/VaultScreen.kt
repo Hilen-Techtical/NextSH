@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.AlertDialog
@@ -53,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -1057,6 +1059,8 @@ fun BackupPassphraseDialog(
                     label = stringResource(R.string.label_passphrase),
                     isError = passphraseError != null,
                     visualTransformation = if (showPassphrase) VisualTransformation.None else PasswordVisualTransformation(),
+                    // Clavier de mot de passe sans correction : il ne doit pas apprendre la passphrase.
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrect = false),
                     trailingIcon = {
                         IconButton(onClick = { showPassphrase = !showPassphrase }) {
                             Icon(
@@ -1083,6 +1087,7 @@ fun BackupPassphraseDialog(
                         label = stringResource(R.string.label_confirm_passphrase),
                         isError = confirmationError != null,
                         visualTransformation = if (showConfirmation) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrect = false),
                         trailingIcon = {
                             IconButton(onClick = { showConfirmation = !showConfirmation }) {
                                 Icon(

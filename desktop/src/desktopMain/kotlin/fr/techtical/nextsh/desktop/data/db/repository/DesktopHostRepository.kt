@@ -102,7 +102,19 @@ class DesktopHostRepository(db: NextShDatabase) : HostRepository {
         q.selectFavorites().asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map(::toDomain) }
 
     override suspend fun setFavorite(id: String, isFavorite: Boolean) = withContext(Dispatchers.IO) {
-        q.setFavorite(if (isFavorite) 1L else 0L, id)
+        // isFavorite is part of the synced payload: a write that does not tick the vector clock
+        // never wins a sync and is overwritten by the next edit coming from the other device.
+        val existing = q.selectById(id).executeAsOneOrNull() ?: return@withContext
+        val target = if (isFavorite) 1L else 0L
+        if (existing.isFavorite == target) return@withContext
+        val now = System.currentTimeMillis()
+        val newClock = VectorClockCodec.decode(existing.vectorClock).tick(DeviceIdentity.deviceId(), now)
+        q.setFavorite(
+            isFavorite = target,
+            vectorClock = VectorClockCodec.encode(newClock),
+            updatedAt = now,
+            id = id,
+        )
     }
 
     // Sync primitives
@@ -121,39 +133,65 @@ class DesktopHostRepository(db: NextShDatabase) : HostRepository {
     }
 
     override suspend fun upsertSyncEntry(entry: SyncEntry<Host>) = withContext(Dispatchers.IO) {
-        val payload = entry.payload
-        if (payload == null) {
-            val existing = q.selectAllIncludingDeleted().executeAsList().firstOrNull { it.id == entry.id }
-            if (existing != null) {
-                q.markDeleted(
-                    deletedAt = entry.deletedAt ?: System.currentTimeMillis(),
-                    updatedAt = entry.updatedAt,
+        // INSERT OR REPLACE is a DELETE then an INSERT: it cascades to tunnels (tunnels.hostId is ON DELETE
+        // CASCADE, when foreign keys are enforced) and resets createdAt and lastConnectedAt. Update the
+        // row in place when it exists (live or tombstoned), insert otherwise.
+        q.transaction {
+            val payload = entry.payload
+            val rowId = payload?.id ?: entry.id
+            val existing = q.selectByIdIncludingDeleted(rowId).executeAsOneOrNull()
+            if (payload == null) {
+                if (existing != null) {
+                    q.markDeleted(
+                        deletedAt = entry.deletedAt ?: System.currentTimeMillis(),
+                        updatedAt = entry.updatedAt,
+                        vectorClock = VectorClockCodec.encode(entry.clock),
+                        id = entry.id,
+                    )
+                }
+            } else if (existing != null) {
+                q.updateFromSync(
+                    label = payload.label,
+                    hostname = payload.hostname,
+                    port = payload.port.toLong(),
+                    username = payload.username,
+                    authType = payload.authType.name,
+                    credentialId = payload.credentialId,
+                    group = payload.group,
+                    keepAliveSeconds = payload.keepAliveSeconds.toLong(),
+                    autoReconnect = if (payload.autoReconnect) 1L else 0L,
+                    terminalTheme = payload.terminalTheme,
+                    fido2Mode = payload.fido2Mode?.name,
+                    isFavorite = if (payload.isFavorite) 1L else 0L,
                     vectorClock = VectorClockCodec.encode(entry.clock),
-                    id = entry.id,
+                    deleted = if (entry.deleted) 1L else 0L,
+                    deletedAt = entry.deletedAt,
+                    updatedAt = entry.updatedAt,
+                    id = payload.id,
+                )
+            } else {
+                q.insert(
+                    id = payload.id,
+                    label = payload.label,
+                    hostname = payload.hostname,
+                    port = payload.port.toLong(),
+                    username = payload.username,
+                    authType = payload.authType.name,
+                    credentialId = payload.credentialId,
+                    group = payload.group,
+                    keepAliveSeconds = payload.keepAliveSeconds.toLong(),
+                    autoReconnect = if (payload.autoReconnect) 1L else 0L,
+                    terminalTheme = payload.terminalTheme,
+                    fido2Mode = payload.fido2Mode?.name,
+                    isFavorite = if (payload.isFavorite) 1L else 0L,
+                    createdAt = System.currentTimeMillis(),
+                    lastConnectedAt = null,
+                    vectorClock = VectorClockCodec.encode(entry.clock),
+                    deleted = if (entry.deleted) 1L else 0L,
+                    deletedAt = entry.deletedAt,
+                    updatedAt = entry.updatedAt,
                 )
             }
-        } else {
-            q.insert(
-                id = payload.id,
-                label = payload.label,
-                hostname = payload.hostname,
-                port = payload.port.toLong(),
-                username = payload.username,
-                authType = payload.authType.name,
-                credentialId = payload.credentialId,
-                group = payload.group,
-                keepAliveSeconds = payload.keepAliveSeconds.toLong(),
-                autoReconnect = if (payload.autoReconnect) 1L else 0L,
-                terminalTheme = payload.terminalTheme,
-                fido2Mode = payload.fido2Mode?.name,
-                isFavorite = if (payload.isFavorite) 1L else 0L,
-                createdAt = System.currentTimeMillis(),
-                lastConnectedAt = null,
-                vectorClock = VectorClockCodec.encode(entry.clock),
-                deleted = if (entry.deleted) 1L else 0L,
-                deletedAt = entry.deletedAt,
-                updatedAt = entry.updatedAt,
-            )
         }
     }
 

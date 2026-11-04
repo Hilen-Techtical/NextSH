@@ -33,6 +33,8 @@ import javax.inject.Singleton
  *
  * Sécurité :
  * - [sanitizePath] rejette les null-bytes et les traversées `..` hors de la racine.
+ *   Les chemins sont littéraux : aucun décodage URL (`+` et `%XX` sont des
+ *   caractères de nom de fichier ordinaires).
  * - [sanitizeFilename] supprime les caractères dangereux et les séparateurs.
  */
 @Singleton
@@ -345,7 +347,8 @@ class SftpManager @Inject constructor(
                 sftp.rm(entry.path)
             } else if (entry.isDirectory) {
                 deleteRecursiveInternal(sftp, entry.path)
-                sftp.rmdir(entry.path)
+                // L'appel récursif retire lui-même le sous-dossier : un second rmdir
+                // échouerait sur un vrai serveur et interromprait la suppression.
             } else {
                 sftp.rm(entry.path)
             }
@@ -706,7 +709,14 @@ class SftpManager @Inject constructor(
     /**
      * Sanitise un chemin SFTP distant.
      *
+     * Un chemin SFTP n'est pas une URL : il est utilisé tel quel, sans aucun
+     * décodage. `+` et `%XX` sont des caractères ordinaires de nom de fichier
+     * (un dossier `x+y` ou `100%` doit rester joignable) et `%2e%2e` est un nom
+     * littéral, pas une remontée : le serveur ne le décode pas non plus.
+     *
+     * - Rejette les chemins vides ou blancs
      * - Rejette les null-bytes (attaque null-byte injection)
+     * - Garde les `\` tels quels (caractère de nom ordinaire sur un serveur POSIX)
      * - Normalise les slashes multiples et les `.`
      * - Résout les segments `..` en remontant dans l'arborescence
      * - Rejette tout chemin résultant qui sort de la racine `/`
@@ -727,22 +737,11 @@ class SftpManager @Inject constructor(
             return null
         }
 
-        // Décoder les séquences percent-encoded (défense contre %2e%2e traversal)
-        val decoded = try {
-            java.net.URLDecoder.decode(path, "UTF-8")
-        } catch (e: IllegalArgumentException) {
-            Timber.w("sanitizePath: séquence encodée malformée dans '$path'")
-            return null
-        }
-
-        // Re-vérifier les null-bytes après décodage
-        if (decoded.contains('\u0000')) {
-            Timber.w("sanitizePath: null-byte détecté après décodage URL")
-            return null
-        }
-
-        // Normaliser les séparateurs Windows (défense en profondeur)
-        val normalized = decoded.replace('\\', '/')
+        // « \ » n'est pas converti : sur un serveur POSIX c'est un caractère de nom
+        // ordinaire, et un dossier nommé « x\..\.. » ferait sinon viser le parent du
+        // parent (une suppression viderait un autre dossier). Les serveurs Windows
+        // (Win32-OpenSSH) présentent déjà leurs chemins avec des « / ».
+        val normalized = path
 
         // Décomposer en segments
         val segments = normalized.split('/')
@@ -756,7 +755,7 @@ class SftpManager @Inject constructor(
                 segment == ".." -> {
                     if (resolved.isEmpty()) {
                         // Tentative de remonter au-dessus de la racine
-                        Timber.w("sanitizePath: traversée hors racine détectée dans '$path'")
+                        Timber.w("sanitizePath: traversée hors racine détectée")
                         return null
                     }
                     resolved.removeLast()
@@ -765,9 +764,7 @@ class SftpManager @Inject constructor(
             }
         }
 
-        val result = "/" + resolved.joinToString("/")
-        Timber.v("sanitizePath: '$path' → '$result'")
-        return result
+        return "/" + resolved.joinToString("/")
     }
 
     /**

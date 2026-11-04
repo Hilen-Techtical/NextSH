@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -138,6 +140,11 @@ fun KeyImportScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // La marge basse de padding est la barre Importer, qui passe
+                // sous le clavier ouvert. Non consommee, imePadding l ajoutait a
+                // la hauteur du clavier : une bande noire de la hauteur de la
+                // barre restait au-dessus du clavier et masquait le formulaire.
+                .consumeWindowInsets(padding)
                 .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.Lg, vertical = Spacing.Md),
@@ -178,6 +185,10 @@ fun KeyImportScreen(
                     singleLine    = false,
                     minLines      = 6,
                     minHeight     = 160.dp,
+                    // Pas de correction automatique sur une clé privée collée. Les suggestions du
+                    // clavier restent possibles : Compose 1.6 n'expose pas NO_SUGGESTIONS. Le type
+                    // de clavier reste celui d'un champ multiligne, le champ n'est pas masqué.
+                    keyboardOptions = KeyboardOptions(autoCorrect = false),
                 )
 
                 Box(
@@ -266,6 +277,11 @@ fun KeyImportScreen(
                         },
                         singleLine    = true,
                         visualTransformation = PasswordVisualTransformation(),
+                        // Clavier de mot de passe sans correction : il ne doit pas apprendre la passphrase.
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Password,
+                            autoCorrect = false,
+                        ),
                         textStyle = androidx.compose.ui.text.TextStyle(
                             fontFamily = JetBrainsMonoFamily,
                             fontSize   = 13.sp,
@@ -377,6 +393,7 @@ private fun FormField(
     singleLine: Boolean = true,
     minLines: Int = 1,
     minHeight: androidx.compose.ui.unit.Dp = 0.dp,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.Xs)) {
         Text(
@@ -391,6 +408,7 @@ private fun FormField(
             onValueChange = onValueChange,
             singleLine    = singleLine,
             minLines      = minLines,
+            keyboardOptions = keyboardOptions,
             placeholder = if (placeholder.isNotEmpty()) {
                 {
                     Text(

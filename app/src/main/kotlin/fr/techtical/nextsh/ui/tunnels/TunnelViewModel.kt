@@ -41,10 +41,63 @@ data class TunnelFormState(
     val openBrowserOnConnect: Boolean = false,
     val keepAliveAfterBrowserClose: Boolean = true,
 ) {
+    /**
+     * What is wrong with the local port as typed, for the message under the field.
+     *
+     * Null while the field is empty: nothing to blame yet, although an empty field still blocks
+     * the save ([isValid]). Text that is not a number (pasted) counts as out of range.
+     */
+    val localPortProblem: TunnelPortProblem?
+        get() = if (localPort.isBlank()) {
+            null
+        } else {
+            TunnelPortRules.localPortProblem(type, localPort.toIntOrNull() ?: NOT_A_PORT)
+        }
+
+    /** Same as [localPortProblem] for the remote port, which a SOCKS5 proxy does not have. */
+    val remotePortProblem: TunnelPortProblem?
+        get() = if (remotePort.isBlank()) {
+            null
+        } else {
+            TunnelPortRules.remotePortProblem(type, remotePort.toIntOrNull() ?: NOT_A_PORT)
+        }
+
+    /**
+     * The local port problem to show under the field now, [hasFocus] telling whether the user is
+     * still typing in it.
+     *
+     * Typing "8080" goes through "8", "80" and "808", which are reserved ports: showing that
+     * message and taking it back would make the form jump under the user's fingers. While the
+     * field has the focus, only a text that appending characters cannot fix is blamed (see
+     * [cannotBecomeValid]). The other problems wait for the field to lose the focus, and show at
+     * once on a form opened with the problem already there. This only decides what is displayed:
+     * [isValid] does not depend on the focus.
+     */
+    fun localPortProblemToShow(hasFocus: Boolean): TunnelPortProblem? =
+        localPortProblem?.takeIf { !hasFocus || cannotBecomeValid(localPort) }
+
+    /** Same as [localPortProblemToShow] for the remote port. */
+    fun remotePortProblemToShow(hasFocus: Boolean): TunnelPortProblem? =
+        remotePortProblem?.takeIf { !hasFocus || cannotBecomeValid(remotePort) }
+
     val isValid: Boolean
         get() = label.isNotBlank() && hostId.isNotBlank()
-                && localPort.toIntOrNull() != null
-                && (type == TunnelType.DYNAMIC_SOCKS5 || (remoteHost.isNotBlank() && remotePort.toIntOrNull() != null))
+                && localPort.isNotBlank() && localPortProblem == null
+                && (type == TunnelType.DYNAMIC_SOCKS5 || (remoteHost.isNotBlank()
+                        && remotePort.isNotBlank() && remotePortProblem == null))
+}
+
+/** Stands for a port field whose text is not a number: out of range for [TunnelPortRules]. */
+private const val NOT_A_PORT = -1
+
+/**
+ * True for a port text that no character typed after it can make valid: not a number, below zero
+ * or above the last port. "0" and the ports below 1024 are not in that case, they are the start of
+ * a longer port.
+ */
+private fun cannotBecomeValid(text: String): Boolean {
+    val port = text.toIntOrNull() ?: return true
+    return port < 0 || port > TunnelPortRules.MAX_PORT
 }
 
 sealed class TunnelEvent {
@@ -223,7 +276,9 @@ class TunnelViewModel @Inject constructor(
                 type = form.type,
                 localPort = form.localPort.toInt(),
                 remoteHost = form.remoteHost.trim(),
-                remotePort = form.remotePort.toInt(),
+                // A SOCKS5 proxy has no remote port and the form does not show one: its text can be
+                // empty, which toInt() would turn into a crash. Same convention as the Desktop form.
+                remotePort = if (form.type == TunnelType.DYNAMIC_SOCKS5) 0 else form.remotePort.toInt(),
                 autoStart = form.autoStart,
                 openBrowserOnConnect = form.openBrowserOnConnect,
                 keepAliveAfterBrowserClose = form.keepAliveAfterBrowserClose,

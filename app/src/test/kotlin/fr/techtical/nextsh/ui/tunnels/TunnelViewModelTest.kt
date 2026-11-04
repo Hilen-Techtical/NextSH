@@ -31,6 +31,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
@@ -176,5 +177,70 @@ class TunnelViewModelTest {
         val configSlot = slot<TunnelConfig>()
         coVerify(exactly = 1) { tunnelRepository.save(capture(configSlot)) }
         assertFalse(configSlot.captured.isFavorite, "isFavorite should be false for new tunnel")
+    }
+
+    // ── saveTunnel port rules ────────────────────────────────────────────────
+
+    @Test
+    fun `saveTunnel saves nothing while a port breaks the rules`() = runTest {
+        coJustRun { tunnelRepository.save(any()) }
+
+        val badForms = listOf<TunnelFormState.() -> TunnelFormState>(
+            { copy(type = TunnelType.LOCAL_FORWARD, localPort = "80") },
+            { copy(type = TunnelType.DYNAMIC_SOCKS5, localPort = "80") },
+            { copy(type = TunnelType.LOCAL_FORWARD, localPort = "70000") },
+            { copy(type = TunnelType.REMOTE_FORWARD, localPort = "0") },
+            { copy(type = TunnelType.LOCAL_FORWARD, localPort = "8080", remotePort = "70000") },
+        )
+        for (bad in badForms) {
+            viewModel.updateForm {
+                copy(label = "Tunnel", hostId = "host-1", remoteHost = "127.0.0.1", remotePort = "80").bad()
+            }
+            viewModel.saveTunnel()
+            advanceUntilIdle()
+        }
+
+        coVerify(exactly = 0) { tunnelRepository.save(any()) }
+    }
+
+    @Test
+    fun `saveTunnel accepts local port 80 for a remote forward`() = runTest {
+        coJustRun { tunnelRepository.save(any()) }
+
+        viewModel.updateForm {
+            copy(
+                label = "Remote",
+                hostId = "host-1",
+                type = TunnelType.REMOTE_FORWARD,
+                localPort = "80",
+                remoteHost = "0.0.0.0",
+                remotePort = "8080",
+            )
+        }
+        viewModel.saveTunnel()
+        advanceUntilIdle()
+
+        val configSlot = slot<TunnelConfig>()
+        coVerify(exactly = 1) { tunnelRepository.save(capture(configSlot)) }
+        assertEquals(80, configSlot.captured.localPort)
+        assertEquals(8080, configSlot.captured.remotePort)
+    }
+
+    @Test
+    fun `saveTunnel saves a new SOCKS5 tunnel whose remote port was never typed`() = runTest {
+        coJustRun { tunnelRepository.save(any()) }
+
+        // The SOCKS5 form has no remote port field: the text stays empty, and toInt() on an empty
+        // text used to crash the save.
+        viewModel.updateForm {
+            copy(label = "Proxy", hostId = "host-1", type = TunnelType.DYNAMIC_SOCKS5, localPort = "1080")
+        }
+        viewModel.saveTunnel()
+        advanceUntilIdle()
+
+        val configSlot = slot<TunnelConfig>()
+        coVerify(exactly = 1) { tunnelRepository.save(capture(configSlot)) }
+        assertEquals(1080, configSlot.captured.localPort)
+        assertEquals(0, configSlot.captured.remotePort)
     }
 }

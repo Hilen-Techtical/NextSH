@@ -17,6 +17,7 @@ import fr.techtical.nextsh.domain.model.SshErrorCode
 import fr.techtical.nextsh.domain.model.SshSession
 import fr.techtical.nextsh.domain.repository.HostRepository
 import fr.techtical.nextsh.domain.repository.SshKeyRepository
+import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 
 /**
@@ -71,7 +72,9 @@ class ConnectSessionUseCase @Inject constructor(
                                 SshErrorCode.AUTH_FAILED,
                                 "Clé SSH introuvable dans le vault pour ${host.label}"
                             )
-                        val result = sessionManager.connectWithKey(host, privateKey)
+                        val result = withKeyPassphrase(host.credentialId) { passphrase ->
+                            sessionManager.connectWithKey(host, privateKey, passphrase)
+                        }
 
                         if (result is SshResult.Success) {
                             hostRepository.updateLastConnected(host.id)
@@ -97,7 +100,9 @@ class ConnectSessionUseCase @Inject constructor(
                                 SshErrorCode.AUTH_FAILED,
                                 "Certificat introuvable dans le vault pour ${host.label}"
                             )
-                        val result = sessionManager.connectWithCertificate(host, privateKey, certificate)
+                        val result = withKeyPassphrase(host.credentialId) { passphrase ->
+                            sessionManager.connectWithCertificate(host, privateKey, certificate, passphrase)
+                        }
 
                         if (result is SshResult.Success) {
                             hostRepository.updateLastConnected(host.id)
@@ -149,17 +154,27 @@ class ConnectSessionUseCase @Inject constructor(
                                     SshErrorCode.FIDO2_NO_KEY,
                                     "Clé SSH associée au passkey introuvable pour ${host.label}"
                                 )
-                            val privateKey = vaultManager.getPrivateKey(sshKey.id)
-                                ?: return SshResult.Error(
-                                    SshErrorCode.AUTH_FAILED,
-                                    "Clé privée introuvable dans le vault pour ${sshKey.label}"
-                                )
-                            val result = sessionManager.connectWithKey(host, privateKey)
+                            try {
+                                val privateKey = vaultManager.getPrivateKey(sshKey.id)
+                                    ?: return SshResult.Error(
+                                        SshErrorCode.AUTH_FAILED,
+                                        "Clé privée introuvable dans le vault pour ${sshKey.label}"
+                                    )
+                                // La phrase de passe est celle de la clé choisie, rangée sous son id comme le PEM.
+                                val result = withKeyPassphrase(sshKey.id) { passphrase ->
+                                    sessionManager.connectWithKey(host, privateKey, passphrase)
+                                }
 
-                            if (result is SshResult.Success) {
-                                hostRepository.updateLastConnected(host.id)
+                                if (result is SshResult.Success) {
+                                    hostRepository.updateLastConnected(host.id)
+                                }
+                                result
+                            } catch (e: VaultAuthExpiredException) {
+                                return SshResult.Error(
+                                    SshErrorCode.AUTH_EXPIRED,
+                                    "Authentification vault expirée : veuillez vous ré-authentifier"
+                                )
                             }
-                            result
                         }
                     }
                 }
@@ -220,8 +235,28 @@ class ConnectSessionUseCase @Inject constructor(
                     }
                 }
             }
+        } catch (e: CancellationException) {
+            // L'écran quitté ou le ViewModel détruit annule la connexion : ce n'est pas un échec à
+            // afficher (UNKNOWN), la coroutine doit finir annulée.
+            throw e
         } catch (e: Exception) {
             SshResult.Error(SshErrorCode.UNKNOWN, e.message ?: "Erreur inconnue")
+        }
+    }
+
+    /**
+     * Lit la phrase de passe de la clé [keyId] dans le vault et la donne à [block], qui ouvre la
+     * connexion ; null quand la clé n'est pas chiffrée (rien n'est stocké), et la connexion se fait
+     * alors comme avant. Le tableau est effacé dès que [block] rend la main, qu'il ait réussi,
+     * échoué ou levé une exception (annulation comprise). La phrase de passe est lue en dernier,
+     * après les autres secrets du vault, pour qu'aucun retour anticipé ne la laisse en mémoire.
+     */
+    private inline fun <T> withKeyPassphrase(keyId: String, block: (CharArray?) -> T): T {
+        val passphrase = vaultManager.getKeyPassphrase(keyId)
+        try {
+            return block(passphrase)
+        } finally {
+            passphrase?.fill('\u0000')
         }
     }
 }

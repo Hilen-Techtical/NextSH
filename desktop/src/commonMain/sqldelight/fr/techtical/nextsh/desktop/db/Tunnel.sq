@@ -32,6 +32,9 @@ SELECT * FROM tunnels WHERE hostId = ? AND deleted = 0 ORDER BY label;
 selectById:
 SELECT * FROM tunnels WHERE id = ? AND deleted = 0;
 
+selectByIdIncludingDeleted:
+SELECT * FROM tunnels WHERE id = ?;
+
 selectAutoStart:
 SELECT * FROM tunnels WHERE autoStart = 1 AND deleted = 0 ORDER BY label;
 
@@ -46,8 +49,13 @@ update:
 UPDATE tunnels SET label = ?, hostId = ?, type = ?, localPort = ?, remoteHost = ?, remotePort = ?, autoStart = ?, openBrowserOnConnect = ?, keepAliveAfterBrowserClose = ?, isFavorite = ?, vectorClock = ?, updatedAt = ?
 WHERE id = ?;
 
+-- Sync write on an existing row (live or tombstoned). Leaves the local-only column createdAt alone.
+updateFromSync:
+UPDATE tunnels SET label = ?, hostId = ?, type = ?, localPort = ?, remoteHost = ?, remotePort = ?, autoStart = ?, openBrowserOnConnect = ?, keepAliveAfterBrowserClose = ?, isFavorite = ?, vectorClock = ?, deleted = ?, deletedAt = ?, updatedAt = ?
+WHERE id = ?;
+
 setFavorite:
-UPDATE tunnels SET isFavorite = ? WHERE id = ?;
+UPDATE tunnels SET isFavorite = ?, vectorClock = ?, updatedAt = ? WHERE id = ? AND deleted = 0;
 
 markDeleted:
 UPDATE tunnels SET deleted = 1, deletedAt = ?, updatedAt = ?, vectorClock = ? WHERE id = ?;

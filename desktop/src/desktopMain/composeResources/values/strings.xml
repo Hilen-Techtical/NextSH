@@ -1002,7 +1002,7 @@
     <string name="sftp_error_invalid_folder_name">Nom de dossier invalide</string>
     <string name="sftp_error_invalid_file_name">Nom de fichier invalide</string>
     <string name="sftp_error_invalid_new_path">Nouveau chemin invalide</string>
-    <string name="sftp_error_invalid_permissions">Permissions invalides (0–511)</string>
+    <string name="sftp_error_invalid_permissions">Permissions invalides (0 à 511)</string>
     <string name="sftp_error_read_generic">Erreur de lecture</string>
     <string name="sftp_error_download_generic">Erreur de téléchargement</string>
     <string name="sftp_error_upload_generic">Erreur d'envoi</string>

@@ -12,6 +12,19 @@
 -keep class org.bouncycastle.** { *; }
 -dontwarn org.bouncycastle.**
 
+# ── i2p EdDSA (provider JCA Ed25519) ──────────────────────────────────────────
+# EdDSASecurityProvider (enregistre dans App) declare ses implementations sous
+# forme de CHAINES : Provider.put("KeyPairGenerator.EdDSA",
+# "net.i2p.crypto.eddsa.KeyPairGenerator"), idem KeyFactory.EdDSA et
+# Signature.NONEwithEdDSA (EdDSAEngine). La JCA les charge par nom, via
+# Class.forName puis le constructeur sans argument : aucune reference statique
+# n y mene. Sans regle, R8 supprime KeyFactory et KeyPairGenerator et renomme
+# EdDSAEngine, et KeyPairGenerator.getInstance("EdDSA", provider) echoue en
+# release avec "class configured for KeyPairGenerator (provider: EdDSA) cannot
+# be found" (la generation de cle Ed25519 est cassee). Les noms ET les membres
+# (dont <init>) doivent survivre. Ne pas retirer : ProguardRulesGuardTest.
+-keep class net.i2p.crypto.eddsa.** { *; }
+
 # ── Room ──────────────────────────────────────────────────────────────────────
 -keep class * extends androidx.room.RoomDatabase
 -keep @androidx.room.Entity class *

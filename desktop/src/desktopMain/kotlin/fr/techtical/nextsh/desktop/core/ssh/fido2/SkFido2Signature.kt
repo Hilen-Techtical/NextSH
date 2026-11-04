@@ -12,7 +12,6 @@ import net.schmizz.sshj.common.Buffer
 import net.schmizz.sshj.common.SSHRuntimeException
 import net.schmizz.sshj.signature.Signature
 import java.io.ByteArrayOutputStream
-import java.security.MessageDigest
 import java.security.PrivateKey
 import java.security.PublicKey
 
@@ -23,10 +22,10 @@ import java.security.PublicKey
  * 1. [initSign] recoit un [SkFido2PrivateKey] et memorise la ref vers le YubiKitFidoManager.
  * 2. [update] accumule les bytes du challenge SSH (format RFC 4252 §7).
  * 3. [sign] :
- *    a. Calcule SHA-256 sur les bytes accumules → clientDataHash (32 bytes).
- *    b. Appelle YubiKitFidoManager.signChallenge(rpId, clientDataHash, credentialId).
- *    c. Extrait flags (byte 32 de authData, index 32) et counter (bytes 33-36 BE).
- *    d. Construit la signature wire SSH SK :
+ *    a. Appelle Fido2Signer.signChallenge(rpId, challenge, credentialId) avec les bytes
+ *       accumules bruts (voir [Fido2Signer.signChallenge]).
+ *    b. Extrait flags (byte 32 de authData, index 32) et counter (bytes 33-36 BE).
+ *    c. Construit la signature wire SSH SK :
  *         string raw_signature (64 bytes ed25519)
  *         byte   flags
  *         uint32 counter
@@ -86,15 +85,14 @@ class SkFido2Signature(
         val key = fido2PrivateKey
             ?: throw SSHRuntimeException("SkFido2Signature.sign() called before initSign()")
 
-        // SHA-256 du challenge SSH accumule = clientDataHash
+        // Challenge passe brut au signer (contrat de Fido2Signer.signChallenge).
         val challengeBytes = buffer.toByteArray()
-        val clientDataHash = MessageDigest.getInstance("SHA-256").digest(challengeBytes)
 
         // Appel CTAP2 GetAssertion (bloquant)
         val assertion = runBlocking {
             key.fido2Signer.signChallenge(
                 rpId = key.publicKey.application, // "ssh:" par defaut
-                clientDataHash = clientDataHash,
+                challenge = challengeBytes,
                 credentialId = key.credentialId,
             )
         }

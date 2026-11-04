@@ -184,6 +184,12 @@ class VaultViewModel @Inject constructor(
                     keystoreManager.deleteBiometricKey(keystoreAlias)
                 } else {
                     vaultManager.deletePrivateKey(keyId)
+                    // La passphrase et le certificat vivent sous le même id que la clé : sans
+                    // ces deux suppressions ils restent dans le vault et continuent de se
+                    // synchroniser. Jamais deletePassword ici : pwd_<id> peut appartenir à un
+                    // hôte PASSWORD qui a hérité de l'id de la clé (défaut de la 1.0.0).
+                    vaultManager.deleteKeyPassphrase(keyId)
+                    vaultManager.deleteCertificate(keyId)
                 }
                 sshKeyRepository.delete(keyId)
                 _uiState.update { it.copy(successMessage = "Clé supprimée") }

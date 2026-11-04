@@ -135,6 +135,33 @@ class DesktopClipboardManagerTest {
     }
 
     @Test
+    fun `remote OSC 52 copy is auto-cleared even without NextSH focus`() {
+        val clipboard = fakeClipboard()
+        val mgr = DesktopClipboardManager(
+            appScope = appScope,
+            timeoutSecondsProvider = { 1 },
+            clipboard = clipboard,
+            isOriginatedFromUsOverride = { false },
+            pollIntervalMsOverride = 50L,
+        )
+        mgr.start()
+        // What RemoteClipboardWriter does on the EDT, minus the system clipboard.
+        RemoteClipboardWriter.noteWritten("from-background-pane")
+        clipboard.setContents(StringSelection("from-background-pane"), null)
+        val cleared = waitFor(2_000) { (readText(clipboard) ?: "x").isEmpty() }
+        assertEquals(true, cleared, "remote copy should have been cleared by 2 s")
+        mgr.stop()
+    }
+
+    @Test
+    fun `remote writer claims only its own last text, once`() {
+        RemoteClipboardWriter.noteWritten("mine")
+        assertEquals(false, RemoteClipboardWriter.claim("someone else"))
+        assertEquals(true, RemoteClipboardWriter.claim("mine"))
+        assertEquals(false, RemoteClipboardWriter.claim("mine"))
+    }
+
+    @Test
     fun `stop halts polling`() {
         val clipboard = fakeClipboard()
         val mgr = DesktopClipboardManager(

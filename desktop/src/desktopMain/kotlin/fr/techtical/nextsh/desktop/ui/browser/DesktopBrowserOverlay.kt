@@ -22,6 +22,7 @@ import androidx.compose.ui.zIndex
 import fr.techtical.nextsh.desktop.core.browser.KcefState
 import fr.techtical.nextsh.desktop.theme.*
 import fr.techtical.nextsh.shared.domain.model.TunnelStatus
+import fr.techtical.nextsh.shared.util.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -30,6 +31,7 @@ import org.cef.CefClient
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefBrowserOsrWithHandler
 import org.cef.browser.CefFrame
+import org.cef.browser.CefRequestContext
 import org.cef.callback.CefCallback
 import org.cef.handler.CefLoadHandler
 import org.cef.handler.CefLoadHandlerAdapter
@@ -329,7 +331,7 @@ fun DesktopBrowserOverlay(
                                 modifier = Modifier.padding(24.dp),
                             ) {
                                 Text(
-                                    text = "Impossible d'initialiser Chromium",
+                                    text = state.title,
                                     color = ErrorRed,
                                     style = MaterialTheme.typography.titleSmall,
                                 )
@@ -469,10 +471,32 @@ fun DesktopBrowserOverlay(
                                         }
                                         newClient.addRequestHandler(requestHandler)
 
+                                        // In-memory request context (createContext(null) has no
+                                        // cache path): cookies, history and cache of tunnelled
+                                        // services never reach the disk. One context per browser
+                                        // session, released with the browser.
+                                        //
+                                        // Fail closed: JCEF can return null WITHOUT throwing (it
+                                        // swallows UnsatisfiedLinkError internally), and
+                                        // CefBrowser_N would then silently fall back to the
+                                        // global persistent context. The browser is not opened
+                                        // at all in that case, never on the global context.
+                                        val requestContext = runCatching { CefRequestContext.createContext(null) }.getOrNull()
+                                        if (requestContext == null) {
+                                            Logger.w(
+                                                "DesktopBrowserOverlay",
+                                                "in-memory request context unavailable, browser not opened",
+                                            )
+                                            newClient.dispose()
+                                            viewModel.onWebError(
+                                                "Session de navigation privée indisponible : le navigateur n'a pas été ouvert."
+                                            )
+                                            return@LaunchedEffect
+                                        }
                                         val newBrowser = CefBrowserOsrWithHandler(
                                             newClient,
                                             initialUrl,
-                                            null, // CefRequestContext: null = default
+                                            requestContext,
                                             renderHandler,
                                             newPanel,
                                         )

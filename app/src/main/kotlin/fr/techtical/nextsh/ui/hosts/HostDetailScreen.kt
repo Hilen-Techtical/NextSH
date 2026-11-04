@@ -25,7 +25,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -46,22 +48,38 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.repeatOnLifecycle
+import com.composables.icons.lucide.Eye
+import com.composables.icons.lucide.EyeOff
 import com.composables.icons.lucide.FileBadge
 import com.composables.icons.lucide.Fingerprint
 import com.composables.icons.lucide.KeyRound
@@ -79,6 +97,7 @@ import fr.techtical.nextsh.domain.model.CustomTerminalTheme
 import fr.techtical.nextsh.domain.model.Fido2Mode
 import fr.techtical.nextsh.domain.model.SshKeyType
 import fr.techtical.nextsh.ui.components.ConfirmDeleteDialog
+import fr.techtical.nextsh.ui.components.NextShMessage
 import fr.techtical.nextsh.ui.components.NextShTextField
 import fr.techtical.nextsh.ui.themes.CustomThemeEditorDialog
 import fr.techtical.nextsh.ui.themes.CustomThemeEditorState
@@ -129,7 +148,20 @@ fun HostDetailScreen(
     val form by viewModel.formState.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
     val customThemes by viewModel.customThemes.collectAsState()
+    val savePhase by viewModel.savePhase.collectAsState()
+    val saveError by viewModel.saveError.collectAsState()
     val isEditing = hostId != null
+    // Même motif que VaultUnlockScreen : l'invite système exige une FragmentActivity.
+    val activity = LocalContext.current as? FragmentActivity
+    // Lus ici car stringResource est composable : l'effet de ré-authentification ci-dessous ne l'est pas.
+    val reauthTitle = stringResource(R.string.host_save_confirm_title)
+    val reauthSubtitle = stringResource(R.string.host_save_confirm_subtitle)
+    val saveErrorText = when (saveError) {
+        HostSaveError.VAULT_LOCKED -> stringResource(R.string.host_save_vault_locked)
+        HostSaveError.VAULT_UNAVAILABLE -> stringResource(R.string.host_save_vault_unavailable)
+        HostSaveError.SAVE_FAILED -> stringResource(R.string.host_save_failed)
+        null -> null
+    }
     var showDeleteDialog by remember { mutableStateOf(false) }
     // null = editor closed; CustomThemeEditorState.NEW = create; otherwise edit an existing theme.
     var editingTheme by remember { mutableStateOf<CustomTerminalTheme?>(null) }
@@ -146,6 +178,25 @@ fun HostDetailScreen(
             when (event) {
                 HostEvent.HostSaved, HostEvent.HostDeleted -> onBack()
                 else -> {}
+            }
+        }
+    }
+
+    // Le vault s'est reverrouillé pendant la saisie : le ViewModel attend l'invite système, puis
+    // relance l'enregistrement. La demande est un état, lancée seulement écran RESUMED : un
+    // lancement pendant que l'activité est arrêtée serait ignoré par BiometricPrompt sans rappel.
+    // Si l'écran quitte RESUMED avant, la demande reste en attente et repart au retour. Sans
+    // activité FragmentActivity, le ViewModel affiche l'échec.
+    val latestActivity by rememberUpdatedState(activity)
+    val latestReauthTitle by rememberUpdatedState(reauthTitle)
+    val latestReauthSubtitle by rememberUpdatedState(reauthSubtitle)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner, viewModel) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            viewModel.savePhase.collect { phase ->
+                if (phase == HostSavePhase.AWAITING_REAUTH) {
+                    viewModel.confirmIdentityAndSave(latestActivity, latestReauthTitle, latestReauthSubtitle)
+                }
             }
         }
     }
@@ -186,10 +237,21 @@ fun HostDetailScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = NearBlack),
             )
         },
+        // Le message d'échec s'affiche juste au-dessus de la barre Enregistrer, sans décaler le
+        // formulaire (le slot de Scaffold dessine par-dessus, hors du padding du contenu).
+        snackbarHost = {
+            NextShMessage(
+                message   = saveErrorText,
+                isError   = true,
+                onDismiss = viewModel::dismissSaveError,
+                modifier  = Modifier.padding(horizontal = Spacing.Md, vertical = Spacing.Sm),
+            )
+        },
         bottomBar = {
             BottomSaveBar(
                 label = if (isEditing) stringResource(R.string.action_save) else stringResource(R.string.action_add_host),
-                enabled = form.isValid,
+                // Grisé pendant l'enregistrement et l'invite : pas de double appui.
+                enabled = form.isValid && savePhase == HostSavePhase.IDLE,
                 onClick = { viewModel.saveHost() },
             )
         },
@@ -199,6 +261,11 @@ fun HostDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // La marge basse de padding est la barre Enregistrer, qui passe
+                // sous le clavier ouvert. Non consommee, imePadding l ajoutait a
+                // la hauteur du clavier : une bande noire de la hauteur de la
+                // barre restait au-dessus du clavier et masquait le formulaire.
+                .consumeWindowInsets(padding)
                 .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.Lg, vertical = Spacing.Md),
@@ -256,11 +323,59 @@ fun HostDetailScreen(
 
                 when (form.authType) {
                     AuthType.PASSWORD -> {
+                        // Jamais rememberSaveable : un secret, ou un état lié au secret, ne doit
+                        // pas finir dans un Bundle. Déclaré dans cette branche, l'état disparaît
+                        // aussi quand on change de type d'authentification.
+                        var passwordVisible by remember { mutableStateOf(false) }
+                        val passwordFocus = remember { FocusRequester() }
+                        // Compose garde le focus quand l'app part en arrière-plan : sans cela, le
+                        // mot de passe affiché le serait encore au retour.
+                        DisposableEffect(lifecycleOwner) {
+                            val observer = LifecycleEventObserver { _, event ->
+                                if (event == Lifecycle.Event.ON_STOP) passwordVisible = false
+                            }
+                            lifecycleOwner.lifecycle.addObserver(observer)
+                            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+                        }
                         NextShTextField(
                             value = form.password,
                             onValueChange = { v -> viewModel.updateForm { copy(password = v) } },
                             label = stringResource(R.string.label_password),
                             placeholder = stringResource(R.string.placeholder_password),
+                            visualTransformation = if (passwordVisible) {
+                                VisualTransformation.None
+                            } else {
+                                PasswordVisualTransformation()
+                            },
+                            // Clavier de mot de passe sans correction ni suggestions : le clavier
+                            // ne doit pas apprendre le secret.
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Password,
+                                autoCorrect = false,
+                            ),
+                            // Le mot de passe repasse masqué dès que le champ perd le focus.
+                            modifier = Modifier
+                                .focusRequester(passwordFocus)
+                                .onFocusChanged { if (!it.isFocused) passwordVisible = false },
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = {
+                                        passwordVisible = !passwordVisible
+                                        // Afficher donne le focus au champ, sinon le mot de passe
+                                        // resterait visible hors du champ actif.
+                                        if (passwordVisible) passwordFocus.requestFocus()
+                                    },
+                                ) {
+                                    Icon(
+                                        imageVector = if (passwordVisible) Lucide.EyeOff else Lucide.Eye,
+                                        contentDescription = stringResource(
+                                            if (passwordVisible) R.string.action_hide_password else R.string.action_show_password,
+                                        ),
+                                        tint = TextSecondary,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            },
                         )
                     }
                     AuthType.SSH_KEY -> {
@@ -268,16 +383,20 @@ fun HostDetailScreen(
                             keys = uiState.sshKeys,
                             selectedKeyId = form.selectedKeyId,
                             label = stringResource(R.string.label_ssh_key),
-                            onSelect = { id -> viewModel.updateForm { copy(selectedKeyId = id) } },
+                            isError = form.showMissingKeyError,
+                            onSelect = viewModel::selectKey,
                         )
+                        if (form.showMissingKeyError) KeyMissingText()
                     }
                     AuthType.CERTIFICATE -> {
                         SshKeyDropdown(
                             keys = uiState.sshKeys,
                             selectedKeyId = form.selectedKeyId,
                             label = stringResource(R.string.label_associated_private_key),
-                            onSelect = { id -> viewModel.updateForm { copy(selectedKeyId = id) } },
+                            isError = form.showMissingKeyError,
+                            onSelect = viewModel::selectKey,
                         )
+                        if (form.showMissingKeyError) KeyMissingText()
                         HelperText(stringResource(R.string.certificate_hint))
                     }
                     AuthType.FIDO2 -> {
@@ -307,8 +426,10 @@ fun HostDetailScreen(
                                 Fido2Mode.HARDWARE_KEY -> stringResource(R.string.fido2_no_sk_keys)
                                 Fido2Mode.PASSKEY -> stringResource(R.string.label_no_key_import_first)
                             },
-                            onSelect = { id -> viewModel.updateForm { copy(selectedKeyId = id) } },
+                            isError = form.showMissingKeyError,
+                            onSelect = viewModel::selectKey,
                         )
+                        if (form.showMissingKeyError) KeyMissingText()
                         HelperText(
                             when (form.fido2Mode) {
                                 Fido2Mode.HARDWARE_KEY -> stringResource(R.string.fido2_info_line1)
@@ -450,12 +571,18 @@ private fun FormSection(
 }
 
 @Composable
-private fun HelperText(text: String) {
+private fun HelperText(text: String, color: Color = TextDisabled) {
     Text(
         text = text,
-        color = TextDisabled,
+        color = color,
         fontSize = 11.sp,
     )
+}
+
+/** Sous le sélecteur de clé : la clé de l'hôte n'existe plus, il faut en choisir une autre. */
+@Composable
+private fun KeyMissingText() {
+    HelperText(stringResource(R.string.host_key_missing), color = ErrorRed)
 }
 
 // ── Auth chips ──────────────────────────────────────────────────────────────
@@ -532,6 +659,7 @@ private fun SshKeyDropdown(
     selectedKeyId: String?,
     label: String,
     emptyMessage: String = stringResource(R.string.label_no_key_import_first),
+    isError: Boolean = false,
     onSelect: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -544,6 +672,7 @@ private fun SshKeyDropdown(
             label = label,
             placeholder = stringResource(R.string.placeholder_select_key),
             readOnly = true,
+            isError = isError,
             modifier = Modifier.menuAnchor(),
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
         )

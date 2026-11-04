@@ -55,6 +55,7 @@ import com.composables.icons.lucide.WifiOff
 import com.composables.icons.lucide.X
 import fr.techtical.nextsh.R
 import fr.techtical.nextsh.core.ssh.TransferStatus
+import fr.techtical.nextsh.core.ssh.pickedFileName
 import fr.techtical.nextsh.domain.model.SftpFile
 import fr.techtical.nextsh.domain.model.SortOrder
 import fr.techtical.nextsh.ui.components.NextShMessage
@@ -1476,8 +1477,16 @@ private fun SftpTransfersBanner(
 
 // ── SAF helpers ──────────────────────────────────────────────────────────────
 
+/**
+ * Nom proposé pour le fichier choisi : `DISPLAY_NAME` du fournisseur, à défaut
+ * le dernier segment de l'URI (voir [pickedFileName]), à défaut un nom générique.
+ *
+ * Seule la requête au `ContentResolver` et le dernier recours vivent ici. Le nom
+ * reste une donnée d'une autre application : l'envoi le contrôle
+ * (`uploadEntryName`).
+ */
 private fun resolveDisplayName(context: android.content.Context, uri: android.net.Uri): String {
-    return try {
+    val providerName = try {
         context.contentResolver.query(
             uri,
             arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
@@ -1487,10 +1496,12 @@ private fun resolveDisplayName(context: android.content.Context, uri: android.ne
                 val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
                 if (idx != -1) cursor.getString(idx) else null
             } else null
-        } ?: uri.lastPathSegment ?: "fichier"
+        }
     } catch (e: Exception) {
-        uri.lastPathSegment ?: "fichier"
+        null
     }
+    return pickedFileName(providerName, uri.lastPathSegment)
+        ?: context.getString(R.string.sftp_upload_default_name)
 }
 
 private fun resolveFileSize(context: android.content.Context, uri: android.net.Uri): Long {

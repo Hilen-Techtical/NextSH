@@ -8,6 +8,7 @@ import fr.techtical.nextsh.desktop.core.auth.fido2.Fido2Enroller
 import fr.techtical.nextsh.desktop.core.auth.fido2.Fido2UiState
 import fr.techtical.nextsh.desktop.core.auth.fido2.winwebauthn.Fido2ProviderDispatcher
 import fr.techtical.nextsh.desktop.core.browser.KcefInitializer
+import fr.techtical.nextsh.desktop.core.browser.resolveBrowserProfileDir
 import fr.techtical.nextsh.desktop.core.clipboard.DesktopClipboardManager
 import fr.techtical.nextsh.desktop.ui.browser.DesktopBrowserSessionHolder
 import fr.techtical.nextsh.desktop.ui.browser.DesktopTunnelBrowserViewModel
@@ -234,8 +235,11 @@ object DesktopContainer {
 
     // ── In-app browser (Phase 1: KCEF engine) ───────────────────────────────
     val kcefInitializer: KcefInitializer by lazy {
+        // The Chromium bundle stays under user.home (machine-wide install cache, shared by
+        // instances), while the profile follows NEXTSH_HOME (per-instance user state).
         KcefInitializer(
             bundleDir = java.io.File(System.getProperty("user.home"), ".nextsh/kcef"),
+            profileDir = resolveBrowserProfileDir(System.getenv("NEXTSH_HOME"), System.getProperty("user.home")),
             coroutineScope = appScope.coroutineScope,
         )
     }

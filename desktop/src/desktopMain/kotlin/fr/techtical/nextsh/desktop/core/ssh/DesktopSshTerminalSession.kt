@@ -3,6 +3,7 @@
 
 package fr.techtical.nextsh.desktop.core.ssh
 
+import fr.techtical.nextsh.desktop.core.clipboard.RemoteClipboardWriter
 import fr.techtical.nextsh.shared.util.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -43,7 +44,10 @@ class DesktopSshTerminalSession(
     val handle: String = UUID.randomUUID().toString()
     private val closed = AtomicBoolean(false)
 
-    val connector: SshTtyConnector = SshTtyConnector(shell)
+    val connector: SshTtyConnector = SshTtyConnector(
+        shell,
+        onRemoteClipboardWrite = RemoteClipboardWriter::write,
+    )
 
     // ── Latency watchdog ──────────────────────────────────────────────────────
 

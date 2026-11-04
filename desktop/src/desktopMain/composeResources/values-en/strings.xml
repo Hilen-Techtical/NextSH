@@ -918,7 +918,7 @@
     <string name="sftp_error_invalid_folder_name">Invalid folder name</string>
     <string name="sftp_error_invalid_file_name">Invalid file name</string>
     <string name="sftp_error_invalid_new_path">Invalid new path</string>
-    <string name="sftp_error_invalid_permissions">Invalid permissions (0–511)</string>
+    <string name="sftp_error_invalid_permissions">Invalid permissions (0 to 511)</string>
     <string name="sftp_error_read_generic">Read error</string>
     <string name="sftp_error_download_generic">Download error</string>
     <string name="sftp_error_upload_generic">Upload error</string>

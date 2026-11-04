@@ -251,7 +251,7 @@ private fun IdleContent(viewModel: Fido2EnrollViewModel) {
             visualTransformation = PasswordVisualTransformation(),
             // KeyboardType.Password (clavier complet masqué) : le PIN FIDO2 YubiKey
             // peut contenir des lettres et symboles (PIN alphanum).
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrect = false),
             singleLine = true,
             colors = nextshOutlinedColors(),
             shape = RoundedCornerShape(Radii.Md),

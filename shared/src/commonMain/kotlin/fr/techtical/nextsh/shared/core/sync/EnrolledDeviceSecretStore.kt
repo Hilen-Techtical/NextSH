@@ -47,6 +47,6 @@ class EnrolledDeviceSecretStore(private val vaultManager: VaultManager) {
     }
 
     suspend fun delete(deviceId: String) {
-        vaultManager.deleteCredential("$LAN_SYNC_SECRET_KEY_PREFIX$deviceId")
+        vaultManager.deletePassword("$LAN_SYNC_SECRET_KEY_PREFIX$deviceId")
     }
 }

@@ -72,9 +72,10 @@ fun PopupRoundedCorners(window: Window, radius: Dp) {
 
 /**
  * Minimal JNA binding for the `user32.dll` extended-style calls used by
- * [WindowsToolWindow]. Same pattern as [Dwmapi] in WindowsDarkTitleBar.kt.
+ * [WindowsToolWindow], also reused by [WindowsDarkTitleBar] for
+ * `SetWindowPos`. Same pattern as [Dwmapi] in WindowsDarkTitleBar.kt.
  */
-private interface User32 : Library {
+internal interface User32 : Library {
     fun GetWindowLongW(hwnd: Pointer, nIndex: Int): Int
     fun SetWindowLongW(hwnd: Pointer, nIndex: Int, dwNewLong: Int): Int
     fun SetWindowPos(

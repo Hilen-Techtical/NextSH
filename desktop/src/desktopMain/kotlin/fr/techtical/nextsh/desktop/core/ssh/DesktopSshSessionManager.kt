@@ -6,7 +6,9 @@ package fr.techtical.nextsh.desktop.core.ssh
 import fr.techtical.nextsh.desktop.core.auth.fido2.Fido2Signer
 import fr.techtical.nextsh.desktop.core.auth.fido2.YubiKitFidoManager
 import fr.techtical.nextsh.desktop.core.ssh.fido2.SkKeyAlgorithm
+import fr.techtical.nextsh.desktop.core.ssh.fido2.SkKeyHandle
 import fr.techtical.nextsh.shared.core.ssh.fido2.SkAuthMethod
+import fr.techtical.nextsh.shared.core.ssh.fido2.SkSshSignature
 import fr.techtical.nextsh.shared.domain.model.AuthType
 import fr.techtical.nextsh.shared.domain.model.Host
 import fr.techtical.nextsh.shared.domain.model.SessionStatus
@@ -162,46 +164,7 @@ class DesktopSshSessionManager(
         // (dispatché vers WindowsWebAuthnProvider ou YubiKitFido2Signer selon l'OS)
         val skAuthMethod = SkAuthMethod(
             publicKey = handle.skPublicKey,
-            challengeHandler = { signingData ->
-                // Le signingData de SkAuthMethod est déjà le buffer de signature RFC 4252.
-                // Pour CTAP2 GetAssertion, on a besoin du clientDataHash = SHA-256(signingData).
-                // SkAuthMethod passe les bytes bruts au handler ; on effectue le hachage ici.
-                val clientDataHash = java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(signingData)
-                val assertion = try {
-                    signer.signChallenge(
-                        rpId = handle.rpId,
-                        clientDataHash = clientDataHash,
-                        credentialId = handle.credentialId,
-                    )
-                } catch (e: YubiKitFidoManager.FidoError.NoDeviceFound) {
-                    throw net.schmizz.sshj.userauth.UserAuthException("FIDO2_NO_KEY: ${e.message}", e)
-                } catch (e: YubiKitFidoManager.FidoError.UserCancelled) {
-                    throw net.schmizz.sshj.userauth.UserAuthException("FIDO2_USER_CANCELLED: ${e.message}", e)
-                } catch (e: YubiKitFidoManager.FidoError.TouchTimeout) {
-                    throw net.schmizz.sshj.userauth.UserAuthException("FIDO2_TIMEOUT: ${e.message}", e)
-                } catch (e: YubiKitFidoManager.FidoError) {
-                    throw net.schmizz.sshj.userauth.UserAuthException("FIDO2_ERROR: ${e.message}", e)
-                }
-                // Extraire flags et counter depuis authData CTAP2 / Windows WebAuthn
-                val authData = assertion.authData
-                if (authData.size < 37) {
-                    throw net.schmizz.sshj.userauth.UserAuthException(
-                        "FIDO2 authData trop court (${authData.size} octets, attendu >= 37)"
-                    )
-                }
-                val flags = authData[32]
-                val counter = ((authData[33].toInt() and 0xFF) shl 24) or
-                    ((authData[34].toInt() and 0xFF) shl 16) or
-                    ((authData[35].toInt() and 0xFF) shl 8) or
-                    (authData[36].toInt() and 0xFF)
-                fr.techtical.nextsh.shared.core.ssh.fido2.SkSshSignature.create(
-                    keyType = handle.skPublicKey.keyType,
-                    rawSignature = assertion.signature,
-                    flags = flags,
-                    counter = counter.toUInt(),
-                )
-            },
+            challengeHandler = fido2ChallengeHandler(signer, handle),
         )
 
         try {
@@ -370,4 +333,49 @@ class DesktopSshSessionManager(
         terminals.remove(sessionId)
         _sessions.value = _sessions.value.filterNot { it.id == sessionId }
     }
+}
+
+/**
+ * Construit le `challengeHandler` de [SkAuthMethod] pour une clé FIDO2 (sk-*).
+ *
+ * `signingData` (tampon de signature RFC 4252) est transmis brut, sans hachage :
+ * voir [Fido2Signer.signChallenge]. `internal` pour être testable sans connexion SSH.
+ */
+internal fun fido2ChallengeHandler(
+    signer: Fido2Signer,
+    handle: SkKeyHandle,
+): suspend (signingData: ByteArray) -> SkSshSignature? = { signingData ->
+    val assertion = try {
+        signer.signChallenge(
+            rpId = handle.rpId,
+            challenge = signingData,
+            credentialId = handle.credentialId,
+        )
+    } catch (e: YubiKitFidoManager.FidoError.NoDeviceFound) {
+        throw UserAuthException("FIDO2_NO_KEY: ${e.message}", e)
+    } catch (e: YubiKitFidoManager.FidoError.UserCancelled) {
+        throw UserAuthException("FIDO2_USER_CANCELLED: ${e.message}", e)
+    } catch (e: YubiKitFidoManager.FidoError.TouchTimeout) {
+        throw UserAuthException("FIDO2_TIMEOUT: ${e.message}", e)
+    } catch (e: YubiKitFidoManager.FidoError) {
+        throw UserAuthException("FIDO2_ERROR: ${e.message}", e)
+    }
+    // Extraire flags et counter depuis authData CTAP2 / Windows WebAuthn
+    val authData = assertion.authData
+    if (authData.size < 37) {
+        throw UserAuthException(
+            "FIDO2 authData trop court (${authData.size} octets, attendu >= 37)"
+        )
+    }
+    val flags = authData[32]
+    val counter = ((authData[33].toInt() and 0xFF) shl 24) or
+        ((authData[34].toInt() and 0xFF) shl 16) or
+        ((authData[35].toInt() and 0xFF) shl 8) or
+        (authData[36].toInt() and 0xFF)
+    SkSshSignature.create(
+        keyType = handle.skPublicKey.keyType,
+        rawSignature = assertion.signature,
+        flags = flags,
+        counter = counter.toUInt(),
+    )
 }

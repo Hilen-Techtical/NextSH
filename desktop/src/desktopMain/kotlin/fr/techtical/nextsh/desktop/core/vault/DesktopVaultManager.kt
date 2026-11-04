@@ -59,6 +59,8 @@ class DesktopVaultManager(
         }
     }
 
+    override suspend fun deletePassword(credentialId: String) = removeEntry(PREFIX_PASSWORD + credentialId)
+
     override suspend fun storePrivateKey(keyId: String, privateKeyPem: String) {
         putEntry(PREFIX_PRIVATE_KEY + keyId, privateKeyPem.toByteArray(Charsets.UTF_8))
     }
@@ -70,6 +72,8 @@ class DesktopVaultManager(
         return s
     }
 
+    override suspend fun deletePrivateKey(keyId: String) = removeEntry(PREFIX_PRIVATE_KEY + keyId)
+
     override suspend fun storeCertificate(certId: String, certPem: String) {
         putEntry(PREFIX_CERTIFICATE + certId, certPem.toByteArray(Charsets.UTF_8))
     }
@@ -79,13 +83,7 @@ class DesktopVaultManager(
         return bytes.toString(Charsets.UTF_8)
     }
 
-    override suspend fun deleteCertificate(certId: String) = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val store = load()
-            val newEntries = store.entries - (PREFIX_CERTIFICATE + certId)
-            if (newEntries.size != store.entries.size) save(VaultStore(newEntries))
-        }
-    }
+    override suspend fun deleteCertificate(certId: String) = removeEntry(PREFIX_CERTIFICATE + certId)
 
     override suspend fun storeKeyPassphrase(keyId: String, passphrase: CharArray) {
         val bytes = charsToBytes(passphrase)
@@ -105,32 +103,13 @@ class DesktopVaultManager(
         }
     }
 
-    override suspend fun deleteKeyPassphrase(keyId: String) = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val store = load()
-            val newEntries = store.entries - (PREFIX_KEY_PASSPHRASE + keyId)
-            if (newEntries.size != store.entries.size) save(VaultStore(newEntries))
-        }
-    }
+    override suspend fun deleteKeyPassphrase(keyId: String) = removeEntry(PREFIX_KEY_PASSPHRASE + keyId)
 
     override suspend fun listStoredKeyPassphraseIds(): List<String> = withContext(Dispatchers.IO) {
         mutex.withLock {
             load().entries.keys
                 .filter { it.startsWith(PREFIX_KEY_PASSPHRASE) }
                 .map { it.removePrefix(PREFIX_KEY_PASSPHRASE) }
-        }
-    }
-
-    override suspend fun deleteCredential(credentialId: String) = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val store = load()
-            val newEntries = store.entries.filterKeys { key ->
-                key != PREFIX_PASSWORD + credentialId &&
-                    key != PREFIX_PRIVATE_KEY + credentialId &&
-                    key != PREFIX_CERTIFICATE + credentialId &&
-                    key != PREFIX_KEY_PASSPHRASE + credentialId
-            }
-            save(VaultStore(newEntries))
         }
     }
 
@@ -171,6 +150,15 @@ class DesktopVaultManager(
             val store = load()
             val blob = encrypt(plaintext)
             save(VaultStore(store.entries + (fullKey to blob)))
+        }
+    }
+
+    /** Removes exactly the entry [fullKey] (prefix included); a missing entry is a no-op. */
+    private suspend fun removeEntry(fullKey: String) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val store = load()
+            val newEntries = store.entries - fullKey
+            if (newEntries.size != store.entries.size) save(VaultStore(newEntries))
         }
     }
 

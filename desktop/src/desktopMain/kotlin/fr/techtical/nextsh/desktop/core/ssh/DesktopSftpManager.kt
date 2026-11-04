@@ -62,9 +62,11 @@ import java.util.concurrent.ConcurrentHashMap
  * All I/O runs on [Dispatchers.IO]; all results flow through [SshResult]:
  * exceptions never bubble to the UI.
  *
- * Security: [sanitizePath] rejects null-bytes and out-of-root traversals,
- * [sanitizeFilename] strips path separators and control chars (mirrors
- * Android parity).
+ * Security: [sanitizePath] rejects null-bytes and out-of-root traversals
+ * (paths are literal, never URL-decoded), [sanitizeFilename] strips path
+ * separators and control chars (mirrors Android parity), [isValidEntryName]
+ * rejects, rather than rewrites, a bare name that is not a plain single
+ * path segment.
  */
 class DesktopSftpManager(
     private val sshSessionManager: DesktopSshSessionManager,
@@ -136,16 +138,24 @@ class DesktopSftpManager(
 
     // ── CRUD (wired for Wave 2.2, kept here to match the Android API) ────────
 
-    suspend fun createDirectory(sessionId: String, path: String): SshResult<Unit> =
+    /**
+     * Creates the folder [name] inside [parentDir].
+     *
+     * [name] must be a bare entry name (see [isValidEntryName]) and is checked
+     * BEFORE being joined to [parentDir]: a name such as `../x` or `a/b` is
+     * refused instead of creating a folder outside, or below, the displayed
+     * directory. Both parts are used literally (no URL decoding).
+     */
+    suspend fun createDirectory(sessionId: String, parentDir: String, name: String): SshResult<Unit> =
         withContext(Dispatchers.IO) {
             val sftp = sftpClients[sessionId]
                 ?: return@withContext SshResult.Error(SshErrorCode.UNKNOWN, getString(Res.string.sftp_error_client_not_ready))
-            val name = path.substringAfterLast('/')
-            if (sanitizeFilename(name) == null) {
+            if (!isValidEntryName(name)) {
                 return@withContext SshResult.Error(SshErrorCode.UNKNOWN, getString(Res.string.sftp_error_invalid_folder_name))
             }
-            val safePath = sanitizePath(path)
+            val safeParent = sanitizePath(parentDir)
                 ?: return@withContext SshResult.Error(SshErrorCode.UNKNOWN, getString(Res.string.sftp_error_invalid_path))
+            val safePath = if (safeParent == "/") "/$name" else "$safeParent/$name"
             return@withContext try {
                 sftp.mkdir(safePath)
                 SshResult.Success(Unit)
@@ -200,10 +210,9 @@ class DesktopSftpManager(
             val isSymlink = entry.attributes.type == FileMode.Type.SYMLINK
             when {
                 isSymlink -> sftp.rm(entry.path)
-                entry.isDirectory -> {
-                    deleteRecursiveInternal(sftp, entry.path)
-                    sftp.rmdir(entry.path)
-                }
+                // The recursive call removes the subfolder itself: a second rmdir
+                // would fail on a real server and stop the deletion half way.
+                entry.isDirectory -> deleteRecursiveInternal(sftp, entry.path)
                 else -> sftp.rm(entry.path)
             }
         }
@@ -389,16 +398,29 @@ class DesktopSftpManager(
 
     // ── Path sanitization ─────────────────────────────────────────────────────
 
+    /**
+     * Sanitizes a remote SFTP path.
+     *
+     * An SFTP path is not a URL: it is used as-is, with no decoding at all.
+     * `+` and `%XX` are ordinary file name characters (a folder named `x+y` or
+     * `100%` must stay reachable) and `%2e%2e` is a literal name, not a parent
+     * reference: the server does not decode it either.
+     *
+     * - rejects blank paths and null-bytes
+     * - keeps `\` as is (an ordinary name character on a POSIX server)
+     * - collapses repeated slashes and `.` segments
+     * - resolves `..` segments, rejecting any path that climbs above `/`
+     * - always returns an absolute path (starts with `/`)
+     *
+     * @return the sanitized path, or null when it is invalid or unsafe.
+     */
     fun sanitizePath(path: String): String? {
         if (path.isBlank()) return null
         if (path.contains('\u0000')) return null
-        val decoded = try {
-            java.net.URLDecoder.decode(path, "UTF-8")
-        } catch (_: IllegalArgumentException) {
-            return null
-        }
-        if (decoded.contains('\u0000')) return null
-        val normalized = decoded.replace('\\', '/')
+        // "\" is not converted: on a POSIX server it is an ordinary name character, and a
+        // folder named "x\..\.." would otherwise target its grandparent (a deletion would
+        // empty another folder). Windows servers (Win32-OpenSSH) already use "/".
+        val normalized = path
         val resolved = ArrayDeque<String>()
         for (segment in normalized.split('/')) {
             when {
@@ -419,6 +441,21 @@ class DesktopSftpManager(
             .trim()
             .take(255)
         return sanitized.ifEmpty { null }
+    }
+
+    /**
+     * Whether [name] is a bare entry name, that is a single path segment that
+     * is safe to append to a directory path.
+     *
+     * Unlike [sanitizeFilename], which silently strips offending characters
+     * (turning `../x` into `..x`), this REJECTS: blank names, `.` and `..`,
+     * the separators `/` and `\`, and null-bytes or other control characters.
+     */
+    fun isValidEntryName(name: String): Boolean {
+        if (name.isBlank()) return false
+        val trimmed = name.trim()
+        if (trimmed == "." || trimmed == "..") return false
+        return name.none { it == '/' || it == '\\' || it.isISOControl() }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

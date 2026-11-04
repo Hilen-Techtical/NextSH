@@ -98,10 +98,12 @@ internal class FakeVaultManagerMem : VaultManager {
         passwords[credentialId] = password.copyOf()
     }
     override suspend fun getPassword(credentialId: String): CharArray? = passwords[credentialId]?.copyOf()
+    override suspend fun deletePassword(credentialId: String) { passwords.remove(credentialId) }
     override suspend fun storePrivateKey(keyId: String, privateKeyPem: String) {
         privateKeys[keyId] = privateKeyPem
     }
     override suspend fun getPrivateKey(keyId: String): String? = privateKeys[keyId]
+    override suspend fun deletePrivateKey(keyId: String) { privateKeys.remove(keyId) }
     override suspend fun storeCertificate(certId: String, certPem: String) { certs[certId] = certPem }
     override suspend fun getCertificate(certId: String): String? = certs[certId]
     override suspend fun deleteCertificate(certId: String) { certs.remove(certId) }
@@ -111,12 +113,6 @@ internal class FakeVaultManagerMem : VaultManager {
     override suspend fun getKeyPassphrase(keyId: String): CharArray? = keyPassphrases[keyId]?.copyOf()
     override suspend fun deleteKeyPassphrase(keyId: String) { keyPassphrases.remove(keyId) }
     override suspend fun listStoredKeyPassphraseIds(): List<String> = keyPassphrases.keys.toList()
-    override suspend fun deleteCredential(credentialId: String) {
-        passwords.remove(credentialId)
-        privateKeys.remove(credentialId)
-        certs.remove(credentialId)
-        keyPassphrases.remove(credentialId)
-    }
     override suspend fun wipeVault() {
         passwords.clear(); privateKeys.clear(); certs.clear(); keyPassphrases.clear()
     }

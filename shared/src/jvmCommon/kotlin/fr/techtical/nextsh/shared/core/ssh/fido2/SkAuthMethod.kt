@@ -24,7 +24,8 @@ private const val TAG = "SkAuthMethod"
  * 1. [request] envoie un feeler non signe (signed=false) avec le type sk-* et le blob de cle publique
  * 2. Le serveur repond [Message.USERAUTH_60] (PK_OK) s'il reconnait la cle
  * 3. [handle] construit les donnees de signature et appelle [challengeHandler]
- * 4. La requete signee est envoyee avec la signature FIDO2 (raw_sig + flags + counter)
+ * 4. La requete signee est envoyee avec la signature FIDO2, encodee par
+ *    [SkSshSignature.encodeSignatureBlob] (format fil PROTOCOL.u2f documente a cet endroit)
  *
  * Les donnees de signature envoyees au challengeHandler suivent le format SSH standard :
  *   string  session_id
@@ -102,11 +103,14 @@ class SkAuthMethod(
                 pubKeyBlob.fill(0)
             }
 
-            // Encoder la signature : putSignature(keyType, innerData) produit
-            // string( string(keyType) + bytes(innerData) )
-            val sigInner = signature.encodeInner()
-            signedReq.putSignature(publicKey.keyType.sshName, sigInner)
-            sigInner.fill(0)
+            // Blob PROTOCOL.u2f ecrit comme UNE string, jamais via putSignature() : voir
+            // SkSshSignature.encodeSignatureBlob.
+            val sigBlob = signature.encodeSignatureBlob()
+            try {
+                signedReq.putString(sigBlob)
+            } finally {
+                sigBlob.fill(0)
+            }
 
             params.transport.write(signedReq)
         } catch (e: UserAuthException) {

@@ -291,12 +291,17 @@ class SftpBrowserViewModel(
 
     // ── CRUD operations ───────────────────────────────────────────────────────
 
+    /**
+     * Creates [name] inside the displayed folder. The bare name goes to the
+     * manager together with the parent directory: the manager validates it
+     * before joining, so `../x` or `a/b` cannot escape the current folder.
+     */
     fun createFolder(name: String) {
         val loaded = _state.value as? SftpBrowserUiState.Loaded ?: return
-        val fullPath = joinPath(loaded.cwd, name)
+        val parentDir = loaded.cwd
         updateLoaded { it.copy(dialog = null) }
         appScope.coroutineScope.launch {
-            when (val r = sftpManager.createDirectory(sessionId, fullPath)) {
+            when (val r = sftpManager.createDirectory(sessionId, parentDir, name)) {
                 is SshResult.Success -> refresh()
                 is SshResult.Error -> setError(r.message)
             }
@@ -354,9 +359,6 @@ class SftpBrowserViewModel(
     private fun setError(message: String) {
         updateLoaded { it.copy(lastError = message.ifBlank { "Erreur SFTP" }) }
     }
-
-    private fun joinPath(cwd: String, name: String): String =
-        if (cwd.endsWith('/')) cwd + name else "$cwd/$name"
 
     companion object {
         const val TEXT_PREVIEW_LIMIT: Long = 512L * 1024           // 512 KB

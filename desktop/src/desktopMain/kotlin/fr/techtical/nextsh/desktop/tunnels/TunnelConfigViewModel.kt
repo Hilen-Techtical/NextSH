@@ -92,21 +92,22 @@ class TunnelConfigViewModel(
         }
         _state.value = s.copy(isSaving = true, error = null)
         appScope.coroutineScope.launch {
-            val socks = s.type == TunnelType.DYNAMIC_SOCKS5
-            val isLocalForward = s.type == TunnelType.LOCAL_FORWARD
-            val config = TunnelConfig(
-                id = s.tunnelId ?: randomUuid(),
-                label = s.label.trim(),
-                hostId = s.hostId,
-                type = s.type,
-                localPort = s.localPort.toInt(),
-                remoteHost = if (socks) "" else s.remoteHost.trim(),
-                remotePort = if (socks) 0 else s.remotePort.toInt(),
-                autoStart = s.autoStart,
-                openBrowserOnConnect = isLocalForward && s.openBrowserOnConnect,
-                keepAliveAfterBrowserClose = isLocalForward && s.keepAliveAfterBrowserClose,
-            )
-            if (s.isExisting) repository.update(config) else repository.save(config)
+            // Re-read the stored tunnel so fields the form does not own are current.
+            // Null means it was deleted meanwhile: write nothing.
+            val storedId = s.tunnelId
+            val stored = if (storedId != null) {
+                repository.getById(storedId) ?: run {
+                    _state.value = _state.value.copy(
+                        isSaving = false,
+                        error = "Ce tunnel a été supprimé entre-temps, rien n'a été enregistré.",
+                    )
+                    return@launch
+                }
+            } else {
+                null
+            }
+            val config = buildTunnelConfig(s, stored, randomUuid())
+            if (stored != null) repository.update(config) else repository.save(config)
             _state.value = _state.value.copy(isSaving = false)
             onDone()
         }
@@ -132,4 +133,40 @@ class TunnelConfigViewModel(
         }
         return null
     }
+}
+
+/**
+ * Builds the [TunnelConfig] to persist from the Desktop form. On edit ([stored]
+ * non-null) only the form-owned fields are overwritten: rebuilding from scratch
+ * would reset the others (today `isFavorite`) and the newest CRDT write would
+ * push that reset to Android. A new tunnel gets the model defaults and [newId].
+ */
+internal fun buildTunnelConfig(
+    form: TunnelConfigState,
+    stored: TunnelConfig?,
+    newId: String,
+): TunnelConfig {
+    val socks = form.type == TunnelType.DYNAMIC_SOCKS5
+    val isLocalForward = form.type == TunnelType.LOCAL_FORWARD
+    // New tunnel: blank base, the form-owned fields are overwritten below.
+    val base = stored ?: TunnelConfig(
+        id = newId,
+        label = "",
+        hostId = "",
+        type = form.type,
+        localPort = 0,
+        remoteHost = "",
+        remotePort = 0,
+    )
+    return base.copy(
+        label = form.label.trim(),
+        hostId = form.hostId,
+        type = form.type,
+        localPort = form.localPort.toInt(),
+        remoteHost = if (socks) "" else form.remoteHost.trim(),
+        remotePort = if (socks) 0 else form.remotePort.toInt(),
+        autoStart = form.autoStart,
+        openBrowserOnConnect = isLocalForward && form.openBrowserOnConnect,
+        keepAliveAfterBrowserClose = isLocalForward && form.keepAliveAfterBrowserClose,
+    )
 }

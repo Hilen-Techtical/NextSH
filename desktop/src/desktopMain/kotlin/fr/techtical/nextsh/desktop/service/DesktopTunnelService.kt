@@ -95,11 +95,15 @@ class DesktopTunnelService(
                     // Open the in-app browser automatically for LOCAL_FORWARD tunnels that
                     // have openBrowserOnConnect=true and started successfully.
                     // Guards:
+                    // - ACTIVE: Success is not enough. A start the user stopped during
+                    //   the handshake also answers Success (a deliberate stop is not an
+                    //   error), and so does a Start the manager ignored.
                     // - hasSession: do not double-show an already visible overlay.
                     // - isUserDismissed: do not reopen a tunnel the user closed earlier
                     //   (otherwise keepAliveAfterBrowserClose + idle reconnections
                     //   would re-pop the overlay every cycle).
                     if (result is SshResult.Success
+                        && tunnelManager.getTunnelState(config.id)?.status == TunnelStatus.ACTIVE
                         && config.type == TunnelType.LOCAL_FORWARD
                         && config.openBrowserOnConnect
                         && browserSessionHolder?.hasSession(config.id) == false
@@ -311,7 +315,12 @@ class DesktopTunnelService(
         reconnectJobs[config.id] = job
     }
 
-    private fun restartReconnectingTunnels() {
+    /**
+     * Network is back : reconnects the tunnels left RECONNECTING that have no
+     * reconnect job yet. The state watch normally holds one for each of them,
+     * so this is a safety net, and `internal` only so that the tests reach it.
+     */
+    internal fun restartReconnectingTunnels() {
         val toRestart = tunnelManager.tunnelStates.value
             .filter { (_, s) -> s.status == TunnelStatus.RECONNECTING && !tunnelManager.wasManuallyStopped(s.config.id) }
             .map { it.value.config }
@@ -320,9 +329,13 @@ class DesktopTunnelService(
             if (reconnectJobs.containsKey(config.id)) return@forEach
             val job = appScope.coroutineScope.launch {
                 try {
-                    // Force l'arrêt de l'ancien client si encore en mémoire,
-                    // puis reconnecte avec backoff.
-                    tunnelManager.stopTunnel(config.id)
+                    // Free the old client if it is still in memory, then reconnect
+                    // with backoff. MUST be `releaseForReconnect`, not `stopTunnel`,
+                    // for the reason given in [scheduleReconnect] : `stopTunnel` flags
+                    // the tunnel as manually stopped, `attemptReconnect` then sees
+                    // the flag and gives up at once, leaving the tunnel RECONNECTING
+                    // for good.
+                    tunnelManager.releaseForReconnect(config.id)
                     attemptReconnect(config)
                 } finally {
                     reconnectJobs.remove(config.id)
@@ -336,12 +349,25 @@ class DesktopTunnelService(
         var delayMs = INITIAL_BACKOFF_MS
         var attempt = 0
         while (true) {
-            attempt++
             // Keep the UI at RECONNECTING during the whole backoff cycle. Each
             // failed `startTunnel` flips the status to ERROR (via setError);
             // restoring it here avoids RECONNECTING ↔ ERROR flicker and lets
             // the tunnel row stay in "reconnecting" as long as we're trying.
-            tunnelManager.updateStatus(config.id, TunnelStatus.RECONNECTING)
+            //
+            // Never over a live state, though : STARTING belongs to a start in
+            // flight, ACTIVE to a tunnel that came up on its own. The test and
+            // the write are one compare-and-set, so a status written by that
+            // start between the two cannot be overwritten. ACTIVE ends the loop,
+            // but only when the manager really holds the tunnel : a stale ACTIVE
+            // status with no live entry (a released session) is not a reason to
+            // stop retrying, the round goes on and the start below rewrites it.
+            val seen = tunnelManager.updateStatusIf(config.id, TunnelStatus.RECONNECTING) {
+                it != TunnelStatus.STARTING && it != TunnelStatus.ACTIVE
+            }
+            if (seen == TunnelStatus.ACTIVE && config.id in tunnelManager.activeIds()) {
+                Logger.d(TAG, "Reconnexion ${config.label} abandonnée : déjà ACTIVE")
+                return
+            }
             delay(delayMs)
             // Allow an explicit stop or a successful restart (from elsewhere)
             // to break the loop.
@@ -349,15 +375,46 @@ class DesktopTunnelService(
                 Logger.d(TAG, "Reconnexion ${config.label} abandonnée : arrêt manuel")
                 return
             }
-            if (tunnelManager.getTunnelState(config.id)?.status == TunnelStatus.ACTIVE) {
+            if (tunnelManager.getTunnelState(config.id)?.status == TunnelStatus.ACTIVE &&
+                config.id in tunnelManager.activeIds()
+            ) {
                 Logger.d(TAG, "Reconnexion ${config.label} abandonnée : déjà ACTIVE")
                 return
             }
+            // Another start of this tunnel is still in flight (a Start the user
+            // issued, or the one a network drop flipped to RECONNECTING). The
+            // manager would ignore ours and answer Success, which we would take
+            // for "reconnected" and leave the loop : if that start then fails,
+            // nobody retries. So wait one more backoff and look again: ACTIVE
+            // ends the loop above, a failure lets us start for real.
+            //
+            // The skipped round is not an attempt : it neither bumps `attempt`
+            // (a log counter, the loop has no limit) nor doubles `delayMs`
+            // (the backoff protects the server from failed connects, and this
+            // round opened none).
+            if (tunnelManager.isStarting(config.id)) {
+                Logger.d(TAG, "Reconnexion ${config.label} reportée : un démarrage est déjà en cours")
+                continue
+            }
+            attempt++
             Logger.d(TAG, "Reconnexion tunnel ${config.label} tentative $attempt")
             when (startTunnel(config)) {
                 is SshResult.Success -> {
-                    Logger.d(TAG, "Tunnel ${config.label} reconnecté (tentative $attempt)")
-                    return
+                    if (config.id in tunnelManager.activeIds()) {
+                        Logger.d(TAG, "Tunnel ${config.label} reconnecté (tentative $attempt)")
+                        return
+                    }
+                    // Success without a live tunnel is not a reconnection : the
+                    // manager ignored this Start (another one took the id between
+                    // our `isStarting` check and the call), or a manual stop
+                    // cancelled it. The stop ends the loop ; otherwise wait one
+                    // more backoff and look again (ACTIVE ends it above).
+                    if (tunnelManager.wasManuallyStopped(config.id)) {
+                        Logger.d(TAG, "Reconnexion ${config.label} abandonnée : arrêt manuel")
+                        return
+                    }
+                    Logger.d(TAG, "Reconnexion ${config.label} : démarrage ignoré ou sans tunnel actif, on réessaie")
+                    continue
                 }
                 is SshResult.Error -> {
                     delayMs = (delayMs * 2).coerceAtMost(MAX_BACKOFF_MS)

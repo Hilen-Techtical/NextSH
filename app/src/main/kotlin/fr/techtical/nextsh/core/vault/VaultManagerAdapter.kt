@@ -26,11 +26,17 @@ class VaultManagerAdapter @Inject constructor(
     override suspend fun getPassword(credentialId: String): CharArray? =
         delegate.getPassword(credentialId)
 
+    override suspend fun deletePassword(credentialId: String) =
+        delegate.deletePassword(credentialId)
+
     override suspend fun storePrivateKey(keyId: String, privateKeyPem: String) =
         delegate.storePrivateKey(keyId, privateKeyPem)
 
     override suspend fun getPrivateKey(keyId: String): String? =
         delegate.getPrivateKey(keyId)
+
+    override suspend fun deletePrivateKey(keyId: String) =
+        delegate.deletePrivateKey(keyId)
 
     override suspend fun storeCertificate(certId: String, certPem: String) =
         delegate.storeCertificate(certId, certPem)
@@ -52,17 +58,6 @@ class VaultManagerAdapter @Inject constructor(
 
     override suspend fun listStoredKeyPassphraseIds(): List<String> =
         delegate.listStoredKeyPassphraseIds()
-
-    override suspend fun deleteCredential(credentialId: String) {
-        // The shared contract uses a single "delete by id" for tombstoning across
-        // all credential types. Android's vault stores each kind under a different
-        // prefix; remove from all three (plus key passphrase) so the tombstone
-        // propagates whatever type was actually stored.
-        delegate.deletePassword(credentialId)
-        delegate.deletePrivateKey(credentialId)
-        delegate.deleteCertificate(credentialId)
-        delegate.deleteKeyPassphrase(credentialId)
-    }
 
     override suspend fun wipeVault() =
         delegate.wipeVault()
