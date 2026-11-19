@@ -29,6 +29,7 @@ import java.net.ConnectException
 import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.security.cert.CertificateException
 import javax.net.ssl.SSLHandshakeException
 
 /**
@@ -181,7 +182,7 @@ class LanSyncClientTest {
         // Self-locking case: a device enrolled by host name whose DNS/mDNS record dies. The old
         // classification reported a plain "network error", so discovery was never attempted and
         // the stale entry could never heal.
-        val result = client.classifyIoError("pull", "desktop-1", "my-desktop.local", UnknownHostException("my-desktop.local"))
+        val result = client.classifyIoError("pull", "desktop-1", UnknownHostException("my-desktop.local"))
 
         assertInstanceOf(SyncResult.Error::class.java, result)
         assertEquals(SyncError.HOST_UNREACHABLE, (result as SyncResult.Error).reason)
@@ -191,7 +192,7 @@ class LanSyncClientTest {
     @Test
     fun `NoRouteToHostException classifies as HOST_UNREACHABLE and re-triggers discovery`() {
         // What retries 2-3 hit once the ARP entry for a departed peer goes NUD_FAILED.
-        val result = client.classifyIoError("pull", "desktop-1", "192.168.1.10", NoRouteToHostException("EHOSTUNREACH"))
+        val result = client.classifyIoError("pull", "desktop-1", NoRouteToHostException("EHOSTUNREACH"))
 
         assertEquals(SyncError.HOST_UNREACHABLE, (result as SyncResult.Error).reason)
         assertTrue(client.isHostUnreachable(result))
@@ -199,7 +200,7 @@ class LanSyncClientTest {
 
     @Test
     fun `ConnectException classifies as HOST_UNREACHABLE and re-triggers discovery`() {
-        val result = client.classifyIoError("pull", "desktop-1", "192.168.1.10", ConnectException("Connection refused"))
+        val result = client.classifyIoError("pull", "desktop-1", ConnectException("Connection refused"))
 
         assertEquals(SyncError.HOST_UNREACHABLE, (result as SyncResult.Error).reason)
         assertTrue(client.isHostUnreachable(result))
@@ -209,25 +210,60 @@ class LanSyncClientTest {
     fun `a read timeout is not treated as unreachable and does not re-trigger discovery`() {
         // A read/write timeout means a live server accepted the connection: the address is
         // correct, so broadcasting discovery probes would be pure noise.
-        val timeoutResult = client.classifyIoError("pull", "desktop-1", "192.168.1.10", SocketTimeoutException("Read timed out"))
+        val timeoutResult = client.classifyIoError("pull", "desktop-1", SocketTimeoutException("Read timed out"))
         assertFalse(client.isHostUnreachable(timeoutResult))
 
         // And the shape push/pull actually produce for a timeout (they catch it before
         // classifyIoError is reached) must not re-trigger discovery either.
-        assertFalse(client.isHostUnreachable(SyncResult.Error(SyncError.NETWORK_TIMEOUT, "Délai dépassé (192.168.1.10:47731)")))
+        assertFalse(client.isHostUnreachable(SyncResult.Error(SyncError.NETWORK_TIMEOUT, "Request timed out")))
+    }
+
+    // ── TLS: a refused pin is an authentication failure, any other TLS failure is a network one ──
+
+    @Test
+    fun `a refused TLS pin wrapped in a handshake failure is AuthFailed and does not re-trigger discovery`() {
+        // OkHttp raises the CertificateException of PinnedTrustManager inside an SSLHandshakeException.
+        // The peer answered with another certificate: the settings must invite to enroll the device
+        // again, which "sync failed" would not.
+        val handshake = SSLHandshakeException("handshake failed").apply {
+            initCause(CertificateException("TLS fingerprint mismatch: pinning rejected"))
+        }
+
+        val result = client.classifyIoError("pull", "desktop-1", handshake)
+
+        assertEquals(SyncResult.AuthFailed, result)
+        assertFalse(client.isHostUnreachable(result), "a pin mismatch is a security signal, not a routing problem")
     }
 
     @Test
-    fun `a TLS pin failure is not treated as unreachable`() {
-        // A pin mismatch means the peer answered: a security signal, not a routing problem.
-        val result = client.classifyIoError(
-            "pull",
-            "desktop-1",
-            "192.168.1.10",
-            SSLHandshakeException("pin mismatch"),
+    fun `a refused TLS pin is found deeper in the cause chain`() {
+        val deep = IOException("outer", IOException("middle", CertificateException("pinning rejected")))
+
+        assertEquals(SyncResult.AuthFailed, client.classifyIoError("push", "desktop-1", deep))
+    }
+
+    @Test
+    fun `a TLS failure without a certificate stays a generic error`() {
+        // A handshake cut short may be a plain network drop: it must not tell the user to enroll again.
+        val result = client.classifyIoError("pull", "desktop-1", SSLHandshakeException("Connection reset during handshake"))
+
+        assertInstanceOf(SyncResult.Error::class.java, result)
+        assertEquals(SyncError.UNKNOWN, (result as SyncResult.Error).reason)
+        assertFalse(client.isHostUnreachable(result))
+    }
+
+    @Test
+    fun `the developer messages of a classified failure carry no address and no exception message`() {
+        val secret = "10.20.30.40:47731 /home/user/secret"
+        val results = listOf(
+            client.classifyIoError("pull", "desktop-1", ConnectException("Failed to connect to /$secret")),
+            client.classifyIoError("pull", "desktop-1", IOException("boom $secret")),
         )
 
-        assertFalse(client.isHostUnreachable(result))
+        results.forEach { result ->
+            val message = (result as SyncResult.Error).message.orEmpty()
+            assertFalse(message.contains("10.20.30.40") || message.contains("secret") || message.contains("47731"), message)
+        }
     }
 
     @Test
@@ -351,7 +387,7 @@ class LanSyncClientTest {
         client.persistResolvedHostIfSuccessful(
             "device-1",
             "192.168.1.50",
-            SyncResult.Error(SyncError.HOST_UNREACHABLE, "Hôte injoignable (192.168.1.50:47731)"),
+            SyncResult.Error(SyncError.HOST_UNREACHABLE, "Host unreachable"),
         )
 
         coVerify(exactly = 0) { enrolledDeviceRepository.updateLastKnownHost(any(), any()) }

@@ -4,17 +4,29 @@
 package fr.techtical.nextsh
 
 import android.app.Application
-import android.util.Log
 import dagger.hilt.android.HiltAndroidApp
+import fr.techtical.nextsh.core.logging.DebugLogTree
+import fr.techtical.nextsh.core.lock.AppLock
+import fr.techtical.nextsh.core.lock.OwnerPromptEndedAway
+import fr.techtical.nextsh.core.lock.PromptsEndedByLock
+import fr.techtical.nextsh.core.logging.ReleaseLogTree
 import fr.techtical.nextsh.core.shortcut.ShortcutUpdater
+import fr.techtical.nextsh.core.ssh.BiometricPromptCoordinator
+import fr.techtical.nextsh.core.ssh.Fido2PromptCoordinator
 import fr.techtical.nextsh.core.ssh.HostKeyPromptCoordinator
 import fr.techtical.nextsh.core.ssh.SshSessionManager
+import fr.techtical.nextsh.core.ssh.TunnelReconciler
+import fr.techtical.nextsh.core.vault.AndroidVaultWipe
 import fr.techtical.nextsh.data.preferences.SettingsDataStore
+import fr.techtical.nextsh.data.repository.OrphanTunnelRepair
 import fr.techtical.nextsh.shared.core.sync.SyncScheduler
+import fr.techtical.nextsh.ui.sessions.TerminalTabStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.security.Security
@@ -28,6 +40,15 @@ class App : Application() {
     @Inject lateinit var settingsDataStore: SettingsDataStore
     @Inject lateinit var sshSessionManager: SshSessionManager
     @Inject lateinit var hostKeyPromptCoordinator: HostKeyPromptCoordinator
+    @Inject lateinit var fido2PromptCoordinator: Fido2PromptCoordinator
+    @Inject lateinit var biometricPromptCoordinator: BiometricPromptCoordinator
+    @Inject lateinit var orphanTunnelRepair: OrphanTunnelRepair
+    @Inject lateinit var tunnelReconciler: TunnelReconciler
+    @Inject lateinit var terminalTabStore: TerminalTabStore
+    @Inject lateinit var appLock: AppLock
+    @Inject lateinit var promptsEndedByLock: PromptsEndedByLock
+    @Inject lateinit var ownerPromptEndedAway: OwnerPromptEndedAway
+    @Inject lateinit var androidVaultWipe: AndroidVaultWipe
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -47,21 +68,56 @@ class App : Application() {
         setupBouncyCastleProvider()
 
         if (BuildConfig.DEBUG) {
-            Timber.plant(Timber.DebugTree())
+            Timber.plant(DebugLogTree())
         } else {
-            Timber.plant(ReleaseTree())
+            Timber.plant(ReleaseLogTree())
         }
 
-        shortcutUpdater.startObserving()
-        startSyncSchedulerIfEnabled()
+        // A wipe of the vault that the death of the process cut resumes here, BEFORE anything that opens a
+        // session, starts a tunnel or syncs: the app is closed (VaultWipeGate) from this call on, and
+        // everything below that would work on the old vault finds it refusing. The wipe runs in its own
+        // scope; the modal of the activity shows it as soon as the activity is there.
+        val resumingWipe = androidVaultWipe.resumeIfPending()
 
-        // Install host-key TOFU callback at App-level: it must be live
-        // regardless of which screen the user is on. SessionViewModel used
-        // to wire it in init, but on Android there's no nav entry to
-        // Sessions before connecting, so a fresh install would silently
-        // fail the first connection ("Could not verify host key…").
+        // Install the interactive SSH callbacks at App-level, before anything can open a
+        // connection (the tunnel reconciler below may). They must be live regardless of which
+        // screen the user is on, and they are the only installation: SessionViewModel used to wire
+        // them in init, but a connection started from the host list, SFTP or a tunnel never
+        // creates that ViewModel, so a fresh install would fail the first connection.
+        //  - host-key TOFU: "Could not verify host key..." without it;
+        //  - FIDO2 signature: "FIDO2 callback not configured" without it;
+        //  - fingerprint of a biometric key: no dialog, and the connection fails, without it.
         sshSessionManager.hostKeyVerificationCallback = { unknown ->
             hostKeyPromptCoordinator.promptUnknown(unknown)
+        }
+        fido2PromptCoordinator.install(sshSessionManager)
+        biometricPromptCoordinator.install(sshSessionManager)
+
+        shortcutUpdater.startObserving()
+        tunnelReconciler.startObserving()
+        // The terminal tabs follow the edits made to their hosts for as long as the app lives.
+        terminalTabStore.startObservingHosts()
+        followAutoLockDelay()
+        // The prompts that are up when the app locks end as for an app that was left.
+        promptsEndedByLock.start(appScope)
+        // A vault dialog that ends while the app is away starts the clock of the lock at that moment.
+        ownerPromptEndedAway.start(appScope)
+        startSyncSchedulerIfEnabled()
+        // Not while a wipe resumes: it would write tombstones into a database that is being erased.
+        if (!resumingWipe) repairOrphanTunnels()
+    }
+
+    /**
+     * Keeps the delay of the automatic lock in [AppLock] as the settings have it, for as long as the
+     * app lives. [AppLock] is asked for the delay inside a lifecycle callback and cannot wait for the
+     * settings store, so it holds a copy. Until the first value comes it has the default.
+     */
+    private fun followAutoLockDelay() {
+        appScope.launch {
+            settingsDataStore.settingsFlow
+                .map { it.autoLockDelay }
+                .distinctUntilChanged()
+                .collect { appLock.setAutoLockDelay(it) }
         }
     }
 
@@ -74,11 +130,21 @@ class App : Application() {
             val settings = settingsDataStore.settingsFlow.first()
             if (settings.syncEnabled) {
                 syncScheduler.start(settings.syncInterval.intervalMs)
-                Timber.d("App", "SyncScheduler started (intervalMs=${settings.syncInterval.intervalMs})")
+                Timber.tag("App").d("SyncScheduler started (intervalMs=${settings.syncInterval.intervalMs})")
             } else {
-                Timber.d("App", "SyncScheduler not started: sync disabled in settings")
+                Timber.tag("App").d("SyncScheduler not started: sync disabled in settings")
             }
         }
+    }
+
+    /**
+     * Deletes the live tunnels whose host is deleted, left by an earlier sync (see
+     * [OrphanTunnelRepair]). Off the main thread, and after `user.home` is set in [onCreate]:
+     * the tombstone clock tick reads the device id from it. A failure is logged by class name
+     * inside [OrphanTunnelRepair.runSafely], never thrown.
+     */
+    private fun repairOrphanTunnels() {
+        appScope.launch { orphanTunnelRepair.runSafely() }
     }
 
     private fun setupBouncyCastleProvider() {
@@ -92,24 +158,5 @@ class App : Application() {
         if (Security.getProvider(net.i2p.crypto.eddsa.EdDSASecurityProvider.PROVIDER_NAME) == null) {
             Security.addProvider(net.i2p.crypto.eddsa.EdDSASecurityProvider())
         }
-    }
-}
-
-private class ReleaseTree : Timber.Tree() {
-
-    private val sensitivePatterns = Regex(
-        "password|pwd|key_|credential|passphrase|secret|token|fido2|ctap|assertion|authenticator|signature|signing",
-        RegexOption.IGNORE_CASE,
-    )
-
-    override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
-        if (priority < Log.INFO) return
-
-        val safeMessage = if (sensitivePatterns.containsMatchIn(message)) {
-            "[REDACTED, sensitive data]"
-        } else {
-            message
-        }
-        Log.println(priority, tag ?: "NextSH", safeMessage)
     }
 }

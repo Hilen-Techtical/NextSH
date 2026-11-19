@@ -4,7 +4,9 @@
 package fr.techtical.nextsh.shared.core.sync
 
 import fr.techtical.nextsh.shared.domain.vault.VaultManager
+import fr.techtical.nextsh.shared.util.LogId
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import fr.techtical.nextsh.shared.util.randomUuid
 import kotlinx.coroutines.CancellationException
 import java.util.Arrays
@@ -280,7 +282,8 @@ class JvmCredentialSyncRepository(
         val plain = try {
             CredentialCodec.decrypt(entry.iv, entry.encryptedPayload, innerKey)
         } catch (e: SyncCodecException) {
-            Logger.w(TAG, "Credential decrypt failed for $syncId, skipping (${e.message})")
+            // Neither the raw syncId nor e.message: both can identify the user's credential.
+            Logger.w(TAG, "Credential decrypt failed (type=${entry.type}, id=${LogId.of(syncId)}), skipping (${errorClass(e)})")
             return false
         }
         return try {
@@ -351,6 +354,25 @@ class JvmCredentialSyncRepository(
         } finally {
             Arrays.fill(innerKey, 0)
         }
+    }
+
+    override suspend fun reassertLocalCredential(remote: SyncEntry<CredentialEntry>): Boolean {
+        // A device-local LAN secret never syncs, so it can never be in conflict.
+        if (isInternalSecret(stripPrefix(remote.id))) return false
+        val existing = metaStore.get(remote.id) ?: return false
+        val now = nowMs()
+        // Same rule as CrdtEngine.keepLocal, applied to the stored metadata. The vault, the
+        // hash and the tombstone flag are left as they are, so a kept local deletion stays
+        // a tombstone.
+        metaStore.put(
+            remote.id,
+            existing.copy(
+                vectorClock = existing.vectorClock.supersede(remote.clock, localDeviceId(), now),
+                updatedAt = now,
+            ),
+        )
+        pendingConflictRepository.deleteByEntity(SyncableEntityType.CREDENTIAL, remote.id)
+        return true
     }
 
     private suspend fun persistConflict(syncId: String, conflict: MergeResult.Conflict<CredentialEntry>) {

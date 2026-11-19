@@ -41,6 +41,7 @@ import fr.techtical.nextsh.desktop.sessions.UnknownHostKeyDialog
 import fr.techtical.nextsh.desktop.settings.KnownHostsScreen
 import fr.techtical.nextsh.desktop.transfers.TransfersScreen
 import fr.techtical.nextsh.desktop.settings.SettingsScreen
+import fr.techtical.nextsh.desktop.settings.VaultWipeDialogs
 import fr.techtical.nextsh.desktop.sync.ConflictResolutionScreen
 import fr.techtical.nextsh.desktop.sync.EnrolledDevicesScreen
 import fr.techtical.nextsh.desktop.sync.EnrollmentScreen
@@ -49,10 +50,13 @@ import fr.techtical.nextsh.desktop.theme.TechticalTheme
 import fr.techtical.nextsh.desktop.tunnels.TunnelConfigScreen
 import fr.techtical.nextsh.desktop.tunnels.TunnelListScreen
 import fr.techtical.nextsh.desktop.ui.browser.DesktopBrowserOverlay
+import fr.techtical.nextsh.desktop.generated.resources.Res
+import fr.techtical.nextsh.desktop.generated.resources.open_link_what_repository
 import fr.techtical.nextsh.desktop.onboarding.FirstLaunchScreen
 import fr.techtical.nextsh.desktop.snippets.SnippetListScreen
 import fr.techtical.nextsh.desktop.vault.VaultScreen
 import fr.techtical.nextsh.desktop.vault.VaultUnlockScreen
+import org.jetbrains.compose.resources.stringResource
 
 @Composable
 fun FrameWindowScope.App(
@@ -79,6 +83,9 @@ fun FrameWindowScope.App(
         // pour que le dialog flotte au-dessus de toute la chrome (titre,
         // sidebar, content) sans dépendance à la branche `screen` courante.
         var showRepoLinkDialog by remember { mutableStateOf(false) }
+
+        // The vault wipe modal (progress, failure): at the root so that it shows over any screen.
+        VaultWipeDialogs()
 
         if (cmdKOpen && !vaultLocked) {
             // DI access deferred to this branch: the cmdKViewModel is
@@ -136,7 +143,7 @@ fun FrameWindowScope.App(
         if (showRepoLinkDialog) {
             OpenLinkConfirmDialog(
                 url = RepositoryUrls.GITHUB,
-                what = "le dépôt GitHub public de NextSH",
+                what = stringResource(Res.string.open_link_what_repository),
                 onConfirm = {
                     openExternalLink(RepositoryUrls.GITHUB)
                     showRepoLinkDialog = false
@@ -186,16 +193,22 @@ fun FrameWindowScope.App(
             }
 
             when (val s = screen) {
+                // The vault has just been created, which is an unlock: the first session needs the same
+                // services as the next ones (sync lifecycle, network watcher, tunnel service), so both exits
+                // of the first launch, and the PIN unlock, go through DesktopContainer.onVaultReady().
                 is Screen.FirstLaunch -> FirstLaunchScreen(
-                    onCompleted = { navigator.navigate(Screen.HostList) },
-                    onConfigureSync = { navigator.navigate(Screen.Enrollment(fromFirstLaunch = true)) },
+                    onCompleted = {
+                        DesktopContainer.onVaultReady()
+                        navigator.navigate(Screen.HostList)
+                    },
+                    onConfigureSync = {
+                        DesktopContainer.onVaultReady()
+                        navigator.navigate(Screen.Enrollment(fromFirstLaunch = true))
+                    },
                 )
                 is Screen.VaultUnlock -> VaultUnlockScreen(
                     onUnlocked = {
-                        DesktopContainer.lanSyncServerLifecycle.onVaultUnlocked()
-                        // Idempotent: re-binds the sync server when the LAN IP changes (DHCP).
-                        DesktopContainer.lanSyncServerLifecycle.startNetworkWatcher()
-                        DesktopContainer.tunnelService.onVaultUnlocked()
+                        DesktopContainer.onVaultReady()
                         navigator.navigate(Screen.HostList)
                     },
                 )
@@ -207,9 +220,10 @@ fun FrameWindowScope.App(
                     // MainLayout composition: they're never evaluated while
                     // the user is on VaultUnlock / FirstLaunch screens.
                     val activeSessions by DesktopContainer.sessionManager.tabs.collectAsState()
-                    val foldersWithHosts by DesktopContainer.hostFolderRepository
-                        .observeAllWithHosts()
-                        .collectAsState(initial = emptyList<HostFolderWithHosts>())
+                    // The repository flows below are remembered: a new flow on every recomposition would make
+                    // collectAsState cancel and resubscribe, and the database would re-run the SELECT each time.
+                    val foldersFlow = remember { DesktopContainer.hostFolderRepository.observeAllWithHosts() }
+                    val foldersWithHosts by foldersFlow.collectAsState(initial = emptyList<HostFolderWithHosts>())
                     var hostListReadyLogged by remember { mutableStateOf(false) }
                     LaunchedEffect(foldersWithHosts) {
                         if (!hostListReadyLogged && foldersWithHosts.isNotEmpty()) {
@@ -222,15 +236,13 @@ fun FrameWindowScope.App(
                     // tunnelsTotal must reflect all *configured* tunnels (persisted),
                     // not just the runtime states map (which is empty until something
                     // is started). Source of truth = tunnelRepository.
-                    val configuredTunnels by DesktopContainer.tunnelRepository
-                        .observeAll()
-                        .collectAsState(initial = emptyList())
+                    val configuredTunnelsFlow = remember { DesktopContainer.tunnelRepository.observeAll() }
+                    val configuredTunnels by configuredTunnelsFlow.collectAsState(initial = emptyList())
                     val tunnelsTotal = configuredTunnels.size
                     val settings by DesktopContainer.settingsStore.settings.collectAsState()
                     val syncEnabled = settings.syncEnabled
-                    val enrolledDevices by DesktopContainer.enrolledDeviceRepository
-                        .observeAll()
-                        .collectAsState(initial = emptyList())
+                    val enrolledDevicesFlow = remember { DesktopContainer.enrolledDeviceRepository.observeAll() }
+                    val enrolledDevices by enrolledDevicesFlow.collectAsState(initial = emptyList())
                     val syncState by DesktopContainer.syncScheduler.syncState.collectAsState()
                     val pendingConflicts = syncState.pendingConflicts
                     val activeTransfers by DesktopContainer.transferManager.activeCount.collectAsState()

@@ -10,6 +10,7 @@ import fr.techtical.nextsh.shared.domain.model.SshKey
 import fr.techtical.nextsh.shared.domain.repository.HostRepository
 import fr.techtical.nextsh.shared.domain.repository.SshKeyRepository
 import fr.techtical.nextsh.shared.domain.vault.VaultManager
+import fr.techtical.nextsh.shared.util.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -21,6 +22,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -279,6 +281,24 @@ class HostImportServiceTest {
         assertEquals(0, result.imported)
         assertEquals(0, result.skipped)
         assertTrue(result.errors.isEmpty())
+    }
+
+    @Test
+    fun `log lines carry neither label nor hostname nor exception message`() = runTest {
+        val hosts = FakeHostRepository(failOnHostname = "boom.example")
+        val ok = ParsedHost("ok-label", "good.example", 22, "u", AuthType.PASSWORD, null, password = "p".toCharArray())
+        val bad = ParsedHost("prod-db-label", "boom.example", 22, "u", AuthType.PASSWORD, null, password = "secret".toCharArray())
+
+        val lines = Logger.capture { service.import(listOf(ok, bad), hosts, FakeVaultManager()) }
+
+        assertTrue(
+            lines.contains("W/HostImport: Skipping host entry 2 of 2, import failed (IllegalStateException)"),
+            lines.joinToString("\n"),
+        )
+        val all = lines.joinToString("\n")
+        for (value in listOf("ok-label", "prod-db-label", "good.example", "boom.example", "simulated DB failure", "secret")) {
+            assertFalse(all.contains(value), "'$value' leaked in logs: $all")
+        }
     }
 
     // ── Atomic import ────────────────────────────────────────────────────────────

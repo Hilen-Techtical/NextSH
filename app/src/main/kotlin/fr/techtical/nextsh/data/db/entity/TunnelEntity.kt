@@ -9,6 +9,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import fr.techtical.nextsh.domain.model.TunnelConfig
 import fr.techtical.nextsh.domain.model.TunnelType
+import fr.techtical.nextsh.shared.domain.tunnel.TunnelBrowserPath
 
 @Entity(
     tableName = "tunnels",
@@ -40,6 +41,9 @@ data class TunnelEntity(
     val deleted: Boolean = false,
     val deletedAt: Long? = null,
     val updatedAt: Long = 0L,
+    // Path, query and fragment opened by the in-app browser. Appended last, added by
+    // MIGRATION_12_13 with DEFAULT '/'. May carry a secret in its query: never log it.
+    val browserPath: String = TunnelBrowserPath.DEFAULT,
 ) {
     fun toDomain(): TunnelConfig = TunnelConfig(
         id = id,
@@ -53,6 +57,7 @@ data class TunnelEntity(
         openBrowserOnConnect = openBrowserOnConnect,
         keepAliveAfterBrowserClose = keepAliveAfterBrowserClose,
         isFavorite = isFavorite,
+        browserPath = browserPath,
     )
 
     companion object {
@@ -68,6 +73,7 @@ data class TunnelEntity(
             openBrowserOnConnect = config.openBrowserOnConnect,
             keepAliveAfterBrowserClose = config.keepAliveAfterBrowserClose,
             isFavorite = config.isFavorite,
+            browserPath = config.browserPath,
         )
     }
 }

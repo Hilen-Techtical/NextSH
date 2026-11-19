@@ -81,6 +81,17 @@ class VaultPinManager {
 
     fun isSetup(): Boolean = VaultPaths.metaFile.exists()
 
+    private fun vaultFiles(): List<java.io.File> =
+        listOf(VaultPaths.metaFile, VaultPaths.dataFile)
+            .flatMap { listOf(it, java.io.File(it.absoluteFile.parentFile, it.name + ".tmp")) }
+
+    /**
+     * True while ANY vault file is on disk (`vault.meta`, `vault.dat` and their `.tmp` siblings), not only
+     * `vault.meta` as [isSetup] does: after a wipe that could not delete everything, a leftover `vault.dat`
+     * is still a vault that is not gone.
+     */
+    fun hasVaultFiles(): Boolean = vaultFiles().any { it.exists() }
+
     val isUnlocked: Boolean get() = masterKeyBytes != null
 
     /**
@@ -94,6 +105,14 @@ class VaultPinManager {
         var dek: ByteArray? = null
         return try {
             if (isSetup()) return Result.failure(IllegalStateException("Vault already initialised"))
+
+            // No vault.meta, so any vault.dat (or .tmp) left here is an orphan of an incomplete wipe: it is
+            // encrypted under a DEK that no longer exists and would be read as the new vault's data. Delete it,
+            // or refuse to create the vault on top of it.
+            val orphans = vaultFiles().filter { it.exists() }
+            if (orphans.any { !it.delete() && it.exists() }) {
+                return Result.failure(java.io.IOException("Leftover vault file could not be deleted"))
+            }
 
             dek = ByteArray(DEK_BYTES).also { SecureRandom().nextBytes(it) }
 
@@ -266,10 +285,18 @@ class VaultPinManager {
         return SecretKeySpec(bytes, "AES")
     }
 
+    /**
+     * Locks, then deletes the two vault files. Both deletions are tried; if either file is still on disk
+     * afterwards (open by another process, read-only) this throws, so that a wipe is never reported done
+     * while the encrypted vault is still there.
+     */
     fun wipe() {
         lock()
-        VaultPaths.metaFile.delete()
-        VaultPaths.dataFile.delete()
+        // The `.tmp` siblings too: a write killed before its rename leaves the wrapped DEK or the encrypted
+        // data there (see VaultPaths.atomicWrite).
+        val stillThere = vaultFiles()
+            .count { file -> file.exists() && !file.delete() && file.exists() }
+        if (stillThere > 0) throw java.io.IOException("Vault file could not be deleted")
     }
 
     // ── internals ──────────────────────────────────────────────────────────

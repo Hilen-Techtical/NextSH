@@ -5,12 +5,23 @@ package fr.techtical.nextsh.core.crypto
 
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import fr.techtical.nextsh.shared.util.errorClass
 import timber.log.Timber
 import java.security.KeyStore
+import java.security.KeyStoreException
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+
+/** Fixed text of the refusal: the alias is untrusted input and is never quoted. */
+internal const val NOT_A_BIOMETRIC_ALIAS_MESSAGE = "Not a biometric key alias"
+
+/** Fixed text of the failure for an entry that is not (any more) in the Keystore: the alias is never quoted. */
+internal const val MISSING_BIOMETRIC_KEY_MESSAGE = "Biometric key not found"
+
+/** Fixed text of the failure of [KeystoreManager.deleteAllBiometricKeys]: an alias is never quoted. */
+internal const val BIOMETRIC_KEYS_NOT_DELETED_MESSAGE = "Biometric keys could not be deleted"
 
 @Singleton
 class KeystoreManager @Inject constructor() {
@@ -36,14 +47,14 @@ class KeystoreManager @Inject constructor() {
         return try {
             kpg.initialize(biometricKeySpec(alias, strongBox = true))
             kpg.generateKeyPair().public.also {
-                Timber.i("Biometric SSH key generated in StrongBox: $alias")
+                Timber.i("Biometric SSH key generated in StrongBox")
             }
         } catch (e: Exception) {
             // Repli TEE si StrongBox est absent du materiel.
-            Timber.w("StrongBox unavailable for biometric key, falling back to TEE: ${e.message}")
+            Timber.w("StrongBox unavailable for biometric key, falling back to TEE (${errorClass(e)})")
             kpg.initialize(biometricKeySpec(alias, strongBox = false))
             kpg.generateKeyPair().public.also {
-                Timber.i("Biometric SSH key generated in TEE: $alias")
+                Timber.i("Biometric SSH key generated in TEE")
             }
         }
     }
@@ -85,20 +96,89 @@ class KeystoreManager @Inject constructor() {
      * Récupère la clé privée du Keystore pour signature.
      * Nécessite une authentification biométrique préalable (via BiometricPrompt CryptoObject).
      *
-     * @throws java.security.KeyStoreException si l'alias n'existe pas
+     * Comme [deleteBiometricKey], elle refuse un alias qui n'a pas le format des alias que l'app
+     * génère ([BiometricKeyAlias]) : l'alias vient de la base, donc potentiellement d'un backup ou
+     * d'une sync, et ne doit jamais donner accès à une autre entrée du Keystore.
+     *
+     * @throws java.security.KeyStoreException si l'alias n'existe pas, ou n'est pas un alias de clé biométrique
      * @throws android.security.keystore.UserNotAuthenticatedException si la biométrie n'est pas passée
      */
     fun getBiometricPrivateKey(alias: String): java.security.PrivateKey {
-        val entry = keyStore.getEntry(alias, null) as KeyStore.PrivateKeyEntry
+        requireBiometricAlias(alias)
+        // A missing entry is null here: a KeyStoreException with a fixed text, like the other
+        // refusals, not a cast failure that no caller would think to expect.
+        val entry = keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry
+            ?: throw KeyStoreException(MISSING_BIOMETRIC_KEY_MESSAGE)
         return entry.privateKey
     }
 
-    /** Supprime une clé biométrique du Keystore */
+    /**
+     * The public key of a biometric key, to announce it to the SSH server before the fingerprint is
+     * asked for (reading it needs no authentication, only signing does).
+     *
+     * Same alias guard as [getBiometricPrivateKey]: the alias comes from the database and must never
+     * give access to another Keystore entry.
+     *
+     * @throws java.security.KeyStoreException if the alias is not a biometric key alias, or if the
+     * entry is gone (key deleted)
+     */
+    fun getBiometricPublicKey(alias: String): java.security.PublicKey {
+        requireBiometricAlias(alias)
+        val certificate = keyStore.getCertificate(alias)
+            ?: throw KeyStoreException(MISSING_BIOMETRIC_KEY_MESSAGE)
+        return certificate.publicKey
+    }
+
+    /** Refuse (KeyStoreException, texte fixe sans l'alias) tout alias qui n'est pas un alias de clé biométrique. */
+    private fun requireBiometricAlias(alias: String) {
+        if (!BiometricKeyAlias.isValid(alias)) {
+            throw KeyStoreException(NOT_A_BIOMETRIC_ALIAS_MESSAGE)
+        }
+    }
+
+    /**
+     * Supprime une clé biométrique du Keystore.
+     *
+     * L'alias vient de la base, donc potentiellement d'un backup ou d'un payload de sync : il ne
+     * supprime rien s'il n'a pas exactement le format des alias que l'app génère
+     * ([BiometricKeyAlias]). Sinon un alias forgé pourrait faire supprimer la clé maîtresse du
+     * vault (nextsh_vault_auth_key) ou toute autre entrée du Keystore de l'app.
+     */
     fun deleteBiometricKey(alias: String) {
+        if (!BiometricKeyAlias.isValid(alias)) {
+            // Fixed text on purpose: the alias is untrusted input, it does not go to the log.
+            Timber.w("deleteBiometricKey refused: the alias is not a biometric key alias")
+            return
+        }
         if (keyStore.containsAlias(alias)) {
             keyStore.deleteEntry(alias)
-            Timber.d("Biometric key deleted: $alias")
+            Timber.d("Biometric key deleted")
         }
+    }
+
+    /**
+     * Deletes every biometric key of the app from the Keystore (the "Wipe the vault" action): without
+     * it the `ssh_keys` rows are gone but their keys stay usable. Only the aliases that have exactly the
+     * format of the ones the app generates are deleted, see [BiometricKeyAlias.biometricAliasesOf]: the
+     * master key of the vault stays (an erase that kept it is the decision of 1.1.0).
+     *
+     * Every deletion is tried before the failure is raised.
+     *
+     * @throws KeyStoreException if a biometric key is still there after the deletions
+     */
+    fun deleteAllBiometricKeys() {
+        val aliases = BiometricKeyAlias.biometricAliasesOf(java.util.Collections.list(keyStore.aliases()))
+        for (alias in aliases) {
+            try {
+                keyStore.deleteEntry(alias)
+            } catch (e: Exception) {
+                Timber.w("A biometric key could not be deleted (${errorClass(e)})")
+            }
+        }
+        val left = BiometricKeyAlias.biometricAliasesOf(java.util.Collections.list(keyStore.aliases()))
+        if (left.isNotEmpty()) throw KeyStoreException(BIOMETRIC_KEYS_NOT_DELETED_MESSAGE)
+        val count = aliases.size
+        Timber.i("Biometric keys deleted ($count)")
     }
 
     /**
@@ -107,6 +187,7 @@ class KeystoreManager @Inject constructor() {
      * pour que l'utilisateur autorise la signature.
      */
     fun getSignatureForBiometricKey(alias: String): java.security.Signature {
+        requireBiometricAlias(alias)
         val privateKey = getBiometricPrivateKey(alias)
         return java.security.Signature.getInstance("SHA256withECDSA").apply {
             initSign(privateKey)

@@ -80,6 +80,7 @@ import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.TriangleAlert
 import com.composables.icons.lucide.X
 import fr.techtical.nextsh.desktop.components.ConfirmDeleteDialog
+import fr.techtical.nextsh.desktop.scope.rememberScreenViewModel
 import fr.techtical.nextsh.desktop.theme.Border1
 import fr.techtical.nextsh.desktop.theme.Border2
 import fr.techtical.nextsh.desktop.theme.Burgundy
@@ -100,9 +101,20 @@ import fr.techtical.nextsh.desktop.theme.TextSecondary
 import fr.techtical.nextsh.desktop.theme.White
 import fr.techtical.nextsh.shared.domain.model.Host
 import fr.techtical.nextsh.shared.domain.model.TunnelType
+import fr.techtical.nextsh.shared.domain.tunnel.TunnelBrowserPath
+import fr.techtical.nextsh.shared.core.backup.BackupLimits
+import fr.techtical.nextsh.shared.domain.tunnel.TunnelBrowserPathError
 import fr.techtical.nextsh.desktop.generated.resources.Res
 import fr.techtical.nextsh.desktop.generated.resources.action_cancel
 import fr.techtical.nextsh.desktop.generated.resources.action_close
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_hostname_invalid
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_browser_path_error_invalid_character
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_browser_path_error_invalid_percent
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_browser_path_error_missing_slash
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_browser_path_error_multiple_fragments
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_browser_path_error_too_long
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_browser_path_hint
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_browser_path_label
 import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_danger_text
 import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_delete
 import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_delete_default_label
@@ -123,6 +135,15 @@ import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_remote_bind
 import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_remote_host_label
 import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_remote_port_label
 import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_save
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_error_deleted
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_error_host_required
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_error_label_required
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_error_local_port_range
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_error_not_found
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_error_remote_host_required
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_error_remote_port_range
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_save_error_failed
+import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_save_error_host_deleted
 import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_save_loading
 import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_section_danger
 import fr.techtical.nextsh.desktop.generated.resources.tunnel_config_section_host
@@ -155,7 +176,7 @@ fun TunnelConfigScreen(
     tunnelId: String?,
     onBack: () -> Unit,
 ) {
-    val viewModel = remember { TunnelConfigViewModel() }
+    val viewModel = rememberScreenViewModel { TunnelConfigViewModel() }
     val state by viewModel.state.collectAsState()
     val hosts by viewModel.hosts.collectAsState()
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -205,7 +226,9 @@ fun TunnelConfigScreen(
                     .padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(Spacing.Md),
             ) {
-                state.error?.let { ErrorBanner(it) }
+                state.error?.let { ErrorBanner(it.message()) }
+                state.browserPathError?.let { ErrorBanner(it.message()) }
+                state.saveError?.let { ErrorBanner(it.message()) }
 
                 IdentitySection(state, viewModel)
                 HostSection(state, viewModel, hosts)
@@ -407,7 +430,9 @@ private fun RoutingSection(state: TunnelConfigState, viewModel: TunnelConfigView
                             value = state.remoteHost,
                             onValueChange = viewModel::onRemoteHost,
                             placeholder = "10.0.0.5",
+                            isError = state.remoteHostInvalid,
                         )
+                        RemoteHostProblemText(state.remoteHostInvalid)
                     }
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.Xs)) {
                         FieldLabel(stringResource(Res.string.tunnel_config_remote_port_label))
@@ -428,7 +453,9 @@ private fun RoutingSection(state: TunnelConfigState, viewModel: TunnelConfigView
                             value = state.remoteHost,
                             onValueChange = viewModel::onRemoteHost,
                             placeholder = "0.0.0.0",
+                            isError = state.remoteHostInvalid,
                         )
+                        RemoteHostProblemText(state.remoteHostInvalid)
                     }
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.Xs)) {
                         FieldLabel(stringResource(Res.string.tunnel_config_remote_port_label))
@@ -487,6 +514,23 @@ private fun OptionsSection(state: TunnelConfigState, viewModel: TunnelConfigView
                 checked = state.keepAliveAfterBrowserClose,
                 onChange = viewModel::onKeepAliveAfterBrowserClose,
             )
+            // Start path of the in-app browser. The text can hold a secret in its query string
+            // and is synced to the other devices: the hint says so, and nothing logs this field.
+            FieldGroup {
+                FieldLabel(stringResource(Res.string.tunnel_config_browser_path_label))
+                TechticalTextField(
+                    value = state.browserPath,
+                    onValueChange = viewModel::onBrowserPath,
+                    placeholder = TunnelBrowserPath.DEFAULT,
+                    isError = state.browserPathError != null,
+                )
+                val pathError = state.browserPathError
+                if (pathError != null) {
+                    Text(text = pathError.message(), color = ErrorRed, fontSize = 10.sp)
+                } else {
+                    HelperText(stringResource(Res.string.tunnel_config_browser_path_hint))
+                }
+            }
         }
     }
 }
@@ -603,10 +647,12 @@ private fun TechticalTextField(
     onValueChange: (String) -> Unit,
     placeholder: String,
     modifier: Modifier = Modifier,
+    isError: Boolean = false,
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
+        isError = isError,
         placeholder = {
             Text(text = placeholder, color = TextDisabled, fontSize = 12.sp)
         },
@@ -625,11 +671,15 @@ private fun TechticalTextField(
 private fun techticalTextFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedBorderColor = Gold.copy(alpha = 0.55f),
     unfocusedBorderColor = Border1,
+    errorBorderColor = ErrorRed,
     focusedTextColor = TextPrimary,
     unfocusedTextColor = TextPrimary,
+    errorTextColor = TextPrimary,
     cursorColor = Gold,
+    errorCursorColor = Gold,
     focusedContainerColor = Surface,
     unfocusedContainerColor = Surface,
+    errorContainerColor = Surface,
 )
 
 @Composable
@@ -921,3 +971,49 @@ private fun TunnelType.helperText(): String = stringResource(when (this) {
     TunnelType.REMOTE_FORWARD -> Res.string.tunnel_config_type_remote_desc
     TunnelType.DYNAMIC_SOCKS5 -> Res.string.tunnel_config_type_dynamic_desc
 })
+
+/** The reason under the remote host field: a tunnel saved here must be restorable from a backup. */
+@Composable
+private fun RemoteHostProblemText(show: Boolean) {
+    if (show) {
+        Text(
+            text = stringResource(Res.string.host_detail_hostname_invalid, BackupLimits.MAX_HOST_LENGTH),
+            color = ErrorRed,
+            fontSize = 10.sp,
+        )
+    }
+}
+
+/** Localized, non-technical message for a save the data layer refused. */
+@Composable
+private fun TunnelSaveError.message(): String = when (this) {
+    TunnelSaveError.HOST_DELETED -> stringResource(Res.string.tunnel_config_save_error_host_deleted)
+    TunnelSaveError.SAVE_FAILED -> stringResource(Res.string.tunnel_config_save_error_failed)
+}
+
+/** Localized message for a form the validation refused. */
+@Composable
+private fun TunnelFormError.message(): String = when (this) {
+    TunnelFormError.TUNNEL_NOT_FOUND -> stringResource(Res.string.tunnel_config_error_not_found)
+    TunnelFormError.TUNNEL_DELETED -> stringResource(Res.string.tunnel_config_error_deleted)
+    TunnelFormError.LABEL_REQUIRED -> stringResource(Res.string.tunnel_config_error_label_required)
+    TunnelFormError.HOST_REQUIRED -> stringResource(Res.string.tunnel_config_error_host_required)
+    TunnelFormError.LOCAL_PORT_RANGE -> stringResource(Res.string.tunnel_config_error_local_port_range)
+    TunnelFormError.REMOTE_HOST_REQUIRED -> stringResource(Res.string.tunnel_config_error_remote_host_required)
+    TunnelFormError.REMOTE_PORT_RANGE -> stringResource(Res.string.tunnel_config_error_remote_port_range)
+}
+
+/** Localized, non-technical message. Never includes the typed path, which may hold a secret. */
+@Composable
+private fun TunnelBrowserPathError.message(): String = when (this) {
+    TunnelBrowserPathError.TOO_LONG ->
+        stringResource(Res.string.tunnel_config_browser_path_error_too_long, TunnelBrowserPath.MAX_LENGTH)
+    TunnelBrowserPathError.MISSING_LEADING_SLASH ->
+        stringResource(Res.string.tunnel_config_browser_path_error_missing_slash)
+    TunnelBrowserPathError.INVALID_CHARACTER ->
+        stringResource(Res.string.tunnel_config_browser_path_error_invalid_character)
+    TunnelBrowserPathError.INVALID_PERCENT_ENCODING ->
+        stringResource(Res.string.tunnel_config_browser_path_error_invalid_percent)
+    TunnelBrowserPathError.MULTIPLE_FRAGMENT_MARKERS ->
+        stringResource(Res.string.tunnel_config_browser_path_error_multiple_fragments)
+}

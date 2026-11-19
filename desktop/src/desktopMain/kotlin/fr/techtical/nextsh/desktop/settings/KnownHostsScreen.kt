@@ -54,6 +54,7 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.ShieldCheck
 import com.composables.icons.lucide.Trash2
 import fr.techtical.nextsh.desktop.components.PageHeader
+import fr.techtical.nextsh.desktop.components.dateTimeText
 import fr.techtical.nextsh.desktop.core.ssh.KnownHostEntry
 import fr.techtical.nextsh.desktop.theme.Border1
 import fr.techtical.nextsh.desktop.theme.ErrorRed
@@ -69,9 +70,6 @@ import fr.techtical.nextsh.desktop.theme.Surface
 import fr.techtical.nextsh.desktop.theme.TextDisabled
 import fr.techtical.nextsh.desktop.theme.TextPrimary
 import fr.techtical.nextsh.desktop.theme.TextSecondary
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import fr.techtical.nextsh.desktop.generated.resources.Res
 import fr.techtical.nextsh.desktop.generated.resources.action_cancel
 import fr.techtical.nextsh.desktop.generated.resources.known_hosts_action_back
@@ -85,6 +83,8 @@ import fr.techtical.nextsh.desktop.generated.resources.known_hosts_delete_single
 import fr.techtical.nextsh.desktop.generated.resources.known_hosts_empty_hint
 import fr.techtical.nextsh.desktop.generated.resources.known_hosts_empty_title
 import fr.techtical.nextsh.desktop.generated.resources.known_hosts_subtitle_empty
+import fr.techtical.nextsh.desktop.generated.resources.known_hosts_subtitle_many
+import fr.techtical.nextsh.desktop.generated.resources.known_hosts_subtitle_one
 import fr.techtical.nextsh.desktop.generated.resources.known_hosts_title
 import org.jetbrains.compose.resources.stringResource
 
@@ -106,8 +106,8 @@ fun KnownHostsScreen(onBack: () -> Unit) {
 
     val subtitle = when {
         entries.isEmpty() -> stringResource(Res.string.known_hosts_subtitle_empty)
-        entries.size == 1 -> "1 empreinte enregistrée"
-        else -> "${entries.size} empreintes enregistrées"
+        entries.size == 1 -> stringResource(Res.string.known_hosts_subtitle_one)
+        else -> stringResource(Res.string.known_hosts_subtitle_many, entries.size)
     }
 
     Column(modifier = Modifier.fillMaxSize().background(NearBlack)) {
@@ -203,9 +203,7 @@ fun KnownHostsScreen(onBack: () -> Unit) {
 
 @Composable
 private fun KnownHostCard(entry: KnownHostEntry, onDelete: () -> Unit) {
-    val dateStr = remember(entry.addedAt) {
-        SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(entry.addedAt))
-    }
+    val dateStr = dateTimeText(entry.addedAt)
     Row(
         modifier = Modifier
             .fillMaxWidth()

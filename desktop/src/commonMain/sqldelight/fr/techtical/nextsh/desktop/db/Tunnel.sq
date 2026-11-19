@@ -1,3 +1,5 @@
+-- Keep browserPath the LAST column, where ALTER TABLE ADD COLUMN (migrations/8.sqm) puts it: a fresh
+-- install and a migrated database then share one physical layout (TunnelBrowserPathMigrationTest).
 CREATE TABLE tunnels (
     id TEXT NOT NULL PRIMARY KEY,
     label TEXT NOT NULL,
@@ -15,6 +17,7 @@ CREATE TABLE tunnels (
     deleted INTEGER NOT NULL DEFAULT 0,
     deletedAt INTEGER,
     updatedAt INTEGER NOT NULL DEFAULT 0,
+    browserPath TEXT NOT NULL DEFAULT '/',
     FOREIGN KEY(hostId) REFERENCES hosts(id) ON DELETE CASCADE
 );
 
@@ -35,23 +38,41 @@ SELECT * FROM tunnels WHERE id = ? AND deleted = 0;
 selectByIdIncludingDeleted:
 SELECT * FROM tunnels WHERE id = ?;
 
+-- A tunnel whose host is tombstoned cannot start (no address): it is left out, otherwise it would fail with
+-- an error at every launch.
 selectAutoStart:
-SELECT * FROM tunnels WHERE autoStart = 1 AND deleted = 0 ORDER BY label;
+SELECT t.* FROM tunnels t JOIN hosts h ON h.id = t.hostId
+WHERE t.autoStart = 1 AND t.deleted = 0 AND h.deleted = 0
+ORDER BY t.label;
+
+-- Live tunnels of a tombstoned host, the ones DesktopOrphanTunnelRepair tombstones. A host with a pending
+-- HOST conflict is left out: its deletion is not settled yet (the user may keep the remote version), and
+-- tombstoning its tunnels now would bring the host back without them.
+selectLiveOfDeletedHosts:
+SELECT t.* FROM tunnels t JOIN hosts h ON h.id = t.hostId
+WHERE t.deleted = 0 AND h.deleted = 1
+  AND NOT EXISTS (
+      SELECT 1 FROM pending_conflicts p WHERE p.entityType = 'HOST' AND p.entityId = h.id
+  )
+ORDER BY t.label;
 
 selectFavorites:
 SELECT * FROM tunnels WHERE isFavorite = 1 AND deleted = 0 ORDER BY label;
 
+-- Plain INSERT on purpose: INSERT OR REPLACE would reset createdAt. A row that already exists is
+-- rewritten with updateFromSync instead.
 insert:
-INSERT OR REPLACE INTO tunnels(id, label, hostId, type, localPort, remoteHost, remotePort, autoStart, openBrowserOnConnect, keepAliveAfterBrowserClose, isFavorite, createdAt, vectorClock, deleted, deletedAt, updatedAt)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO tunnels(id, label, hostId, type, localPort, remoteHost, remotePort, autoStart, openBrowserOnConnect, keepAliveAfterBrowserClose, isFavorite, createdAt, vectorClock, deleted, deletedAt, updatedAt, browserPath)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 update:
-UPDATE tunnels SET label = ?, hostId = ?, type = ?, localPort = ?, remoteHost = ?, remotePort = ?, autoStart = ?, openBrowserOnConnect = ?, keepAliveAfterBrowserClose = ?, isFavorite = ?, vectorClock = ?, updatedAt = ?
+UPDATE tunnels SET label = ?, hostId = ?, type = ?, localPort = ?, remoteHost = ?, remotePort = ?, autoStart = ?, openBrowserOnConnect = ?, keepAliveAfterBrowserClose = ?, isFavorite = ?, vectorClock = ?, updatedAt = ?, browserPath = ?
 WHERE id = ?;
 
 -- Sync write on an existing row (live or tombstoned). Leaves the local-only column createdAt alone.
+-- Also used by DesktopTunnelRepository.save to overwrite an existing id (backup restore).
 updateFromSync:
-UPDATE tunnels SET label = ?, hostId = ?, type = ?, localPort = ?, remoteHost = ?, remotePort = ?, autoStart = ?, openBrowserOnConnect = ?, keepAliveAfterBrowserClose = ?, isFavorite = ?, vectorClock = ?, deleted = ?, deletedAt = ?, updatedAt = ?
+UPDATE tunnels SET label = ?, hostId = ?, type = ?, localPort = ?, remoteHost = ?, remotePort = ?, autoStart = ?, openBrowserOnConnect = ?, keepAliveAfterBrowserClose = ?, isFavorite = ?, vectorClock = ?, deleted = ?, deletedAt = ?, updatedAt = ?, browserPath = ?
 WHERE id = ?;
 
 setFavorite:
@@ -62,3 +83,7 @@ UPDATE tunnels SET deleted = 1, deletedAt = ?, updatedAt = ?, vectorClock = ? WH
 
 delete:
 DELETE FROM tunnels WHERE id = ?;
+
+-- Vault wipe: every row, tombstones included. Generated, so that the listeners of the table are notified.
+deleteAll:
+DELETE FROM tunnels;

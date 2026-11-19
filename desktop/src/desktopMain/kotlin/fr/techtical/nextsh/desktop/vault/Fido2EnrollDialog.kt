@@ -74,13 +74,27 @@ import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_algo_value
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_btn_continue
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_btn_detect
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_btn_make
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_btn_start_windows
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_detecting
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_dialog_subtitle
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_dialog_title
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_error_cancelled
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_error_ctap
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_error_detail_transport
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_error_detail_unknown
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_error_detection
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_error_label_required
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_error_no_device
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_error_pin_empty
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_error_touch_timeout
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_error_transport
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_error_unexpected
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_error_unknown
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_label_field
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_label_placeholder
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_pin_field
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_pin_hint
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_pcsc_windows_bug
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_retry
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_rpid_field
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_success
@@ -88,6 +102,9 @@ import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_success_ecds
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_success_ed25519
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_waiting_touch
 import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_waiting_touch_sub
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_windows_hid_locked
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_windows_waiting_sub
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_windows_waiting_title
 import fr.techtical.nextsh.desktop.theme.Border1
 import fr.techtical.nextsh.desktop.theme.Burgundy
 import fr.techtical.nextsh.desktop.theme.ErrorRed
@@ -218,7 +235,7 @@ fun Fido2EnrollDialog(
                     )
                     is Fido2EnrollState.Success -> SuccessContent(keyType = s.key.keyType)
                     is Fido2EnrollState.Error -> ErrorContent(
-                        message = s.message,
+                        message = fido2EnrollErrorText(s),
                         viewModel = viewModel,
                         onDismiss = onDismiss,
                     )
@@ -289,7 +306,7 @@ private fun IdleContent(
             // Sur Windows WebAuthn : "Démarrer l'enrôlement", Hello gère nativement
             // Sur YubiKit (PC/SC) : "Brancher la clé", detection hardware d'abord
             val btnLabel = if (isWindowsWebAuthn) {
-                "Démarrer l'enrôlement"
+                stringResource(Res.string.fido2_enroll_btn_start_windows)
             } else {
                 stringResource(Res.string.fido2_enroll_btn_detect)
             }
@@ -431,7 +448,7 @@ private fun WaitingForTouchContent(
             Spacer(Modifier.height(Spacing.Lg))
 
             Text(
-                text = "En attente de Windows Hello…",
+                text = stringResource(Res.string.fido2_enroll_windows_waiting_title),
                 color = TextPrimary,
                 fontFamily = SpaceGroteskFamily,
                 fontWeight = FontWeight.SemiBold,
@@ -442,7 +459,7 @@ private fun WaitingForTouchContent(
             Spacer(Modifier.height(Spacing.Xs))
 
             Text(
-                text = "Windows va te demander de toucher ta clé ou saisir ton PIN.",
+                text = stringResource(Res.string.fido2_enroll_windows_waiting_sub),
                 color = TextSecondary,
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center,
@@ -719,4 +736,33 @@ private fun EnrollBtnGhost(onClick: () -> Unit, label: String) {
     ) {
         Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium)
     }
+}
+
+@Composable
+private fun fido2EnrollErrorText(error: Fido2EnrollState.Error): String = when (error.reason) {
+    Fido2EnrollError.LabelRequired -> stringResource(Res.string.fido2_enroll_error_label_required)
+    Fido2EnrollError.PinEmpty -> stringResource(Res.string.fido2_enroll_error_pin_empty)
+    Fido2EnrollError.WindowsHidLocked -> stringResource(Res.string.fido2_enroll_windows_hid_locked)
+    Fido2EnrollError.PcscWindowsBug -> stringResource(Res.string.fido2_enroll_pcsc_windows_bug)
+    Fido2EnrollError.NoDevice -> stringResource(Res.string.fido2_enroll_error_no_device)
+    Fido2EnrollError.TouchTimeout -> stringResource(Res.string.fido2_enroll_error_touch_timeout)
+    Fido2EnrollError.UserCancelled -> stringResource(Res.string.fido2_enroll_error_cancelled)
+    Fido2EnrollError.Ctap -> stringResource(
+        Res.string.fido2_enroll_error_ctap,
+        (error.ctapCode ?: 0).toString(16).uppercase(),
+        error.detail ?: stringResource(Res.string.fido2_enroll_error_detail_unknown),
+    )
+    Fido2EnrollError.Transport -> stringResource(
+        Res.string.fido2_enroll_error_transport,
+        error.detail ?: stringResource(Res.string.fido2_enroll_error_detail_transport),
+    )
+    Fido2EnrollError.Detection -> stringResource(
+        Res.string.fido2_enroll_error_detection,
+        error.detail ?: stringResource(Res.string.fido2_enroll_error_detail_unknown),
+    )
+    Fido2EnrollError.Unexpected -> stringResource(
+        Res.string.fido2_enroll_error_unexpected,
+        error.detail ?: stringResource(Res.string.fido2_enroll_error_detail_unknown),
+    )
+    Fido2EnrollError.Fido2Unknown -> error.detail ?: stringResource(Res.string.fido2_enroll_error_unknown)
 }

@@ -51,26 +51,23 @@ class DesktopKnownHostsVerifier(
             is HostKeyVerifyResult.Unknown -> {
                 val cb = unknownHostCallback
                 if (cb == null) {
-                    Logger.w(TAG, "Unknown host ${result.hostPort} and no UI callback wired: rejecting")
+                    Logger.w(TAG, "Unknown host key (algorithm=${key.algorithm}) and no UI callback wired: rejecting")
                     false
                 } else {
                     val accepted = runBlocking { cb(result) }
                     if (accepted) {
                         store.upsert(result.hostPort, key.algorithm, key.encoded)
-                        Logger.d(TAG, "Host ${result.hostPort} accepted by user: persisted")
+                        Logger.d(TAG, "Host key (algorithm=${key.algorithm}) accepted by user: persisted")
                         true
                     } else {
-                        Logger.d(TAG, "Host ${result.hostPort} rejected by user")
+                        Logger.d(TAG, "Host key (algorithm=${key.algorithm}) rejected by user")
                         false
                     }
                 }
             }
             is HostKeyVerifyResult.Mismatch -> {
-                Logger.w(
-                    TAG,
-                    "HOST KEY MISMATCH for ${result.hostPort}: " +
-                        "stored=${result.storedFingerprint} received=${result.receivedFingerprint}: rejecting",
-                )
+                // Neither the host nor the fingerprints are logged: the mismatch dialog shows them.
+                Logger.w(TAG, "HOST KEY MISMATCH, algorithm=${key.algorithm}: rejecting")
                 mismatchListener?.invoke(result)
                 false
             }

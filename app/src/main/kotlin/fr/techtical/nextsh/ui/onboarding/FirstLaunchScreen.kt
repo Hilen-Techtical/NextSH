@@ -281,7 +281,7 @@ private fun WelcomePane(onNext: () -> Unit) {
 @Composable
 private fun CreateVaultPane(
     state: OnboardingViewModel.OnboardingState,
-    onCreateVault: (FragmentActivity) -> Unit,
+    onCreateVault: () -> Unit,
     onDismissError: () -> Unit,
 ) {
     val activity = LocalContext.current as? FragmentActivity
@@ -330,22 +330,21 @@ private fun CreateVaultPane(
         )
         Spacer(Modifier.height(Spacing.Xl))
 
-        if (state.biometricAvailable && activity != null) {
+        if (state.biometricAvailable) {
             PrimaryButton(
                 label = stringResource(R.string.firstlaunch_vault_button),
                 icon = Lucide.Fingerprint,
                 enabled = !state.isAuthenticating,
                 loading = state.isAuthenticating,
-                onClick = { onCreateVault(activity) },
+                onClick = onCreateVault,
             )
         } else {
             FallbackBlock(text = stringResource(R.string.label_no_device_lock))
         }
 
-        // Prefer the localizable res-id (known vault exceptions); fall back to
-        // the OS-localized BiometricPrompt string. Tap the banner to dismiss a
-        // transient auth error.
-        val errorText = state.errorRes?.let { stringResource(it) } ?: state.errorMessage
+        // The error is a resource of ours, never the text of the system dialog. Tap
+        // the banner to dismiss a transient auth error.
+        val errorText = state.errorRes?.let { stringResource(it) }
         errorText?.let { error ->
             Spacer(Modifier.height(Spacing.Md))
             ErrorBanner(text = error, onDismiss = onDismissError)

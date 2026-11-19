@@ -7,7 +7,13 @@ import fr.techtical.nextsh.shared.domain.model.AuthType
 import fr.techtical.nextsh.shared.domain.model.CustomTerminalTheme
 import fr.techtical.nextsh.shared.domain.model.Host
 import fr.techtical.nextsh.shared.domain.model.Snippet
+import fr.techtical.nextsh.shared.domain.model.TunnelConfig
+import fr.techtical.nextsh.shared.domain.model.TunnelType
+import java.security.SecureRandom
 import java.util.Base64
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -116,5 +122,109 @@ class SyncBundleCodecTest {
         assertEquals(16, decoded.customThemes[0].payload!!.ansi.size)
         // totalCount must include the customThemes entry (1 host + 1 snippet + 1 theme = 3)
         assertEquals(3, decoded.totalCount)
+    }
+
+    // --- TunnelConfig.browserPath wire compatibility ---
+
+    private fun tunnel(browserPath: String) = TunnelConfig(
+        id = "t1",
+        label = "Grafana",
+        hostId = "h1",
+        type = TunnelType.LOCAL_FORWARD,
+        localPort = 3000,
+        remoteHost = "localhost",
+        remotePort = 3000,
+        browserPath = browserPath,
+    )
+
+    /**
+     * Encrypts raw JSON exactly like [SyncBundleCodec.encrypt] does, so a test can feed the
+     * decoder bytes produced by an older peer instead of bytes produced by the current model.
+     */
+    private fun encryptRawJson(plaintextJson: String): SyncPayload {
+        val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(secret, "AES"), GCMParameterSpec(128, iv))
+        val ciphertextWithTag = cipher.doFinal(plaintextJson.toByteArray(Charsets.UTF_8))
+        val encoder = Base64.getUrlEncoder().withoutPadding()
+        return SyncPayload(
+            senderDeviceId = "old-peer",
+            timestamp = 1_700_000_000_000L,
+            iv = encoder.encodeToString(iv),
+            ciphertext = encoder.encodeToString(ciphertextWithTag),
+        )
+    }
+
+    @Test
+    fun `encrypt then decrypt round trip preserves a non default tunnel browserPath`() {
+        val entry = SyncEntry(
+            id = "t1",
+            payload = tunnel("/d/abc/dashboard?orgId=1#top"),
+            clock = VectorClock.EMPTY,
+            updatedAt = 1_700_000_200_000L,
+        )
+        val bundle = sampleBundle().copy(tunnels = listOf(entry))
+
+        val decoded = SyncBundleCodec.decrypt(SyncBundleCodec.encrypt(bundle, "device-1", secret), secret)
+
+        assertEquals(bundle, decoded)
+        assertEquals("/d/abc/dashboard?orgId=1#top", decoded.tunnels.single().payload!!.browserPath)
+    }
+
+    @Test
+    fun `bundle from an old peer without browserPath decodes the tunnel to the root`() {
+        val legacyBundleJson = """
+            {
+              "hosts": [],
+              "tunnels": [
+                {
+                  "id": "t1",
+                  "payload": {
+                    "id": "t1", "label": "Grafana", "hostId": "h1", "type": "LOCAL_FORWARD",
+                    "localPort": 3000, "remoteHost": "localhost", "remotePort": 3000,
+                    "autoStart": false, "openBrowserOnConnect": true,
+                    "keepAliveAfterBrowserClose": true, "isFavorite": false
+                  },
+                  "clock": { "entries": { "device-old": 4 } },
+                  "deleted": false,
+                  "deletedAt": null,
+                  "updatedAt": 1700000000000
+                }
+              ],
+              "sshKeys": [],
+              "snippets": []
+            }
+        """.trimIndent()
+
+        val decoded = SyncBundleCodec.decrypt(encryptRawJson(legacyBundleJson), secret)
+
+        val decodedTunnel = decoded.tunnels.single().payload!!
+        assertEquals("/", decodedTunnel.browserPath)
+        assertEquals(tunnel("/").copy(openBrowserOnConnect = true), decodedTunnel)
+    }
+
+    @Test
+    fun `bundle from a newer peer with unknown tunnel fields still decodes and keeps browserPath`() {
+        val futureBundleJson = """
+            {
+              "hosts": [], "sshKeys": [], "snippets": [],
+              "tunnels": [
+                {
+                  "id": "t1",
+                  "payload": {
+                    "id": "t1", "label": "Grafana", "hostId": "h1", "type": "LOCAL_FORWARD",
+                    "localPort": 3000, "remoteHost": "localhost", "remotePort": 3000,
+                    "browserPath": "/admin", "someFutureField": 42
+                  },
+                  "clock": { "entries": {} },
+                  "updatedAt": 1700000000000
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val decoded = SyncBundleCodec.decrypt(encryptRawJson(futureBundleJson), secret)
+
+        assertEquals("/admin", decoded.tunnels.single().payload!!.browserPath)
     }
 }

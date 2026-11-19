@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -91,8 +92,7 @@ fun KnownHostsScreen(
 
     val subtitle = when {
         entries.isEmpty() -> stringResource(R.string.empty_no_known_hosts_title)
-        entries.size == 1 -> "1 empreinte enregistrée"
-        else -> "${entries.size} empreintes enregistrées"
+        else -> pluralStringResource(R.plurals.known_hosts_count, entries.size, entries.size)
     }
 
     Scaffold(

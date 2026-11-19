@@ -11,6 +11,8 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import fr.techtical.nextsh.data.db.AppDatabase
+import fr.techtical.nextsh.data.db.RoomTransactionRunner
+import fr.techtical.nextsh.data.db.TransactionRunner
 import fr.techtical.nextsh.data.db.dao.CustomTerminalThemeDao
 import fr.techtical.nextsh.data.db.dao.EnrolledDeviceDao
 import fr.techtical.nextsh.data.db.dao.HostDao
@@ -45,9 +47,14 @@ object DatabaseModule {
             AppDatabase.MIGRATION_9_10,
             AppDatabase.MIGRATION_10_11,
             AppDatabase.MIGRATION_11_12,
+            AppDatabase.MIGRATION_12_13,
         )
         .fallbackToDestructiveMigration()
         .build()
+
+    @Provides
+    @Singleton
+    fun provideTransactionRunner(db: AppDatabase): TransactionRunner = RoomTransactionRunner(db)
 
     @Provides
     fun provideHostDao(db: AppDatabase): HostDao = db.hostDao()

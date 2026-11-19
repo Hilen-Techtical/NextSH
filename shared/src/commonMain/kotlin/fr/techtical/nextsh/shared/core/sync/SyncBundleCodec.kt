@@ -58,26 +58,52 @@ object SyncBundleCodec {
     /**
      * Decrypts [payload] using [sharedSecret] and deserialises the resulting JSON.
      *
+     * SECURITY: the thrown [SyncCodecException] never carries decrypted content. A
+     * kotlinx.serialization error message embeds an excerpt of the JSON it failed on (host
+     * labels, hostnames, usernames, tunnel paths), and a cause keeps that message alive in any
+     * stack trace. So the decode stage reports only the cause's class name and drops the cause.
+     * The crypto stage keeps its cause: a java.util.Base64 message may quote one on-wire byte
+     * in hex (public wire data), the other crypto messages are fixed text, and a failed GCM
+     * tag check never releases plaintext.
+     *
      * @throws SyncCodecException on AES-GCM authentication failure, malformed Base64, or
      * invalid JSON content.
      */
     fun decrypt(payload: SyncPayload, sharedSecret: ByteArray): SyncBundle {
         require(sharedSecret.size == 32) { "sharedSecret must be 32 bytes (AES-256)" }
 
-        return try {
+        val plaintext = try {
             val iv = urlSafeDecoder.decode(payload.iv)
             val ciphertextWithTag = urlSafeDecoder.decode(payload.ciphertext)
 
             val secretKey = SecretKeySpec(sharedSecret, "AES")
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(TAG_BITS, iv))
-            val plaintext = cipher.doFinal(ciphertextWithTag)
+            cipher.doFinal(ciphertextWithTag)
+        } catch (e: Exception) {
+            throw SyncCodecException("Decryption failed (${e.safeTypeName()})", e)
+        }
 
+        return try {
             json.decodeFromString(SyncBundle.serializer(), plaintext.toString(Charsets.UTF_8))
         } catch (e: Exception) {
-            throw SyncCodecException("Decryption failed: ${e.message}", e)
+            // No cause on purpose: see the SECURITY note on this function.
+            throw SyncCodecException("Sync bundle decoding failed (${e.safeTypeName()})")
         }
     }
 }
 
+/**
+ * Failure of a sync encrypt or decrypt step.
+ *
+ * Callers log [message] and the stack trace, so neither may contain decrypted or decoded
+ * payload text. Build the message from fixed text plus [safeTypeName] only.
+ */
 class SyncCodecException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * Class name of this throwable, for exception messages and logs. Deliberately never its
+ * `message`: for a kotlinx.serialization failure the message embeds an excerpt of the decoded
+ * JSON, which in the sync path is user data.
+ */
+internal fun Throwable.safeTypeName(): String = this::class.simpleName ?: "Exception"

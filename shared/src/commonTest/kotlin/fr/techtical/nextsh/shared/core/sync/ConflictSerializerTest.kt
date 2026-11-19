@@ -11,8 +11,28 @@ import fr.techtical.nextsh.shared.domain.model.SshKey
 import fr.techtical.nextsh.shared.domain.model.SshKeyType
 import fr.techtical.nextsh.shared.domain.model.TunnelConfig
 import fr.techtical.nextsh.shared.domain.model.TunnelType
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+/** TunnelConfig as an old peer knows it: no browserPath. */
+@Serializable
+private data class LegacyTunnelConfig(
+    val id: String,
+    val label: String,
+    val hostId: String,
+    val type: TunnelType,
+    val localPort: Int,
+    val remoteHost: String,
+    val remotePort: Int,
+    val autoStart: Boolean = false,
+    val openBrowserOnConnect: Boolean = false,
+    val keepAliveAfterBrowserClose: Boolean = true,
+    val isFavorite: Boolean = false,
+)
 
 class ConflictSerializerTest {
 
@@ -65,6 +85,126 @@ class ConflictSerializerTest {
         val decoded = ConflictSerializer.decodeTunnel(encoded)
 
         assertEquals(entry, decoded)
+    }
+
+    // --- TunnelConfig.browserPath wire compatibility ---
+
+    /** JSON of a tunnel SyncEntry as emitted by a peer that predates browserPath. */
+    private val legacyTunnelEntryJson = """
+        {
+          "id": "tunnel-1",
+          "payload": {
+            "id": "tunnel-1",
+            "label": "Dev DB",
+            "hostId": "host-1",
+            "type": "LOCAL_FORWARD",
+            "localPort": 5432,
+            "remoteHost": "db.internal",
+            "remotePort": 5432,
+            "autoStart": true,
+            "openBrowserOnConnect": true,
+            "keepAliveAfterBrowserClose": false,
+            "isFavorite": true
+          },
+          "clock": { "entries": { "device-B": 3 } },
+          "deleted": false,
+          "deletedAt": null,
+          "updatedAt": 2000
+        }
+    """.trimIndent()
+
+    private fun tunnelWithPath(path: String) = TunnelConfig(
+        id = "tunnel-1",
+        label = "Dev DB",
+        hostId = "host-1",
+        type = TunnelType.LOCAL_FORWARD,
+        localPort = 5432,
+        remoteHost = "db.internal",
+        remotePort = 5432,
+        browserPath = path,
+    )
+
+    private fun tunnelEntry(tunnel: TunnelConfig) = SyncEntry(
+        id = tunnel.id,
+        payload = tunnel,
+        clock = clock("device-B" to 3L),
+        updatedAt = 2_000L,
+    )
+
+    @Test
+    fun `TunnelConfig with a non default browserPath round trips`() {
+        val entry = tunnelEntry(tunnelWithPath("/admin/?tab=2#top"))
+
+        val encoded = ConflictSerializer.encode(SyncableEntityType.TUNNEL, entry)
+        val decoded = ConflictSerializer.decodeTunnel(encoded)
+
+        assertEquals(entry, decoded)
+        assertEquals("/admin/?tab=2#top", decoded.payload!!.browserPath)
+        assertTrue(encoded.contains("\"browserPath\":\"/admin/?tab=2#top\""), encoded)
+    }
+
+    @Test
+    fun `legacy tunnel JSON without browserPath decodes to the root and keeps its other fields`() {
+        val decoded = ConflictSerializer.decodeTunnel(legacyTunnelEntryJson)
+
+        val tunnel = decoded.payload!!
+        assertEquals("/", tunnel.browserPath)
+        val expected = tunnelWithPath("/").copy(
+            autoStart = true,
+            openBrowserOnConnect = true,
+            keepAliveAfterBrowserClose = false,
+            isFavorite = true,
+        )
+        assertEquals(expected, tunnel)
+    }
+
+    @Test
+    fun `minimal tunnel JSON with only the required fields decodes to the root`() {
+        val minimal = """
+            {"id":"t","payload":{"id":"t","label":"L","hostId":"h","type":"LOCAL_FORWARD",
+            "localPort":1,"remoteHost":"r","remotePort":2},"clock":{"entries":{}},"updatedAt":1}
+        """.trimIndent()
+
+        val tunnel = ConflictSerializer.decodeTunnel(minimal).payload!!
+
+        assertEquals("/", tunnel.browserPath)
+    }
+
+    @Test
+    fun `ConflictSerializer writes a default browserPath because encodeDefaults is on`() {
+        val encoded = ConflictSerializer.encode(SyncableEntityType.TUNNEL, tunnelEntry(tunnelWithPath("/")))
+
+        // New peers always emit the field, so the stored value is explicit on the wire.
+        assertTrue(encoded.contains("\"browserPath\":\"/\""), encoded)
+    }
+
+    @Test
+    fun `a JSON config without encodeDefaults omits the default path and still decodes to the root`() {
+        val lenient = Json { ignoreUnknownKeys = true }
+        val serializer = SyncEntry.serializer(TunnelConfig.serializer())
+        val entry = tunnelEntry(tunnelWithPath("/"))
+
+        val compact = lenient.encodeToString(serializer, entry)
+        val withPath = lenient.encodeToString(serializer, tunnelEntry(tunnelWithPath("/admin")))
+
+        // Documents why decoding must never rely on the field being present.
+        assertFalse(compact.contains("browserPath"), compact)
+        assertEquals("/", lenient.decodeFromString(serializer, compact).payload!!.browserPath)
+        // A non default value is always written, whatever the encoder configuration.
+        assertTrue(withPath.contains("\"browserPath\":\"/admin\""), withPath)
+    }
+
+    @Test
+    fun `an old peer that does not know browserPath ignores it instead of failing`() {
+        val encoded = ConflictSerializer.encode(SyncableEntityType.TUNNEL, tunnelEntry(tunnelWithPath("/admin")))
+        // Same settings as the old peers' ConflictSerializer and SyncBundleCodec.
+        val oldPeerJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+        val decoded = oldPeerJson.decodeFromString(SyncEntry.serializer(LegacyTunnelConfig.serializer()), encoded)
+
+        assertEquals("tunnel-1", decoded.payload!!.id)
+        assertEquals("Dev DB", decoded.payload.label)
+        assertEquals(5432, decoded.payload.localPort)
     }
 
     @Test

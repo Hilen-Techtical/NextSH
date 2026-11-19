@@ -5,6 +5,7 @@ package fr.techtical.nextsh.desktop.sync
 
 import fr.techtical.nextsh.desktop.core.diagnostics.StartupTrace
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
@@ -165,7 +166,7 @@ class TlsCertificateManager(
         } catch (e: Exception) {
             // Covers provider-specific exceptions (e.g. BouncyCastle BadPaddingException)
             // that may be thrown instead of UnrecoverableKeyException depending on the JDK.
-            Logger.w(TAG, "P12 load failed with ${e.javaClass.simpleName}, attempting legacy migration")
+            Logger.w(TAG, "P12 load failed with ${errorClass(e)}, attempting legacy migration")
             migrateLegacyOrRegenerate(p12, passphrase)
         }
     }
@@ -180,7 +181,7 @@ class TlsCertificateManager(
         } catch (e: Exception) {
             // Both passphrases failed: file is corrupt or written by another keystore.
             // Affected Android peers will need to re-enrol (new fingerprint).
-            Logger.e(TAG, "P12 unreadable with both passphrases (${e.javaClass.simpleName}), regenerating, enrolled peers must re-enrol")
+            Logger.e(TAG, "P12 unreadable with both passphrases (${errorClass(e)}), regenerating, enrolled peers must re-enrol")
             Arrays.fill(newPassphrase, '\u0000')
             generate(p12)
         } finally {

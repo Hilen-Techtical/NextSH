@@ -8,6 +8,7 @@ import android.security.keystore.UserNotAuthenticatedException
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
+import fr.techtical.nextsh.shared.util.errorClass
 import timber.log.Timber
 import java.io.File
 import java.security.KeyStore
@@ -129,10 +130,10 @@ class VaultMigration @Inject constructor(
         } catch (e: VaultAuthExpiredException) {
             throw e
         } catch (e: UserNotAuthenticatedException) {
-            Timber.e(e, "VaultMigration: auth window expired during migration")
+            Timber.e("VaultMigration: auth window expired during migration (${errorClass(e)})")
             throw VaultAuthExpiredException(e)
         } catch (e: Exception) {
-            Timber.e(e, "VaultMigration: unexpected error during migration")
+            Timber.e("VaultMigration: unexpected error during migration (${errorClass(e)})")
             // Do not delete legacy vault on unexpected error: data safety first
         }
     }
@@ -159,7 +160,7 @@ class VaultMigration @Inject constructor(
                 Timber.i("VaultMigration: legacy Keystore alias deleted")
             }
         } catch (e: Exception) {
-            Timber.w(e, "VaultMigration: failed to delete legacy Keystore alias")
+            Timber.w("VaultMigration: failed to delete legacy Keystore alias (${errorClass(e)})")
         }
     }
 
@@ -176,7 +177,7 @@ class VaultMigration @Inject constructor(
         try {
             migrationDoneFile().createNewFile()
         } catch (e: Exception) {
-            Timber.w(e, "VaultMigration: failed to write migration flag")
+            Timber.w("VaultMigration: failed to write migration flag (${errorClass(e)})")
         }
     }
 }

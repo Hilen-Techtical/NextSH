@@ -81,6 +81,10 @@ import fr.techtical.nextsh.desktop.generated.resources.theme_picker_presets
 import fr.techtical.nextsh.desktop.generated.resources.theme_picker_selected
 import fr.techtical.nextsh.desktop.generated.resources.theme_picker_subtitle
 import fr.techtical.nextsh.desktop.generated.resources.theme_picker_title
+import fr.techtical.nextsh.desktop.snippets.FieldLimit
+import fr.techtical.nextsh.desktop.snippets.reasonText
+import fr.techtical.nextsh.shared.core.backup.BackupFieldProblem
+import fr.techtical.nextsh.shared.core.backup.BackupFieldRules
 import fr.techtical.nextsh.desktop.theme.Border1
 import fr.techtical.nextsh.desktop.theme.Burgundy
 import fr.techtical.nextsh.desktop.theme.ErrorRed
@@ -462,7 +466,12 @@ internal fun CustomThemeEditorWindow(
     // Which color slot is being edited (null = picker closed).
     var editingSlot by remember(initial.id) { mutableStateOf<ColorSlot?>(null) }
 
-    val allValid = name.isNotBlank()
+    // Same rule as a backup restore (BackupFieldRules): a theme saved here can always be exported and restored.
+    val nameProblem = BackupFieldRules.themeNameProblem(name.trim())
+    val allValid = nameProblem == null
+    // An empty name is only reported once the user has edited the field (a new theme starts empty).
+    var nameTouched by remember(initial.id) { mutableStateOf(initial.name.isNotEmpty()) }
+    val shownNameProblem = nameProblem?.takeIf { it != BackupFieldProblem.EMPTY || nameTouched }
 
     DialogWindow(
         onCloseRequest = onDismiss,
@@ -516,10 +525,13 @@ internal fun CustomThemeEditorWindow(
             ) {
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it },
+                    onValueChange = { name = it; nameTouched = true },
                     label = { Text(stringResource(Res.string.theme_editor_name)) },
                     singleLine = true,
-                    isError = name.isBlank(),
+                    isError = shownNameProblem != null,
+                    supportingText = shownNameProblem?.let { problem ->
+                        { Text(problem.reasonText(FieldLimit.TEXT)) }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 ColorSlotRow(stringResource(Res.string.theme_editor_background), background) { editingSlot = ColorSlot.Background }

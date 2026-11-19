@@ -14,6 +14,7 @@ import fr.techtical.nextsh.shared.domain.model.TunnelState
 import fr.techtical.nextsh.shared.domain.model.TunnelStatus
 import fr.techtical.nextsh.shared.util.AppScope
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -44,13 +45,18 @@ import javax.imageio.ImageIO
 class DesktopTunnelTray(
     private val appScope: AppScope,
     private val tunnelService: DesktopTunnelService,
-) {
+) : TrayMessenger {
 
     @Volatile
     private var trayIcon: TrayIcon? = null
 
     @Volatile
     private var observeJob: Job? = null
+
+    @Volatile
+    private var deletionJob: Job? = null
+
+    private val deletionNotifier = TunnelDeletionNotifier(this)
 
     /**
      * True once the tray icon is actually registered with the OS. `start()`
@@ -61,6 +67,13 @@ class DesktopTunnelTray(
      * window could be hidden with no way for the user to bring it back.
      */
     val isRegistered: Boolean get() = trayIcon != null
+
+    override val isAvailable: Boolean get() = isRegistered
+
+    /** System notification (balloon / toast, depending on the OS) from the tray icon. No-op without a tray. */
+    override fun displayInfo(title: String, message: String) {
+        trayIcon?.displayMessage(title, message, TrayIcon.MessageType.INFO)
+    }
 
     /**
      * Registers the tray icon. `suspend` because the menu labels and default
@@ -116,23 +129,27 @@ class DesktopTunnelTray(
             SystemTray.getSystemTray().add(icon)
             trayIcon = icon
         } catch (e: AWTException) {
-            Logger.w("TunnelTray", "could not register tray icon: ${e.javaClass.simpleName}")
+            Logger.w("TunnelTray", "could not register tray icon: ${errorClass(e)}")
             return
         }
 
         observeJob = appScope.coroutineScope.launch {
             tunnelService.tunnelStates.collectLatest { states -> updateTooltip(states) }
         }
+        // Tunnels stopped because they were deleted on another device: tell the user, the window may be hidden.
+        deletionJob = deletionNotifier.observe(appScope.coroutineScope, tunnelService.deletionStops)
     }
 
     fun stop() {
         observeJob?.cancel()
         observeJob = null
+        deletionJob?.cancel()
+        deletionJob = null
         trayIcon?.let { current ->
             try {
                 SystemTray.getSystemTray().remove(current)
             } catch (e: Exception) {
-                Logger.w("TunnelTray", "remove failed: ${e.javaClass.simpleName}")
+                Logger.w("TunnelTray", "remove failed: ${errorClass(e)}")
             }
         }
         trayIcon = null

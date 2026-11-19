@@ -19,6 +19,10 @@ interface CustomTerminalThemeDao {
     @Query("SELECT * FROM custom_terminal_themes WHERE id = :id AND deleted = 0")
     suspend fun getById(id: String): CustomTerminalThemeEntity?
 
+    // Backup restore: a tombstone is read too, to tick its clock instead of restarting from "{}".
+    @Query("SELECT * FROM custom_terminal_themes WHERE id = :id")
+    suspend fun getByIdIncludingDeleted(id: String): CustomTerminalThemeEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(theme: CustomTerminalThemeEntity)
 

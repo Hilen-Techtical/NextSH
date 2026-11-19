@@ -3,9 +3,7 @@
 
 package fr.techtical.nextsh.ui.vault
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -32,7 +30,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -41,6 +38,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -53,19 +51,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -75,6 +72,9 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Nfc
 import com.composables.icons.lucide.Usb
 import fr.techtical.nextsh.R
+import fr.techtical.nextsh.core.auth.EnrollFailure
+import fr.techtical.nextsh.ui.components.MaskedPinField
+import fr.techtical.nextsh.ui.sessions.isFidoPinAcceptable
 import fr.techtical.nextsh.ui.theme.Border1
 import fr.techtical.nextsh.ui.theme.Border2
 import fr.techtical.nextsh.ui.theme.Burgundy
@@ -95,7 +95,8 @@ import fr.techtical.nextsh.ui.theme.WarningAmber
 import fr.techtical.nextsh.ui.theme.White
 
 /**
- * Écran d'enrôlement FIDO2 : génère une clé sk-ssh-ed25519 via YubiKey (USB-C ou NFC).
+ * Écran d'enrôlement FIDO2 : génère une clé sk-ssh-ed25519 via YubiKey (USB-C ou NFC), ou
+ * sk-ecdsa-sha2-nistp256 si la clé ne gère pas Ed25519.
  *
  * Phases UI gérées par [Fido2EnrollViewModel.EnrollState] :
  *   Idle          → formulaire label + rpId + PIN optionnel + bouton
@@ -110,18 +111,6 @@ fun Fido2EnrollScreen(
     viewModel: Fido2EnrollViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
-    val context = LocalContext.current
-
-    // Démarrer/arrêter le listening YubiKit avec le cycle de vie de l'écran
-    DisposableEffect(Unit) {
-        val activity = context.findActivity()
-        if (activity != null) {
-            viewModel.startListening(activity)
-        }
-        onDispose {
-            viewModel.stopListening()
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -176,7 +165,7 @@ fun Fido2EnrollScreen(
 
                 is Fido2EnrollViewModel.EnrollState.Error ->
                     ErrorContent(
-                        message = currentState.message,
+                        reason = currentState.reason,
                         canRetry = currentState.canRetry,
                         isPinRequired = currentState.isPinRequired,
                         onRetry = { viewModel.reset() },
@@ -193,7 +182,13 @@ fun Fido2EnrollScreen(
 private fun IdleContent(viewModel: Fido2EnrollViewModel) {
     var labelText by remember { mutableStateOf(viewModel.label) }
     var rpIdText by remember { mutableStateOf(viewModel.rpId) }
-    var pinText by remember { mutableStateOf("") }
+    // The PIN is a secret: it lives in this mutable char buffer, never in a String, and never in
+    // anything saved (no rememberSaveable: a Bundle outlives the screen). It is emptied when the
+    // PIN is handed over to the ViewModel and when the screen is left, whatever the way out.
+    val pinChars: SnapshotStateList<Char> = remember { mutableStateListOf() }
+    DisposableEffect(Unit) {
+        onDispose { pinChars.clear() }
+    }
     var showAdvanced by remember { mutableStateOf(false) }
 
     Column(
@@ -236,7 +231,13 @@ private fun IdleContent(viewModel: Fido2EnrollViewModel) {
             value = labelText,
             onValueChange = { labelText = it; viewModel.onLabelChange(it) },
             label = { Text(stringResource(R.string.label_key_name), color = TextSecondary, fontSize = 12.sp) },
-            placeholder = { Text("Ma YubiKey Ed25519", color = TextSecondary.copy(alpha = 0.5f), fontSize = 13.sp) },
+            placeholder = {
+                Text(
+                    stringResource(R.string.fido2_enroll_label_placeholder),
+                    color = TextSecondary.copy(alpha = 0.5f),
+                    fontSize = 13.sp,
+                )
+            },
             singleLine = true,
             colors = nextshOutlinedColors(),
             shape = RoundedCornerShape(Radii.Md),
@@ -244,17 +245,12 @@ private fun IdleContent(viewModel: Fido2EnrollViewModel) {
         )
 
         // Champ PIN optionnel
-        OutlinedTextField(
-            value = pinText,
-            onValueChange = { pinText = it },
-            label = { Text(stringResource(R.string.fido2_pin_optional_label), color = TextSecondary, fontSize = 12.sp) },
-            visualTransformation = PasswordVisualTransformation(),
-            // KeyboardType.Password (clavier complet masqué) : le PIN FIDO2 YubiKey
-            // peut contenir des lettres et symboles (PIN alphanum).
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrect = false),
-            singleLine = true,
+        // Full masked keyboard: a FIDO2 PIN may hold letters and symbols (see MaskedPinField).
+        MaskedPinField(
+            pinChars = pinChars,
             colors = nextshOutlinedColors(),
-            shape = RoundedCornerShape(Radii.Md),
+            textStyle = LocalTextStyle.current.copy(color = TextPrimary),
+            label = { Text(stringResource(R.string.fido2_pin_optional_label), color = TextSecondary, fontSize = 12.sp) },
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -315,11 +311,14 @@ private fun IdleContent(viewModel: Fido2EnrollViewModel) {
 
         Button(
             onClick = {
-                val pin = pinText.takeIf { it.isNotEmpty() }?.toCharArray()
-                pinText = "" // wipe local state
+                // Materialize the secret exactly once; the ViewModel owns the array and zeroes it.
+                val pin = if (pinChars.isEmpty()) null else CharArray(pinChars.size) { pinChars[it] }
+                pinChars.clear()
                 viewModel.startEnroll(pin = pin)
             },
-            enabled = labelText.isNotBlank(),
+            // The PIN is optional (a key may have none), but one that is typed must be one a key
+            // takes: the library refuses a shorter or longer one before it is sent.
+            enabled = labelText.isNotBlank() && (pinChars.isEmpty() || isFidoPinAcceptable(pinChars)),
             colors = ButtonDefaults.buttonColors(
                 containerColor = Burgundy,
                 contentColor = White,
@@ -443,9 +442,40 @@ private fun SuccessContent(keyLabel: String, onDone: () -> Unit) {
 
 // ── Error ─────────────────────────────────────────────────────────────────────
 
+/** The sentence a non-technician reads when the enrollment failed, for [reason]. */
+@StringRes
+internal fun enrollFailureMessageRes(reason: EnrollFailure): Int = when (reason) {
+    EnrollFailure.NoKeyInTime -> R.string.fido2_enroll_error_no_key
+    EnrollFailure.PinRequired -> R.string.fido2_enroll_error_pin_required
+    is EnrollFailure.PinIncorrect ->
+        if (reason.triesRemaining != null) R.string.fido2_error_pin_incorrect_tries else R.string.fido2_error_pin_incorrect
+    EnrollFailure.PinNotSet -> R.string.fido2_enroll_error_pin_not_set
+    EnrollFailure.PinBlocked -> R.string.fido2_pin_blocked
+    EnrollFailure.PinAuthBlocked -> R.string.fido2_error_pin_auth_blocked
+    EnrollFailure.UnsupportedKey -> R.string.fido2_enroll_error_unsupported_key
+    EnrollFailure.KeyRemoved -> R.string.fido2_error_key_removed
+    EnrollFailure.TouchTimeout -> R.string.fido2_error_touch_timeout
+    EnrollFailure.Refused -> R.string.fido2_error_refused
+    EnrollFailure.NameMissing -> R.string.fido2_enroll_error_name_missing
+    EnrollFailure.NotSaved -> R.string.fido2_enroll_error_not_saved
+    EnrollFailure.Unexpected -> R.string.fido2_error_unexpected
+}
+
+/** The format arguments of [enrollFailureMessageRes]: the tries left, for a PIN refused with a known count. */
+internal fun enrollFailureMessageArgs(reason: EnrollFailure): Array<Any> =
+    if (reason is EnrollFailure.PinIncorrect && reason.triesRemaining != null) {
+        arrayOf<Any>(reason.triesRemaining)
+    } else {
+        emptyArray()
+    }
+
+@Composable
+private fun enrollFailureText(reason: EnrollFailure): String =
+    stringResource(enrollFailureMessageRes(reason), *enrollFailureMessageArgs(reason))
+
 @Composable
 private fun ErrorContent(
-    message: String,
+    reason: EnrollFailure,
     canRetry: Boolean,
     isPinRequired: Boolean,
     onRetry: () -> Unit,
@@ -471,7 +501,7 @@ private fun ErrorContent(
 
         Spacer(Modifier.height(Spacing.Lg))
         Text(
-            text = message,
+            text = enrollFailureText(reason),
             color = ErrorRed,
             fontSize = 13.sp,
             textAlign = TextAlign.Center,
@@ -568,14 +598,3 @@ private fun nextshOutlinedColors() = OutlinedTextFieldDefaults.colors(
     focusedLabelColor = Gold,
     unfocusedLabelColor = TextSecondary,
 )
-
-// ── Extension Context → Activity ──────────────────────────────────────────────
-
-private fun Context.findActivity(): Activity? {
-    var ctx = this
-    while (ctx is ContextWrapper) {
-        if (ctx is Activity) return ctx
-        ctx = ctx.baseContext
-    }
-    return null
-}

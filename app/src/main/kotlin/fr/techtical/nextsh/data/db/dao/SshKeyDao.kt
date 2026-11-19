@@ -5,10 +5,9 @@ package fr.techtical.nextsh.data.db.dao
 
 import androidx.room.Dao
 import androidx.room.Delete
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Upsert
 import fr.techtical.nextsh.data.db.entity.SshKeyEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -24,8 +23,9 @@ interface SshKeyDao {
     @Query("SELECT * FROM ssh_keys WHERE keystoreAlias = :alias AND deleted = 0")
     suspend fun getByKeystoreAlias(alias: String): SshKeyEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(key: SshKeyEntity)
+    // One row by id, tombstones included (getById hides them).
+    @Query("SELECT * FROM ssh_keys WHERE id = :id")
+    suspend fun getByIdIncludingDeleted(id: String): SshKeyEntity?
 
     @Update
     suspend fun update(key: SshKeyEntity)
@@ -43,6 +43,7 @@ interface SshKeyDao {
     @Query("SELECT * FROM ssh_keys ORDER BY label ASC")
     suspend fun getAllIncludingDeleted(): List<SshKeyEntity>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    // Insert, or UPDATE in place on primary-key conflict (see HostDao.upsert). No REPLACE insert on this DAO on purpose.
+    @Upsert
     suspend fun upsert(key: SshKeyEntity)
 }

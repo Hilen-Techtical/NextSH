@@ -1,0 +1,6 @@
+-- Foreign keys are now really enforced on the local database (DatabaseFactory). Until now they were not,
+-- so tunnels whose host row does not exist at all could pile up (sync bundles and backups from before the
+-- fix carried live tunnels of deleted hosts). Turning enforcement on does not check the existing rows, and
+-- such a row would make every later UPDATE of it fail, so drop them here. A tunnel whose host is only
+-- tombstoned is NOT touched: its host row exists.
+DELETE FROM tunnels WHERE hostId NOT IN (SELECT id FROM hosts);

@@ -4,6 +4,11 @@
 package fr.techtical.nextsh.desktop.sync
 
 import fr.techtical.nextsh.desktop.data.di.DesktopContainer
+import fr.techtical.nextsh.desktop.generated.resources.Res
+import fr.techtical.nextsh.desktop.generated.resources.sync_error_no_free_port
+import fr.techtical.nextsh.desktop.generated.resources.sync_error_no_lan_interface
+import fr.techtical.nextsh.desktop.generated.resources.sync_error_start_failed
+import fr.techtical.nextsh.desktop.generated.resources.sync_error_unknown
 import fr.techtical.nextsh.shared.core.sync.DeviceIdentity
 import fr.techtical.nextsh.shared.core.sync.EcdhHandshake
 import fr.techtical.nextsh.shared.core.sync.EnrolledDevice
@@ -24,10 +29,12 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.getString
 import java.net.ServerSocket
 import java.util.Base64
 
@@ -64,13 +71,13 @@ class EnrollmentServer(
 
             val lan = LanAddressDetector.detect()
             if (lan == null) {
-                _state.value = State.Error("Aucune interface LAN détectée")
+                _state.value = State.Error(getString(Res.string.sync_error_no_lan_interface))
                 return@launch
             }
 
             val port = findFreePort(lan.address.hostAddress)
             if (port == null) {
-                _state.value = State.Error("Aucun port libre disponible dans la plage $PORT_RANGE_START-$PORT_RANGE_END")
+                _state.value = State.Error(getString(Res.string.sync_error_no_free_port, PORT_RANGE_START, PORT_RANGE_END))
                 return@launch
             }
 
@@ -111,13 +118,17 @@ class EnrollmentServer(
                 }
                 engine = server
                 server.start(wait = false)
-                Logger.d(TAG, "Enrôlement en écoute sur $addr:$port (fingerprint=$fp)")
+                Logger.d(TAG, "Enrôlement en écoute (certificat TLS éphémère prêt)")
                 _state.value = State.Listening(addr = addr, port = port, fingerprint = fp)
+            } catch (e: CancellationException) {
+                keypair?.wipePrivate()
+                keypair = null
+                throw e
             } catch (e: Exception) {
                 keypair?.wipePrivate()
                 keypair = null
                 Logger.e(TAG, "Impossible de démarrer le serveur d'enrôlement", e)
-                _state.value = State.Error("Erreur de démarrage du serveur : ${e.message}")
+                _state.value = State.Error(getString(Res.string.sync_error_start_failed, getString(Res.string.sync_error_unknown)))
                 return@launch
             }
 

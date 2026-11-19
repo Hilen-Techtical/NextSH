@@ -9,6 +9,8 @@ import fr.techtical.nextsh.shared.core.sync.EnrolledDeviceSecretStore
 import fr.techtical.nextsh.shared.core.sync.Platform
 import fr.techtical.nextsh.shared.domain.vault.VaultManager
 import fr.techtical.nextsh.shared.util.AppScope
+import fr.techtical.nextsh.shared.util.LogId
+import fr.techtical.nextsh.shared.util.Logger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -195,10 +197,20 @@ class EnrolledDevicesViewModelTest {
             viewModel.events.collect { collectedEvents.add(it) }
         }
 
-        viewModel.revoke(testDevice)
+        val lines = Logger.capture { viewModel.revoke(testDevice) }
 
         assertEquals(1, collectedEvents.size)
         assertTrue(collectedEvents[0] is EnrolledDevicesViewModel.Event.Error)
+
+        // The failure is logged with the LogId fingerprint and the exception class: never the
+        // raw device id, the device name or the exception message.
+        assertTrue(lines.any { it.contains("device=${LogId.of(testDevice.deviceId)}") && it.contains("RuntimeException") }, "got $lines")
+        assertTrue(
+            lines.none {
+                it.contains(testDevice.deviceId) || it.contains(testDevice.deviceName) || it.contains("DB write error")
+            },
+            "got $lines",
+        )
 
         collector.cancel()
     }

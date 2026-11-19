@@ -74,9 +74,10 @@ import com.composables.icons.lucide.Smartphone
 import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.TriangleAlert
 import fr.techtical.nextsh.desktop.components.PageHeader
+import fr.techtical.nextsh.desktop.components.relativeTimeLabel
 import fr.techtical.nextsh.desktop.components.rememberNowTicking
-import fr.techtical.nextsh.shared.util.RelativeTime
 import fr.techtical.nextsh.desktop.core.security.WindowSecurityHelper
+import fr.techtical.nextsh.desktop.scope.rememberScreenViewModel
 import fr.techtical.nextsh.desktop.sessions.ThemePickerDialog
 import fr.techtical.nextsh.desktop.sync.LanSyncServer
 import fr.techtical.nextsh.desktop.theme.Border1
@@ -102,8 +103,12 @@ import fr.techtical.nextsh.desktop.theme.White
 import fr.techtical.nextsh.shared.core.sync.SyncState
 import fr.techtical.nextsh.desktop.data.preferences.LanguagePref
 import fr.techtical.nextsh.desktop.vault.RecoveryPhraseDisplay
+import fr.techtical.nextsh.desktop.vault.vaultErrorText
 import fr.techtical.nextsh.desktop.generated.resources.Res
 import fr.techtical.nextsh.desktop.generated.resources.action_cancel
+import fr.techtical.nextsh.desktop.generated.resources.action_ok
+import fr.techtical.nextsh.desktop.generated.resources.conflicts_subtitle_many
+import fr.techtical.nextsh.desktop.generated.resources.conflicts_subtitle_one
 import fr.techtical.nextsh.desktop.generated.resources.settings_clipboard_disabled
 import fr.techtical.nextsh.desktop.generated.resources.settings_clipboard_seconds_format
 import fr.techtical.nextsh.desktop.generated.resources.settings_danger_warning
@@ -128,7 +133,6 @@ import fr.techtical.nextsh.desktop.generated.resources.settings_label_sync_enabl
 import fr.techtical.nextsh.desktop.generated.resources.settings_label_sync_enrolled
 import fr.techtical.nextsh.desktop.generated.resources.settings_label_terminal_font
 import fr.techtical.nextsh.desktop.generated.resources.settings_label_wipe_vault
-import fr.techtical.nextsh.desktop.generated.resources.settings_relative_just_now
 import fr.techtical.nextsh.desktop.generated.resources.settings_section_connection
 import fr.techtical.nextsh.desktop.generated.resources.settings_section_danger
 import fr.techtical.nextsh.desktop.generated.resources.settings_section_security
@@ -169,9 +173,6 @@ import fr.techtical.nextsh.desktop.generated.resources.settings_purge_token_titl
 import fr.techtical.nextsh.desktop.generated.resources.settings_purge_token_body
 import fr.techtical.nextsh.desktop.generated.resources.settings_purge_token_field_label
 import fr.techtical.nextsh.desktop.generated.resources.settings_purge_token_button
-import fr.techtical.nextsh.desktop.generated.resources.statusbar_relative_days_ago
-import fr.techtical.nextsh.desktop.generated.resources.statusbar_relative_hours_ago
-import fr.techtical.nextsh.desktop.generated.resources.statusbar_relative_minutes_ago
 import org.jetbrains.compose.resources.stringResource
 
 private val CLIPBOARD_EXPIRY_OPTIONS = listOf(0, 15, 30, 60, 90, 120)
@@ -203,7 +204,7 @@ fun SettingsScreen(
     onOpenConflictResolution: () -> Unit = {},
     onOpenEnrolledDevices: () -> Unit = {},
 ) {
-    val viewModel = remember { SettingsViewModel() }
+    val viewModel = rememberScreenViewModel { SettingsViewModel() }
     val settings by viewModel.settings.collectAsState()
     val syncState by viewModel.syncState.collectAsState()
     val schedulerState by viewModel.schedulerState.collectAsState()
@@ -567,7 +568,7 @@ fun SettingsScreen(
                 TextButton(onClick = {
                     showWipeConfirmStep2 = false
                     wipeConfirmText = ""
-                }) { Text("Annuler", color = TextSecondary) }
+                }) { Text(stringResource(Res.string.action_cancel), color = TextSecondary) }
             },
             containerColor = Surface,
         )
@@ -671,6 +672,20 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { showRegenerateConfirm = false }) {
                     Text(stringResource(Res.string.action_cancel), color = TextSecondary)
+                }
+            },
+            containerColor = Surface,
+        )
+    }
+
+    // ── Recovery phrase: a failed generation is told, not silent ──────────────
+    recoveryState.error?.let { recoveryError ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissRecoveryError() },
+            text = { Text(vaultErrorText(recoveryError), color = TextSecondary) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.dismissRecoveryError() }) {
+                    Text(stringResource(Res.string.action_ok), color = Gold)
                 }
             },
             containerColor = Surface,
@@ -1183,7 +1198,7 @@ private fun ConflictAlert(count: Int, onClick: () -> Unit) {
         Icon(Lucide.TriangleAlert, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(Spacing.Md))
         Text(
-            text = "$count conflit${if (count > 1) "s" else ""} à résoudre",
+            text = if (count == 1) stringResource(Res.string.conflicts_subtitle_one) else stringResource(Res.string.conflicts_subtitle_many, count),
             color = TextPrimary,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
@@ -1236,7 +1251,7 @@ private fun LanSyncStatusLine(
         }
         val now = rememberNowTicking(schedulerState.lastSyncAt)
         val lastSyncText = schedulerState.lastSyncAt?.let { ts ->
-            stringResource(Res.string.settings_sync_last_received, formatRelativeTime(ts, now))
+            stringResource(Res.string.settings_sync_last_received, relativeTimeLabel(ts, now).text)
         } ?: stringResource(Res.string.settings_sync_last_none)
         Text(
             text = lastSyncText,
@@ -1288,16 +1303,5 @@ private fun LanSyncStatusLine(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun formatRelativeTime(timestampMs: Long, now: Long): String {
-    val bucket = RelativeTime.bucket(now - timestampMs)
-    return when (bucket.unit) {
-        RelativeTime.Unit.SECONDS -> stringResource(Res.string.settings_relative_just_now)
-        RelativeTime.Unit.MINUTES -> stringResource(Res.string.statusbar_relative_minutes_ago, bucket.value)
-        RelativeTime.Unit.HOURS   -> stringResource(Res.string.statusbar_relative_hours_ago, bucket.value)
-        RelativeTime.Unit.DAYS    -> stringResource(Res.string.statusbar_relative_days_ago, bucket.value)
     }
 }

@@ -26,6 +26,19 @@ internal interface VaultPrefsOpener {
      * maître : la fenêtre d'authentification doit être ouverte (voir [MasterKeyProbe]).
      */
     fun open(): SharedPreferences
+
+    /**
+     * Les préférences BRUTES du fichier du vault : la même instance que celle qu'enveloppe
+     * EncryptedSharedPreferences, sans la clé maître ni aucun déchiffrement. Ne sert qu'à l'effacement
+     * (voir [VaultManager.wipeAllEntries]) : les noms et les valeurs y sont chiffrés.
+     */
+    fun rawPrefs(): SharedPreferences = throw UnsupportedOperationException("No raw preferences")
+
+    /** Supprime l'ancien fichier du vault v1. Vrai s'il n'en reste rien. */
+    fun deleteLegacyVault(): Boolean = true
+
+    /** Vrai si l'ancien fichier du vault v1 existe encore. */
+    fun legacyVaultPresent(): Boolean = false
 }
 
 internal class AndroidVaultPrefsOpener(
@@ -53,6 +66,15 @@ internal class AndroidVaultPrefsOpener(
     override fun ensureMasterKey() {
         masterKey
     }
+
+    override fun rawPrefs(): SharedPreferences =
+        context.getSharedPreferences(VAULT_FILE_NAME_V2, Context.MODE_PRIVATE)
+
+    override fun deleteLegacyVault(): Boolean =
+        context.deleteSharedPreferences(VaultManager.LEGACY_VAULT_FILE)
+
+    override fun legacyVaultPresent(): Boolean =
+        java.io.File(context.applicationInfo.dataDir, "shared_prefs/${VaultManager.LEGACY_VAULT_FILE}.xml").exists()
 
     @Suppress("DEPRECATION")
     override fun open(): SharedPreferences =

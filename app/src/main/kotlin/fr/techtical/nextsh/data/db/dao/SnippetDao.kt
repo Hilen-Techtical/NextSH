@@ -26,6 +26,10 @@ interface SnippetDao {
     @Query("SELECT * FROM snippets WHERE id = :id AND deleted = 0")
     suspend fun getById(id: String): SnippetEntity?
 
+    // Backup restore: a tombstone is read too, to tick its clock instead of restarting from "{}".
+    @Query("SELECT * FROM snippets WHERE id = :id")
+    suspend fun getByIdIncludingDeleted(id: String): SnippetEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(snippet: SnippetEntity)
 

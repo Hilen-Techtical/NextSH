@@ -7,6 +7,8 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import fr.techtical.nextsh.shared.core.ssh.PublicKeyDeriver
+import fr.techtical.nextsh.shared.core.ssh.SshPublicKeyDeriver
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import javax.inject.Qualifier
@@ -20,9 +22,22 @@ import javax.inject.Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class IoDispatcher
 
+/** Dispatcher des calculs coûteux (dérivation de clés), hors du fil principal. */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class DefaultDispatcher
+
 @Module
 @InstallIn(SingletonComponent::class)
 object DispatchersModule {
+
+    @Provides
+    @DefaultDispatcher
+    fun provideDefaultDispatcher(): CoroutineDispatcher = Dispatchers.Default
+
+    @Provides
+    fun providePublicKeyDeriver(): PublicKeyDeriver = SshPublicKeyDeriver
+
 
     @Provides
     @IoDispatcher

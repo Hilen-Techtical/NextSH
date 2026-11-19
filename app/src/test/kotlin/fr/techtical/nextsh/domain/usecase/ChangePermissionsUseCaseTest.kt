@@ -3,6 +3,7 @@
 
 package fr.techtical.nextsh.domain.usecase
 
+import fr.techtical.nextsh.core.ssh.SFTP_PERMISSIONS_INVALID_MESSAGE
 import fr.techtical.nextsh.core.ssh.SftpManager
 import fr.techtical.nextsh.domain.model.SshErrorCode
 import fr.techtical.nextsh.shared.domain.model.SshResult
@@ -128,7 +129,7 @@ class ChangePermissionsUseCaseTest {
 
         assertTrue(result is SshResult.Error)
         assertEquals(SshErrorCode.UNKNOWN, (result as SshResult.Error).code)
-        assertEquals("Valeur de permissions invalide (attendu 0–511)", result.message)
+        assertEquals(SFTP_PERMISSIONS_INVALID_MESSAGE, result.message)
     }
 
     @Test
@@ -141,7 +142,7 @@ class ChangePermissionsUseCaseTest {
 
         assertTrue(result is SshResult.Error)
         assertEquals(SshErrorCode.UNKNOWN, (result as SshResult.Error).code)
-        assertEquals("Valeur de permissions invalide (attendu 0–511)", result.message)
+        assertEquals(SFTP_PERMISSIONS_INVALID_MESSAGE, result.message)
     }
 
     @Test
@@ -153,7 +154,7 @@ class ChangePermissionsUseCaseTest {
         val result = changePermissionsUseCase(sessionId, path, permissions)
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Valeur de permissions invalide (attendu 0–511)", (result as SshResult.Error).message)
+        assertEquals(SFTP_PERMISSIONS_INVALID_MESSAGE, (result as SshResult.Error).message)
     }
 
     @Test
@@ -165,7 +166,7 @@ class ChangePermissionsUseCaseTest {
         val result = changePermissionsUseCase(sessionId, path, permissions)
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Valeur de permissions invalide (attendu 0–511)", (result as SshResult.Error).message)
+        assertEquals(SFTP_PERMISSIONS_INVALID_MESSAGE, (result as SshResult.Error).message)
     }
 
     @Test

@@ -9,6 +9,8 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import fr.techtical.nextsh.core.auth.HardwareKeyAuthenticator
 import fr.techtical.nextsh.core.auth.YubiKitAuthenticator
+import fr.techtical.nextsh.core.vault.DocumentDeleter
+import fr.techtical.nextsh.core.vault.SafDocumentDeleter
 import javax.inject.Singleton
 
 @Module
@@ -20,4 +22,8 @@ object AppModule {
     @Provides
     @Singleton
     fun provideHardwareKeyAuthenticator(impl: YubiKitAuthenticator): HardwareKeyAuthenticator = impl
+
+    @Provides
+    @Singleton
+    fun provideDocumentDeleter(impl: SafDocumentDeleter): DocumentDeleter = impl
 }

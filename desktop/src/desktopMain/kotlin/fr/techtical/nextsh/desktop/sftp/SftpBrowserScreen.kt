@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,7 +35,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
@@ -46,6 +49,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -56,9 +60,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -75,7 +81,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import fr.techtical.nextsh.desktop.sessions.PaneSlot
+import fr.techtical.nextsh.desktop.components.formatFileSize
+import fr.techtical.nextsh.desktop.core.ssh.DesktopSftpManager
+import fr.techtical.nextsh.desktop.core.ssh.replaceInvisibleCharacters
 import fr.techtical.nextsh.desktop.theme.Burgundy
 import fr.techtical.nextsh.desktop.theme.ErrorRed
 import fr.techtical.nextsh.desktop.theme.Gold
@@ -85,18 +93,21 @@ import fr.techtical.nextsh.desktop.theme.Surface
 import fr.techtical.nextsh.desktop.theme.SurfaceVariant
 import fr.techtical.nextsh.desktop.theme.TextPrimary
 import fr.techtical.nextsh.desktop.theme.TextSecondary
+import fr.techtical.nextsh.desktop.theme.WarningAmber
 import fr.techtical.nextsh.shared.domain.model.SftpFile
 import fr.techtical.nextsh.shared.domain.model.SortOrder
+import kotlinx.coroutines.delay
 import java.awt.Cursor
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import javax.swing.JFileChooser
+import fr.techtical.nextsh.desktop.components.dateTimeText
 import fr.techtical.nextsh.desktop.generated.resources.Res
 import fr.techtical.nextsh.desktop.generated.resources.action_delete
+import fr.techtical.nextsh.desktop.generated.resources.action_ok
 import fr.techtical.nextsh.desktop.generated.resources.sftp_action_clear_selection
+import fr.techtical.nextsh.desktop.generated.resources.sftp_action_create
 import fr.techtical.nextsh.desktop.generated.resources.sftp_action_hide_hidden
+import fr.techtical.nextsh.desktop.generated.resources.sftp_action_new_file
 import fr.techtical.nextsh.desktop.generated.resources.sftp_action_new_folder
 import fr.techtical.nextsh.desktop.generated.resources.sftp_action_refresh
 import fr.techtical.nextsh.desktop.generated.resources.sftp_action_show_hidden
@@ -113,6 +124,12 @@ import fr.techtical.nextsh.desktop.generated.resources.sftp_dialog_upload_title
 import fr.techtical.nextsh.desktop.generated.resources.sftp_empty_short
 import fr.techtical.nextsh.desktop.generated.resources.sftp_error_retry
 import fr.techtical.nextsh.desktop.generated.resources.sftp_error_title
+import fr.techtical.nextsh.desktop.generated.resources.sftp_leftover_badge
+import fr.techtical.nextsh.desktop.generated.resources.sftp_leftover_banner_delete
+import fr.techtical.nextsh.desktop.generated.resources.sftp_leftover_banner_dismiss
+import fr.techtical.nextsh.desktop.generated.resources.sftp_leftover_banner_many
+import fr.techtical.nextsh.desktop.generated.resources.sftp_leftover_banner_one
+import fr.techtical.nextsh.desktop.generated.resources.sftp_leftover_detail
 import fr.techtical.nextsh.desktop.generated.resources.sftp_selection_count_many
 import fr.techtical.nextsh.desktop.generated.resources.sftp_selection_count_one
 import fr.techtical.nextsh.desktop.generated.resources.sftp_selection_select_all
@@ -132,19 +149,25 @@ import org.jetbrains.compose.resources.stringResource
 fun SftpBrowserScreen(
     sessionId: String,
     tabId: String,
+    paneId: String,
     initialCwd: String,
-    paneSlot: PaneSlot? = null,
     modifier: Modifier = Modifier,
 ) {
-    val viewModel = remember(sessionId, tabId, paneSlot) {
+    val viewModel = remember(sessionId, tabId, paneId) {
         SftpBrowserViewModel(
             sessionId = sessionId,
             tabId = tabId,
+            paneId = paneId,
             initialCwd = initialCwd,
-            paneSlot = paneSlot,
         )
     }
+    // The view model is re-created when the screen comes back (tab change, another view): the old one
+    // may still see an upload end and must then neither reload nor rewrite the folder of the pane.
+    DisposableEffect(viewModel) {
+        onDispose { viewModel.dispose() }
+    }
     val state by viewModel.state.collectAsState()
+    val notice by viewModel.notice.collectAsState()
     val listState = rememberLazyListState()
 
     // Preview split geometry is local UI state, not part of the VM: same
@@ -177,7 +200,7 @@ fun SftpBrowserScreen(
         // save title keeps its %1$s placeholder: the remote file name is only
         // known inside the per-row click lambda (String.format handles the
         // positional specifier).
-        val uploadDialogTitle = stringResource(Res.string.sftp_dialog_upload_title, loaded?.cwd ?: "/")
+        val uploadDialogTitle = stringResource(Res.string.sftp_dialog_upload_title, displayEntryName(loaded?.cwd ?: "/"))
         val saveDialogTitleTemplate = stringResource(Res.string.sftp_dialog_save_title)
         if (loaded != null && loaded.isSelectionMode) {
             SelectionBar(
@@ -194,6 +217,7 @@ fun SftpBrowserScreen(
                 hiddenVisible = loaded?.hiddenVisible ?: false,
                 sortOrder = loaded?.sortOrder ?: SortOrder.NAME_ASC,
                 onNewFolder = { viewModel.openDialog(SftpDialog.NewFolder) },
+                onNewFile = { viewModel.openDialog(SftpDialog.NewFile) },
                 onUpload = {
                     pickFileForUpload(uploadDialogTitle)?.let { viewModel.uploadFile(it) }
                 },
@@ -208,6 +232,18 @@ fun SftpBrowserScreen(
             cwd = loaded?.cwd ?: "/",
             onJumpTo = viewModel::navigateTo,
         )
+        // Leftovers of interrupted uploads: a banner above the list, since the rows can sit below the
+        // folders. Hidden once dismissed for this folder, and while the selection bar is shown.
+        if (loaded != null && !loaded.isSelectionMode && !loaded.leftoverBannerDismissed) {
+            val leftovers = loaded.leftovers
+            if (leftovers.isNotEmpty()) {
+                UploadLeftoversBanner(
+                    count = leftovers.size,
+                    onDelete = { viewModel.openDialog(SftpDialog.DeleteLeftovers(leftovers)) },
+                    onDismiss = viewModel::dismissLeftoverBanner,
+                )
+            }
+        }
         val fileListContent: @Composable () -> Unit = {
             when (val s = state) {
                 SftpBrowserUiState.Loading -> LoadingCenter()
@@ -227,12 +263,23 @@ fun SftpBrowserScreen(
                         if (s.isSelectionMode) viewModel.toggleSelection(file.path)
                     },
                     onStartSelection = { viewModel.selectOnly(it.path) },
+                    onCopyPathRefused = viewModel::onCopyPathRefused,
                     onRename = { viewModel.openDialog(SftpDialog.Rename(it)) },
                     onChmod = { viewModel.openDialog(SftpDialog.Chmod(it)) },
-                    onDelete = { viewModel.openDialog(SftpDialog.DeleteConfirm(listOf(it))) },
+                    onDelete = { file ->
+                        // A leftover of an interrupted upload has its own dialog (plain delete, with the
+                        // explanation and the warning); everything else keeps the generic one.
+                        viewModel.openDialog(
+                            if (file.path in s.leftoverPaths) SftpDialog.DeleteLeftovers(listOf(file))
+                            else SftpDialog.DeleteConfirm(listOf(file)),
+                        )
+                    },
                     onDownload = { file ->
-                        val title = String.format(saveDialogTitleTemplate, file.name)
-                        pickDestinationForDownload(file.name, title)?.let { dest ->
+                        // The name offered for the local file never holds a control or an invisible
+                        // format character (a bidirectional control could make a `.exe` pass for a
+                        // `.pdf` in the file explorer); the title shows it with U+FFFD in their place.
+                        val title = String.format(saveDialogTitleTemplate, displayEntryName(file.name))
+                        pickDestinationForDownload(replaceInvisibleCharacters(file.name, '_'), title)?.let { dest ->
                             viewModel.downloadFile(file, dest)
                         }
                     },
@@ -267,8 +314,14 @@ fun SftpBrowserScreen(
                 fileListContent()
             }
         }
-        if (loaded?.lastError != null) {
-            ErrorToast(message = loaded.lastError, onDismiss = viewModel::dismissError)
+        // Why a transfer was refused (a folder of that name...) or an operation failed
+        // (create, rename, permissions, delete). Not tied to the loaded state: it must
+        // still be there after a reload, or once the screen came back.
+        notice?.let { message ->
+            ErrorToast(message = message, onDismiss = { viewModel.dismissNotice(message) })
+        }
+        if (loaded?.lastInfo != null) {
+            InfoToast(message = loaded.lastInfo, onDismiss = viewModel::dismissInfo)
         }
     }
 
@@ -277,6 +330,10 @@ fun SftpBrowserScreen(
     when (dlg) {
         SftpDialog.NewFolder -> NewFolderDialog(
             onConfirm = viewModel::createFolder,
+            onDismiss = viewModel::dismissDialog,
+        )
+        SftpDialog.NewFile -> NewFileDialog(
+            onConfirm = viewModel::createFile,
             onDismiss = viewModel::dismissDialog,
         )
         is SftpDialog.Rename -> RenameDialog(
@@ -294,7 +351,29 @@ fun SftpBrowserScreen(
             onConfirm = viewModel::deleteTargets,
             onDismiss = viewModel::dismissDialog,
         )
+        is SftpDialog.DeleteLeftovers -> LeftoverDeleteDialog(
+            targets = dlg.targets,
+            onConfirm = viewModel::deleteLeftovers,
+            onDismiss = viewModel::dismissDialog,
+        )
         null -> Unit
+    }
+
+    // Replacement confirmation of an upload or a download. The questions live in their own
+    // queue and are shown whatever the state is: a folder reload (the one that follows an
+    // earlier upload, for instance) must not close the one on screen, which a
+    // `Loaded.dialog` would not survive. Only the first question is shown, the others wait
+    // behind it. `key` gives every question its own window, so the focus goes back on
+    // Cancel and the delay before "Replace" can be used starts again for each of them.
+    val replaceQueue by viewModel.replaceQueue.collectAsState()
+    replaceQueue.firstOrNull()?.let { prompt ->
+        key(prompt.id) {
+            ReplaceConfirmDialog(
+                prompt = prompt,
+                onConfirm = { viewModel.confirmReplace(prompt) },
+                onDismiss = { viewModel.dismissReplace(prompt) },
+            )
+        }
     }
 }
 
@@ -427,6 +506,7 @@ private fun ActionBar(
     hiddenVisible: Boolean,
     sortOrder: SortOrder,
     onNewFolder: () -> Unit,
+    onNewFile: () -> Unit,
     onUpload: () -> Unit,
     onToggleHidden: () -> Unit,
     onSortChange: (SortOrder) -> Unit,
@@ -442,11 +522,10 @@ private fun ActionBar(
             .padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ActionIconButton(
-            icon = Icons.Default.CreateNewFolder,
-            label = stringResource(Res.string.sftp_action_new_folder),
+        CreateMenuButton(
+            onNewFolder = onNewFolder,
+            onNewFile = onNewFile,
             enabled = otherActionsEnabled,
-            onClick = onNewFolder,
         )
         ActionIconButton(
             icon = Icons.Default.Upload,
@@ -527,6 +606,63 @@ private fun ActionIconButton(
     }
 }
 
+/** "+" button opening a small menu: new folder or new file in the current directory. */
+@Composable
+private fun CreateMenuButton(
+    onNewFolder: () -> Unit,
+    onNewFile: () -> Unit,
+    enabled: Boolean,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }, enabled = enabled) {
+            Icon(
+                Icons.Default.Add,
+                contentDescription = stringResource(Res.string.sftp_action_create),
+                tint = if (enabled) Gold else GoldMuted,
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(Surface),
+        ) {
+            DropdownMenuItem(
+                leadingIcon = {
+                    Icon(Icons.Default.CreateNewFolder, contentDescription = null, tint = Gold, modifier = Modifier.size(18.dp))
+                },
+                text = {
+                    Text(
+                        text = stringResource(Res.string.sftp_action_new_folder),
+                        color = TextPrimary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onNewFolder()
+                },
+            )
+            DropdownMenuItem(
+                leadingIcon = {
+                    Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null, tint = Gold, modifier = Modifier.size(18.dp))
+                },
+                text = {
+                    Text(
+                        text = stringResource(Res.string.sftp_action_new_file),
+                        color = TextPrimary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onNewFile()
+                },
+            )
+        }
+    }
+}
+
 @Composable
 private fun SortMenuButton(
     current: SortOrder,
@@ -600,7 +736,7 @@ private fun Breadcrumb(cwd: String, onJumpTo: (String) -> Unit) {
                     modifier = Modifier.size(14.dp),
                 )
                 val fullPath = "/" + segments.subList(0, index + 1).joinToString("/")
-                BreadcrumbChip(label = segment, onClick = { onJumpTo(fullPath) })
+                BreadcrumbChip(label = displayEntryName(segment), onClick = { onJumpTo(fullPath) })
             }
         }
     }
@@ -678,6 +814,7 @@ private fun FileList(
     onPreview: (SftpFile) -> Unit,
     onClick: (SftpFile) -> Unit,
     onStartSelection: (SftpFile) -> Unit,
+    onCopyPathRefused: () -> Unit,
     onRename: (SftpFile) -> Unit,
     onChmod: (SftpFile) -> Unit,
     onDelete: (SftpFile) -> Unit,
@@ -702,12 +839,14 @@ private fun FileList(
             items(files, key = { it.path }) { file ->
                 FileRow(
                     file = file,
+                    leftoverOf = if (file.path in loaded.leftoverPaths) leftoverOriginalName(file.name) else null,
                     isSelected = file.path in loaded.selection,
                     columns = columns,
                     onNavigateInto = { onNavigateInto(file.path) },
                     onPreview = { onPreview(file) },
                     onClick = { onClick(file) },
                     onStartSelection = { onStartSelection(file) },
+                    onCopyPathRefused = onCopyPathRefused,
                     onRename = { onRename(file) },
                     onChmod = { onChmod(file) },
                     onDelete = { onDelete(file) },
@@ -722,12 +861,15 @@ private fun FileList(
 @Composable
 private fun FileRow(
     file: SftpFile,
+    /** The name, ready to show, of the file this entry is the interrupted upload of; null for an ordinary entry. */
+    leftoverOf: String?,
     isSelected: Boolean,
     columns: FileListColumns,
     onNavigateInto: () -> Unit,
     onPreview: () -> Unit,
     onClick: () -> Unit,
     onStartSelection: () -> Unit,
+    onCopyPathRefused: () -> Unit,
     onRename: () -> Unit,
     onChmod: () -> Unit,
     onDelete: () -> Unit,
@@ -751,7 +893,8 @@ private fun FileRow(
             add(ContextMenuItem(labelRename, onRename))
             add(ContextMenuItem(labelChmod, onChmod))
             add(ContextMenuItem(labelCopyPath) {
-                clipboard.setText(AnnotatedString(file.path))
+                val copyable = copyablePath(file.path)
+                if (copyable != null) clipboard.setText(AnnotatedString(copyable)) else onCopyPathRefused()
             })
             add(ContextMenuItem(labelDelete, onDelete))
         }
@@ -780,17 +923,55 @@ private fun FileRow(
                 modifier = Modifier.size(18.dp),
             )
             Spacer(Modifier.width(10.dp))
-            Text(
-                text = file.name,
-                color = TextPrimary,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+            if (leftoverOf == null) {
+                Text(
+                    text = displayEntryName(file.name),
+                    color = TextPrimary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                // The real name, then a badge, and under them the file this is the incomplete copy of.
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = displayEntryName(file.name),
+                            color = TextPrimary,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        // Not in a narrow pane: the badge would take the room of the name, and the second
+                        // line already says the same thing.
+                        if (columns.showSize) {
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = stringResource(Res.string.sftp_leftover_badge),
+                                color = WarningAmber,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(WarningAmber.copy(alpha = 0.12f))
+                                    .padding(horizontal = 6.dp, vertical = 1.dp),
+                            )
+                        }
+                    }
+                    Text(
+                        text = stringResource(Res.string.sftp_leftover_detail, leftoverOf),
+                        color = WarningAmber,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             if (columns.showSize) {
                 Text(
-                    text = if (file.isDirectory) "-" else formatSize(file.size),
+                    text = if (file.isDirectory) "-" else formatFileSize(file.size),
                     color = TextSecondary,
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.width(80.dp),
@@ -815,6 +996,46 @@ private fun FileRow(
                     modifier = Modifier.width(140.dp),
                 )
             }
+        }
+    }
+}
+
+/**
+ * The name of the file that the leftover [leftoverName] is the incomplete copy of, ready to show: invisible
+ * characters replaced for display, and an ellipsis when the start of the name may have been cut.
+ */
+internal fun leftoverOriginalName(leftoverName: String): String? =
+    DesktopSftpManager.uploadLeftoverName(leftoverName)?.let { displayEntryName(it.original) + if (it.cut) "…" else "" }
+
+/** Count of leftovers, a plain-text banner above the list with the actions "Delete…" and "Dismiss". */
+@Composable
+private fun UploadLeftoversBanner(count: Int, onDelete: () -> Unit, onDismiss: () -> Unit) {
+    val text = if (count > 1) stringResource(Res.string.sftp_leftover_banner_many, count)
+    else stringResource(Res.string.sftp_leftover_banner_one, count)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 36.dp)
+            .background(WarningAmber.copy(alpha = 0.12f))
+            .padding(start = 16.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Default.Warning,
+            contentDescription = null,
+            tint = WarningAmber,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = text,
+            color = TextPrimary,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onDelete) { Text(stringResource(Res.string.sftp_leftover_banner_delete), color = Gold) }
+        TextButton(onClick = onDismiss) {
+            Text(stringResource(Res.string.sftp_leftover_banner_dismiss), color = TextSecondary)
         }
     }
 }
@@ -845,6 +1066,13 @@ private fun ErrorCenter(message: String, onRetry: () -> Unit) {
 
 @Composable
 private fun ErrorToast(message: String, onDismiss: () -> Unit) {
+    // "OK" is usable only once the notice has been on screen for a moment: a double click (or a key held
+    // down) on the "OK" of the previous notice must not take off this one, which nobody read.
+    var armed by remember(message) { mutableStateOf(false) }
+    LaunchedEffect(message) {
+        delay(REPLACE_ARM_DELAY_MS)
+        armed = true
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -858,9 +1086,35 @@ private fun ErrorToast(message: String, onDismiss: () -> Unit) {
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.weight(1f),
         )
-        TextButton(onClick = onDismiss) { Text("OK", color = Gold) }
+        TextButton(onClick = onDismiss, enabled = armed) { Text(stringResource(Res.string.action_ok), color = if (armed) Gold else TextSecondary) }
     }
 }
+
+/** Success confirmation. Unlike [ErrorToast] there is nothing to re-read, so it clears itself. */
+@Composable
+private fun InfoToast(message: String, onDismiss: () -> Unit) {
+    LaunchedEffect(message) {
+        delay(INFO_TOAST_DURATION_MS)
+        onDismiss()
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Gold.copy(alpha = 0.12f))
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = message,
+            color = Gold,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onDismiss) { Text(stringResource(Res.string.action_ok), color = Gold) }
+    }
+}
+
+private const val INFO_TOAST_DURATION_MS = 3_000L
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -871,20 +1125,9 @@ private fun iconFor(file: SftpFile): ImageVector =
     if (file.isDirectory || file.isSymlink) Icons.Default.Folder
     else Icons.AutoMirrored.Filled.InsertDriveFile
 
-private fun formatSize(bytes: Long): String {
-    if (bytes < 1024) return "${bytes} B"
-    val kb = bytes / 1024.0
-    if (kb < 1024) return "%.1f Ko".format(kb)
-    val mb = kb / 1024.0
-    if (mb < 1024) return "%.1f Mo".format(mb)
-    val gb = mb / 1024.0
-    return "%.2f Go".format(gb)
-}
-
-private fun formatDate(epochMillis: Long): String {
-    if (epochMillis <= 0) return "-"
-    return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.FRANCE).format(Date(epochMillis))
-}
+@Composable
+private fun formatDate(epochMillis: Long): String =
+    if (epochMillis <= 0) "-" else dateTimeText(epochMillis)
 
 @Composable
 private fun SortOrder.displayName(): String = stringResource(when (this) {
@@ -914,9 +1157,10 @@ private fun pickFileForUpload(dialogTitle: String): File? {
 
 /**
  * Swing [JFileChooser] for choosing a local destination for a download.
- * Pre-fills the file name with the remote name. User-confirmed overwrite
- * is delegated to JFileChooser's default behaviour. [dialogTitle] is
- * resolved by the composable caller.
+ * Pre-fills the file name with the remote name. The chooser asks nothing
+ * when the chosen file already exists: the replacement is confirmed
+ * afterwards by [SftpBrowserViewModel.downloadFile], through [ReplaceConfirmDialog].
+ * [dialogTitle] is resolved by the composable caller.
  */
 private fun pickDestinationForDownload(remoteName: String, dialogTitle: String): File? {
     val chooser = JFileChooser().apply {

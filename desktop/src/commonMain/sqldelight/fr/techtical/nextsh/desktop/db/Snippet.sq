@@ -26,6 +26,9 @@ SELECT DISTINCT category FROM snippets WHERE category IS NOT NULL AND deleted = 
 selectById:
 SELECT * FROM snippets WHERE id = ? AND deleted = 0;
 
+selectByIdIncludingDeleted:
+SELECT * FROM snippets WHERE id = ?;
+
 insert:
 INSERT OR REPLACE INTO snippets(id, label, command, category, hostId, createdAt, vectorClock, deleted, deletedAt, updatedAt)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
@@ -39,3 +42,7 @@ UPDATE snippets SET deleted = 1, deletedAt = ?, updatedAt = ?, vectorClock = ? W
 
 delete:
 DELETE FROM snippets WHERE id = ?;
+
+-- Vault wipe: every row, tombstones included. Generated, so that the listeners of the table are notified.
+deleteAll:
+DELETE FROM snippets;

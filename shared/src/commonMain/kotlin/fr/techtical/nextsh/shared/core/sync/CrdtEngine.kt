@@ -25,4 +25,37 @@ object CrdtEngine {
             else -> MergeResult.Conflict(local, remote)
         }
     }
+
+    /**
+     * Resolves a conflict in favor of [local]: returns [local] stamped with a clock that
+     * strictly dominates both its own clock and [remoteClock] (see [VectorClock.supersede]
+     * for why the device tick is mandatory).
+     *
+     * Deleting the pending-conflict marker alone resolves nothing: the two clocks stay
+     * concurrent, so the very next sync detects the same conflict again on both devices.
+     * The returned entry must be written back to the local store the way a synced entry
+     * is, so the next sync sends it as a clean win.
+     *
+     * Payload, [SyncEntry.deleted] and [SyncEntry.deletedAt] are kept: keeping a local
+     * deletion keeps the tombstone. Only [SyncEntry.clock] and [SyncEntry.updatedAt]
+     * change. Pure function: no I/O, no clock access.
+     *
+     * @param local the CURRENT stored entry of this device, never the snapshot in
+     *   `PendingConflict.localJson`: that snapshot predates any edit made since the
+     *   conflict was detected, and writing it back would overwrite those edits on
+     *   both devices.
+     * @param remoteClock clock of the remote version being discarded, decoded from
+     *   `PendingConflict.remoteJson`
+     * @param deviceId id of this device (the one whose user made the choice)
+     * @param nowMs wall-clock time of the choice, in milliseconds
+     */
+    fun <T> keepLocal(
+        local: SyncEntry<T>,
+        remoteClock: VectorClock,
+        deviceId: String,
+        nowMs: Long,
+    ): SyncEntry<T> = local.copy(
+        clock = local.clock.supersede(remoteClock, deviceId, nowMs),
+        updatedAt = nowMs,
+    )
 }

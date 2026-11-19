@@ -41,34 +41,6 @@ class SkSshSignatureTest {
         sig.close()
     }
 
-    @Suppress("DEPRECATION")
-    @Test
-    fun `encodeInner produces correct wire format`() {
-        val rawSig = byteArrayOf(1, 2, 3, 4)
-        val sig = SkSshSignature.create(
-            keyType = SkKeyType.SK_ED25519,
-            rawSignature = rawSig,
-            flags = 0x05, // USER_PRESENT + USER_VERIFIED
-            counter = 256u,
-        )
-
-        val inner = sig.encodeInner()
-        val buf = Buffer.PlainBuffer(inner)
-
-        // string raw_signature
-        val decodedSig = buf.readStringAsBytes()
-        assertArrayEquals(byteArrayOf(1, 2, 3, 4), decodedSig)
-
-        // byte flags
-        assertEquals(0x05.toByte(), buf.readByte())
-
-        // uint32 counter
-        assertEquals(256L, buf.readUInt32())
-
-        inner.fill(0)
-        sig.close()
-    }
-
     @Test
     fun `encodeSignatureBlob produces the PROTOCOL u2f layout for ed25519`() {
         val rawSig = ByteArray(64) { it.toByte() }

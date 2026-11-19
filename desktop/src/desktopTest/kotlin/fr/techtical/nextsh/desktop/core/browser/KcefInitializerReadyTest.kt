@@ -3,6 +3,7 @@
 
 package fr.techtical.nextsh.desktop.core.browser
 
+import fr.techtical.nextsh.desktop.captureLogs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,6 +20,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 /**
  * When [KcefInitializer] publishes [KcefState.Ready]: only once Chromium is really
@@ -109,8 +111,7 @@ class KcefInitializerReadyTest {
         awaitInitializeDone()
 
         val failed = assertIs<KcefState.Failed>(initializer.state.value)
-        assertEquals("Chromium n'a pas terminé son initialisation. Réessayez ou redémarrez NextSH.", failed.reason)
-        assertEquals("Impossible d'initialiser Chromium", failed.title)
+        assertEquals(KcefFailure.Timeout, failed.failure)
         assertEquals(1, starterCalls.get())
         assertEquals(1, readyCalls.get())
     }
@@ -126,7 +127,8 @@ class KcefInitializerReadyTest {
         awaitInitializeDone()
 
         val failed = assertIs<KcefState.Failed>(initializer.state.value)
-        assertEquals("x", failed.reason)
+        assertEquals(KcefFailure.EngineError, failed.failure)
+        assertEquals("x", failed.detail)
         assertEquals(1, starterCalls.get())
         assertEquals(0, readyCalls.get())
     }
@@ -142,10 +144,7 @@ class KcefInitializerReadyTest {
         awaitInitializeDone()
 
         val failed = assertIs<KcefState.Failed>(initializer.state.value)
-        assertEquals(
-            "Un redémarrage de l'application est nécessaire pour finaliser l'initialisation de Chromium.",
-            failed.reason,
-        )
+        assertEquals(KcefFailure.RestartRequired, failed.failure)
         assertEquals(1, starterCalls.get())
         assertEquals(0, readyCalls.get())
     }
@@ -161,7 +160,36 @@ class KcefInitializerReadyTest {
         awaitInitializeDone()
 
         val failed = assertIs<KcefState.Failed>(initializer.state.value)
-        assertEquals("boom", failed.reason)
+        assertEquals(KcefFailure.EngineError, failed.failure)
+        assertEquals("boom", failed.detail)
         assertEquals(0, readyCalls.get())
+    }
+
+    @Test
+    fun `an engine failure reaches the state with its message but the log keeps only the exception class`() {
+        val secretish = "bundle unreadable at corpshare-backup"
+        val viaCallback = newInitializer(
+            starter = { onError, _ -> onError(IllegalStateException(secretish)) },
+            awaitEngineReady = { true },
+        )
+        val viaThrow = newInitializer(
+            starter = { _, _ -> throw IllegalArgumentException(secretish) },
+            awaitEngineReady = { true },
+        )
+
+        val lines = captureLogs {
+            viaCallback.initialize()
+            awaitInitializeDone()
+            viaThrow.initialize()
+            awaitInitializeDone()
+        }
+
+        // The user still sees the reason...
+        assertEquals(secretish, assertIs<KcefState.Failed>(viaCallback.state.value).detail)
+        assertEquals(secretish, assertIs<KcefState.Failed>(viaThrow.state.value).detail)
+        // ...the log carries the class chain, not the message.
+        assertTrue(lines.any { it.contains("KCEF init failed") && it.contains("IllegalStateException") }, "got $lines")
+        assertTrue(lines.any { it.contains("KCEF init exception") && it.contains("IllegalArgumentException") }, "got $lines")
+        assertTrue(lines.none { it.contains("corpshare") || it.contains("unreadable") }, "the message leaked: $lines")
     }
 }

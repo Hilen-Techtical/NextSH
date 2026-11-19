@@ -51,6 +51,36 @@ class DesktopSnippetRepository(db: NextShDatabase) : SnippetRepository {
         )
     }
 
+    /**
+     * Backup restore path, to be called inside a transaction of the caller (not a suspend function on
+     * purpose: a SQLDelight transaction is bound to its thread). NOT [save]: that one restarts the clock
+     * from `{}`, so on an id a peer already holds, `{me: now}` does not dominate `{peer: t}` and the next
+     * sync reports a false conflict.
+     *
+     * The id is looked up tombstones included. A LIVE row that already equals [snippet] is left untouched
+     * (restoring the same backup twice is not an edit). Otherwise the row is written live, with the clock
+     * stored for that id (tombstone included, `{}` for a new id) ticked by this device, so this version
+     * also wins on the peers.
+     */
+    internal fun restoreInTransaction(snippet: Snippet) {
+        val now = System.currentTimeMillis()
+        val existing = q.selectByIdIncludingDeleted(snippet.id).executeAsOneOrNull()
+        if (existing != null && existing.deleted == 0L && toDomain(existing) == snippet) return
+        val newClock = VectorClockCodec.decode(existing?.vectorClock ?: "{}").tick(DeviceIdentity.deviceId(), now)
+        q.insert(
+            id = snippet.id,
+            label = snippet.label,
+            command = snippet.command,
+            category = snippet.category,
+            hostId = snippet.hostId,
+            createdAt = snippet.createdAt,
+            vectorClock = VectorClockCodec.encode(newClock),
+            deleted = 0L,
+            deletedAt = null,
+            updatedAt = now,
+        )
+    }
+
     override suspend fun update(snippet: Snippet) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val existing = q.selectById(snippet.id).executeAsOneOrNull()

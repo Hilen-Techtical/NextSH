@@ -4,6 +4,7 @@
 package fr.techtical.nextsh.desktop.tunnels
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,11 +41,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.composables.icons.lucide.ArrowLeftRight
@@ -51,8 +55,11 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Play
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Square
+import com.composables.icons.lucide.X
 import fr.techtical.nextsh.desktop.components.PageHeader
 import fr.techtical.nextsh.desktop.data.di.DesktopContainer
+import fr.techtical.nextsh.desktop.scope.rememberScreenViewModel
+import fr.techtical.nextsh.desktop.service.StoppedTunnel
 import fr.techtical.nextsh.desktop.theme.Border2
 import fr.techtical.nextsh.desktop.theme.Burgundy
 import fr.techtical.nextsh.desktop.theme.Gold
@@ -63,9 +70,11 @@ import fr.techtical.nextsh.desktop.theme.Spacing
 import fr.techtical.nextsh.desktop.theme.TextDisabled
 import fr.techtical.nextsh.desktop.theme.TextPrimary
 import fr.techtical.nextsh.desktop.theme.TextSecondary
+import fr.techtical.nextsh.desktop.theme.WarningAmber
 import fr.techtical.nextsh.desktop.theme.White
 import fr.techtical.nextsh.shared.domain.model.TunnelStatus
 import fr.techtical.nextsh.desktop.generated.resources.Res
+import fr.techtical.nextsh.desktop.generated.resources.action_ok
 import fr.techtical.nextsh.desktop.generated.resources.action_close
 import fr.techtical.nextsh.desktop.generated.resources.tunnels_action_new
 import fr.techtical.nextsh.desktop.generated.resources.tunnels_action_start_all
@@ -73,6 +82,8 @@ import fr.techtical.nextsh.desktop.generated.resources.tunnels_action_stop_all
 import fr.techtical.nextsh.desktop.generated.resources.tunnels_empty_hint_alt
 import fr.techtical.nextsh.desktop.generated.resources.tunnels_empty_title
 import fr.techtical.nextsh.desktop.generated.resources.tunnels_error_dialog_title
+import fr.techtical.nextsh.desktop.generated.resources.tunnels_stopped_deleted_many
+import fr.techtical.nextsh.desktop.generated.resources.tunnels_stopped_deleted_one
 import fr.techtical.nextsh.desktop.generated.resources.tunnels_subtitle
 import fr.techtical.nextsh.desktop.generated.resources.tunnels_title
 import org.jetbrains.compose.resources.stringResource
@@ -91,11 +102,12 @@ fun TunnelListScreen(
     onAddTunnel: () -> Unit,
     onEditTunnel: (String) -> Unit,
 ) {
-    val viewModel = remember { TunnelListViewModel() }
+    val viewModel = rememberScreenViewModel { TunnelListViewModel() }
     val tunnels by viewModel.tunnels.collectAsState()
     val hosts by viewModel.hosts.collectAsState()
     val states by viewModel.tunnelStates.collectAsState()
     val latencies by viewModel.latenciesByTunnel.collectAsState()
+    val deletionNotice by viewModel.deletionNotice.collectAsState()
     val activeBrowserTunnelId by DesktopContainer.browserSessionHolder.activeTunnelId.collectAsState()
 
     // Errors → AlertDialog (pas de SnackbarHost dans la refonte)
@@ -160,6 +172,15 @@ fun TunnelListScreen(
             },
         )
 
+        // Tunnels stopped because they, or their host, were deleted on another device. Stays until dismissed.
+        if (deletionNotice.isNotEmpty()) {
+            // The lambda holds the list drawn here: a notice that arrives before the click is not dismissed.
+            DeletedTunnelsBanner(
+                tunnels = deletionNotice,
+                onDismiss = { viewModel.dismissDeletionNotice(deletionNotice) },
+            )
+        }
+
         if (tunnels.isEmpty()) {
             EmptyTunnelsState(onAddTunnel = onAddTunnel)
         } else {
@@ -211,10 +232,63 @@ fun TunnelListScreen(
             text = { Text(text = message) },
             confirmButton = {
                 TextButton(onClick = { errorDialog = null }) {
-                    Text(text = "OK")
+                    Text(text = stringResource(Res.string.action_ok))
                 }
             },
         )
+    }
+}
+
+/**
+ * Bandeau d'avertissement : des tunnels en cours ont été arrêtés parce qu'ils (ou leur hôte) ont été
+ * supprimés sur un autre appareil. Même look que le `StatusBanner` des snippets et du vault (pastille +
+ * texte 12sp sur fond teinté α=0.08), en ambre, avec une croix pour le fermer.
+ */
+@Composable
+private fun DeletedTunnelsBanner(tunnels: List<StoppedTunnel>, onDismiss: () -> Unit) {
+    val text = if (tunnels.size == 1) {
+        stringResource(Res.string.tunnels_stopped_deleted_one, tunnels.single().label)
+    } else {
+        stringResource(Res.string.tunnels_stopped_deleted_many, tunnels.size)
+    }
+    val color = WarningAmber
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(color.copy(alpha = 0.08f))
+            .padding(horizontal = Spacing.Xxl, vertical = Spacing.Sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .background(color, RoundedCornerShape(9999.dp)),
+        )
+        Spacer(Modifier.width(Spacing.Sm))
+        Text(
+            text = text,
+            color = color,
+            fontSize = 12.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(Spacing.Sm))
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .pointerHoverIcon(PointerIcon.Hand)
+                .clickable(onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Lucide.X,
+                contentDescription = stringResource(Res.string.action_close),
+                tint = color,
+                modifier = Modifier.size(12.dp),
+            )
+        }
     }
 }
 

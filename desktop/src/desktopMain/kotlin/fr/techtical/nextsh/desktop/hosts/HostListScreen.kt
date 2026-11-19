@@ -50,6 +50,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -90,7 +91,9 @@ import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.Download
 import fr.techtical.nextsh.desktop.components.ConfirmDeleteDialog
 import fr.techtical.nextsh.desktop.components.PageHeader
+import fr.techtical.nextsh.desktop.components.relativeTimeText
 import fr.techtical.nextsh.desktop.data.db.repository.HostFolderWithHosts
+import fr.techtical.nextsh.desktop.scope.rememberScreenViewModel
 import fr.techtical.nextsh.desktop.theme.BioViolet
 import fr.techtical.nextsh.desktop.theme.Border1
 import fr.techtical.nextsh.desktop.theme.Border2
@@ -157,12 +160,8 @@ import fr.techtical.nextsh.desktop.generated.resources.hosts_import_importing
 import fr.techtical.nextsh.desktop.generated.resources.hosts_import_parsing
 import fr.techtical.nextsh.desktop.generated.resources.hosts_import_secret_badge
 import fr.techtical.nextsh.desktop.generated.resources.hosts_import_secret_warning
-import fr.techtical.nextsh.desktop.generated.resources.hosts_relative_just_now
 import fr.techtical.nextsh.desktop.generated.resources.hosts_subtitle
 import fr.techtical.nextsh.desktop.generated.resources.hosts_title
-import fr.techtical.nextsh.desktop.generated.resources.statusbar_relative_days_ago
-import fr.techtical.nextsh.desktop.generated.resources.statusbar_relative_hours_ago
-import fr.techtical.nextsh.desktop.generated.resources.statusbar_relative_minutes_ago
 import fr.techtical.nextsh.desktop.generated.resources.statusbar_relative_never
 import org.jetbrains.compose.resources.stringResource
 import javax.swing.JFileChooser
@@ -180,13 +179,17 @@ fun HostListScreen(
     onImportHost: (() -> Unit)? = null,
     onOpenSnippets: (() -> Unit)? = null,
 ) {
-    val viewModel = remember { HostViewModel() }
+    val viewModel = rememberScreenViewModel { HostViewModel() }
     val foldersWithHosts by viewModel.foldersWithHosts.collectAsState()
     val activeHostIds by viewModel.activeHostIds.collectAsState()
 
     // Import des hôtes depuis Termius / KeePassXC (parsing + preview + import).
     val importViewModel = remember { HostImportViewModel() }
     val importState by importViewModel.state.collectAsState()
+    // An import abandoned by leaving the screen wipes the passwords and passphrases of its preview.
+    DisposableEffect(importViewModel) {
+        onDispose { importViewModel.discard() }
+    }
 
     // État de confirmation de suppression
     var hostToDelete by remember { mutableStateOf<Host?>(null) }
@@ -845,23 +848,13 @@ private fun EmptyHostsPlaceholder(onAddHost: () -> Unit) {
 }
 
 /**
- * Formate un timestamp `Hosts.lastConnectedAt` (epoch ms) en delta
- * relatif court : `< 1 min`, `il y a 12 min`, `il y a 3 h`, `il y a 2 j`.
- * Renvoie la chaîne localisée « jamais » si jamais connecté. Doublon
- * volontaire de la fonction homonyme dans `StatusBar.kt`. Un fichier
- * utility partagé sera extrait quand un 3e usage apparaîtra.
+ * Formate un timestamp `Hosts.lastConnectedAt` (epoch ms) en delta relatif court, ou en date
+ * au-delà de 7 jours (voir `relativeTimeText`). Renvoie la chaîne localisée « jamais » si jamais
+ * connecté.
  */
 @Composable
-private fun formatLastConnected(ts: Long?): String {
-    if (ts == null) return stringResource(Res.string.statusbar_relative_never)
-    val deltaSec = ((System.currentTimeMillis() - ts) / 1000).coerceAtLeast(0)
-    return when {
-        deltaSec < 60 -> stringResource(Res.string.hosts_relative_just_now)
-        deltaSec < 3600 -> stringResource(Res.string.statusbar_relative_minutes_ago, (deltaSec / 60).toInt())
-        deltaSec < 86_400 -> stringResource(Res.string.statusbar_relative_hours_ago, (deltaSec / 3600).toInt())
-        else -> stringResource(Res.string.statusbar_relative_days_ago, (deltaSec / 86_400).toInt())
-    }
-}
+private fun formatLastConnected(ts: Long?): String =
+    if (ts == null) stringResource(Res.string.statusbar_relative_never) else relativeTimeText(ts)
 
 // ─── Import hôtes (Termius / KeePassXC) ─────────────────────────────────────────
 

@@ -8,6 +8,7 @@ import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.ptr.IntByReference
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import java.awt.Window
 import java.util.Locale
 import javax.swing.SwingUtilities
@@ -109,7 +110,7 @@ internal interface Uxtheme : Library {
  * bug-prone workarounds, but the default OS title bar is light-themed even
  * inside a dark Compose app: that's the visual seam this helper closes.
  *
- * On Windows 10 1809–22H1 only `DWMWA_USE_IMMERSIVE_DARK_MODE` (attr 20)
+ * On Windows 10 1809 to 22H1 only `DWMWA_USE_IMMERSIVE_DARK_MODE` (attr 20)
  * applies and we get the standard dark title bar. On Windows 11 22H2+ we
  * additionally paint the caption + border in [NextShTitleBarColor.NearBlack]
  * (0x0F0F0F) so the OS title bar is visually continuous with the Compose
@@ -165,7 +166,7 @@ object WindowsDarkTitleBar {
                 4,
             )
         }.onFailure { e ->
-            Logger.w(TAG, "DWMWA_USE_IMMERSIVE_DARK_MODE failed: ${e.message}")
+            Logger.w(TAG, "DWMWA_USE_IMMERSIVE_DARK_MODE failed (${errorClass(e)})")
         }
 
         // 2. Win 11 22H2+ only: paint caption + border NearBlack to match
@@ -217,7 +218,7 @@ object WindowsDarkTitleBar {
                     User32.SWP_NOACTIVATE or User32.SWP_FRAMECHANGED,
             )
         }.onFailure { e ->
-            Logger.w(TAG, "Hiding the title bar icon failed: ${e.message}")
+            Logger.w(TAG, "Hiding the title bar icon failed (${errorClass(e)})")
         }
     }
 

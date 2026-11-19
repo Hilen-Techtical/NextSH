@@ -3,12 +3,14 @@
 
 package fr.techtical.nextsh.domain.usecase
 
+import fr.techtical.nextsh.core.vault.VaultExport
 import fr.techtical.nextsh.core.vault.VaultExporter
 import io.mockk.coEvery
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertArrayEquals
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
@@ -29,15 +31,16 @@ class ExportVaultUseCaseTest {
     }
 
     @Test
-    fun `success - exporter returns ByteArray, use case returns Result success`() = runTest {
+    fun `success - exporter returns VaultExport, use case returns Result success`() = runTest {
         val passphrase = "my-secure-passphrase".toCharArray()
         val exportedData = byteArrayOf(1, 2, 3, 4, 5)
-        coEvery { vaultExporter.export(passphrase) } returns exportedData
+        coEvery { vaultExporter.export(passphrase) } returns VaultExport(exportedData, notRestorable = 2)
 
         val result = useCase(passphrase)
 
         assertTrue(result.isSuccess)
-        assertArrayEquals(exportedData, result.getOrNull())
+        assertArrayEquals(exportedData, result.getOrNull()!!.bytes)
+        assertEquals(2, result.getOrNull()!!.notRestorable)
     }
 
     @Test
@@ -72,7 +75,7 @@ class ExportVaultUseCaseTest {
         // (caller is responsible). This test documents the actual behavior.
         val passphrase = "my-secure-passphrase".toCharArray()
         val originalPassphrase = passphrase.copyOf()
-        coEvery { vaultExporter.export(passphrase) } returns byteArrayOf(1, 2, 3)
+        coEvery { vaultExporter.export(passphrase) } returns VaultExport(byteArrayOf(1, 2, 3), notRestorable = 0)
 
         val result = useCase(passphrase)
 

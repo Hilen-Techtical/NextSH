@@ -4,6 +4,7 @@
 package fr.techtical.nextsh.desktop.core.security
 
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import java.awt.Window
 import java.util.Locale
 import javax.swing.SwingUtilities
@@ -67,7 +68,7 @@ object WindowSecurityHelper {
                     val ok = runCatching {
                         User32DisplayAffinity.INSTANCE.SetWindowDisplayAffinity(deferredHwnd, affinity)
                     }.getOrElse { e ->
-                        Logger.w(TAG, "SetWindowDisplayAffinity (deferred) failed: ${e.message}")
+                        Logger.w(TAG, "SetWindowDisplayAffinity (deferred) failed (${errorClass(e)})")
                         false
                     }
                     Logger.d(TAG, "SetWindowDisplayAffinity (deferred) enabled=$enabled → $ok")
@@ -82,7 +83,7 @@ object WindowSecurityHelper {
         val ok = runCatching {
             User32DisplayAffinity.INSTANCE.SetWindowDisplayAffinity(hwnd, affinity)
         }.getOrElse { e ->
-            Logger.w(TAG, "SetWindowDisplayAffinity failed: ${e.message}")
+            Logger.w(TAG, "SetWindowDisplayAffinity failed (${errorClass(e)})")
             false
         }
         Logger.d(TAG, "SetWindowDisplayAffinity enabled=$enabled → $ok")
@@ -102,7 +103,7 @@ object WindowSecurityHelper {
             // getWindowPointer returns 0 / Pointer.NULL when the peer is not yet created.
             if (ptr == null || ptr == com.sun.jna.Pointer.NULL) null else ptr
         }.getOrElse { e ->
-            Logger.w(TAG, "getWindowPointer failed: ${e.message}")
+            Logger.w(TAG, "getWindowPointer failed (${errorClass(e)})")
             null
         }
     }

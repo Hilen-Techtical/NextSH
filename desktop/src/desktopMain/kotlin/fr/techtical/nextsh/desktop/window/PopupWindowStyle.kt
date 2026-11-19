@@ -10,6 +10,7 @@ import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.Pointer
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import java.awt.Window
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
@@ -55,7 +56,7 @@ fun PopupRoundedCorners(window: Window, radius: Dp) {
                     arcDiameter,
                     arcDiameter,
                 )
-            }.onFailure { e -> Logger.w(TAG, "window shape failed: ${e.message}") }
+            }.onFailure { e -> Logger.w(TAG, "window shape failed (${errorClass(e)})") }
         }
 
         val resizeListener = object : ComponentAdapter() {
@@ -152,7 +153,7 @@ object WindowsToolWindow {
                             User32.SWP_NOACTIVATE or User32.SWP_FRAMECHANGED,
                     )
                 }
-            }.onFailure { e -> Logger.w(TAG, "toolwindow style failed: ${e.message}") }
+            }.onFailure { e -> Logger.w(TAG, "toolwindow style failed (${errorClass(e)})") }
         }
     }
 }

@@ -27,6 +27,57 @@ class TunnelFormStateTest {
         remotePort = remotePort,
     )
 
+    // ── Remote host, restorable like the ports ───────────────────────────────
+
+    private fun withRemoteHost(type: TunnelType, host: String) = form(type, "8080").copy(remoteHost = host)
+
+    @Test
+    fun `a remote host with an inner space or an invisible character is refused`() {
+        val invisible = String(Character.toChars(0x200B))
+        for (type in listOf(TunnelType.LOCAL_FORWARD, TunnelType.REMOTE_FORWARD)) {
+            for (host in listOf("bad host", "zero${invisible}width", "a".repeat(256))) {
+                assertFalse(withRemoteHost(type, host).isValid, "$type [$host]")
+                assertTrue(withRemoteHost(type, host).remoteHostInvalid, "$type [$host]")
+            }
+        }
+    }
+
+    @Test
+    fun `a remote host with spaces around it is accepted and saved trimmed`() {
+        val padded = withRemoteHost(TunnelType.LOCAL_FORWARD, "  db.internal  ")
+
+        assertTrue(padded.isValid)
+        assertFalse(padded.remoteHostInvalid)
+        assertEquals("db.internal", padded.storedRemoteHost)
+    }
+
+    @Test
+    fun `an empty remote host stays refused for a local forward and is no message for the user`() {
+        val empty = withRemoteHost(TunnelType.LOCAL_FORWARD, "")
+
+        assertFalse(empty.isValid)
+        assertFalse(empty.remoteHostInvalid)
+    }
+
+    @Test
+    fun `SOCKS5 does not depend on the remote host and never saves one a restore would refuse`() {
+        val leftover = withRemoteHost(TunnelType.DYNAMIC_SOCKS5, "bad host")
+
+        assertTrue(leftover.isValid)
+        assertFalse(leftover.remoteHostInvalid)
+        assertEquals("", leftover.storedRemoteHost)
+        assertEquals("127.0.0.1", withRemoteHost(TunnelType.DYNAMIC_SOCKS5, "127.0.0.1").storedRemoteHost)
+    }
+
+    @Test
+    fun `the remote port is bounded from 1 to 65535 except for SOCKS5`() {
+        for (port in listOf("0", "65536", "-1")) {
+            assertFalse(form(TunnelType.LOCAL_FORWARD, "8080", port).isValid, port)
+        }
+        assertTrue(form(TunnelType.LOCAL_FORWARD, "8080", "65535").isValid)
+        assertTrue(form(TunnelType.DYNAMIC_SOCKS5, "8080", "0").isValid)
+    }
+
     // ── isValid ──────────────────────────────────────────────────────────────
 
     @Test

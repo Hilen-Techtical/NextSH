@@ -7,17 +7,21 @@ import android.util.Base64
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.techtical.nextsh.core.auth.EnrollFailure
 import fr.techtical.nextsh.core.auth.Fido2EnrollManager
 import fr.techtical.nextsh.domain.model.SshKey
 import fr.techtical.nextsh.domain.model.SshKeyType
 import fr.techtical.nextsh.domain.repository.SshKeyRepository
 import fr.techtical.nextsh.shared.core.ssh.fido2.SkKeyType
 import fr.techtical.nextsh.shared.core.ssh.fido2.SkSshPublicKey
+import fr.techtical.nextsh.shared.util.LogId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import java.util.Arrays
 import java.util.UUID
 import javax.inject.Inject
 
@@ -28,7 +32,7 @@ import javax.inject.Inject
  *   Idle          → Formulaire (label + rpId + PIN optionnel), bouton "Brancher / Approcher"
  *   WaitingForKey → En attente de la clé physique (USB ou NFC) + enrôlement en une passe
  *   Success       → Clé enrôlée + sauvegardée dans le vault
- *   Error         → Message d'erreur + bouton réessayer
+ *   Error         → Raison de l'échec (l'écran la traduit) + bouton réessayer
  *
  * Le PIN est collecté dans le formulaire AVANT de brancher/approcher la clé.
  * Cela permet un flow NFC-safe : detect + enroll se font dans la même connexion.
@@ -58,16 +62,18 @@ class Fido2EnrollViewModel @Inject constructor(
         data class Success(val savedKey: SshKey) : EnrollState()
 
         /**
-         * Erreur.
-         * @param message      Message humain.
-         * @param canRetry     Si vrai, le bouton "Réessayer" est affiché.
-         * @param isPinRequired Si vrai, indique que la clé exige un PIN non fourni.
+         * The enrollment failed, for [reason]. A reason and not a sentence: the screen turns it
+         * into text in the language of the user (see `enrollFailureMessageRes`).
          */
-        data class Error(
-            val message: String,
-            val canRetry: Boolean = true,
-            val isPinRequired: Boolean = false,
-        ) : EnrollState()
+        data class Error(val reason: EnrollFailure) : EnrollState() {
+            /** Whether "Try again" is offered: not for a key that cannot do it, whatever is tried. */
+            val canRetry: Boolean
+                get() = reason != EnrollFailure.PinBlocked && reason != EnrollFailure.UnsupportedKey
+
+            /** Whether the PIN field of the form is what to look at: no PIN was given, or it was refused. */
+            val isPinRequired: Boolean
+                get() = reason is EnrollFailure.PinRequired || reason is EnrollFailure.PinIncorrect
+        }
     }
 
     private val _state = MutableStateFlow<EnrollState>(EnrollState.Idle)
@@ -88,18 +94,6 @@ class Fido2EnrollViewModel @Inject constructor(
     fun onLabelChange(value: String) { label = value }
     fun onRpIdChange(value: String) { rpId = value.ifBlank { "ssh:" } }
 
-    // ── Gestion cycle de vie ──────────────────────────────────────────────────
-
-    /** Délègue à [Fido2EnrollManager.startListening]. Appeler depuis DisposableEffect. */
-    fun startListening(activity: android.app.Activity) {
-        fido2EnrollManager.startListening(activity)
-    }
-
-    /** Délègue à [Fido2EnrollManager.stopListening]. Appeler depuis DisposableEffect.onDispose. */
-    fun stopListening() {
-        fido2EnrollManager.stopListening()
-    }
-
     // ── Actions publiques ─────────────────────────────────────────────────────
 
     /**
@@ -107,20 +101,35 @@ class Fido2EnrollViewModel @Inject constructor(
      *
      * Le PIN est passé en argument depuis le formulaire (peut être null/vide si la clé
      * n'en a pas). Si la clé exige un PIN et qu'aucun n'a été fourni, l'état passe à
-     * [EnrollState.Error] avec [isPinRequired=true] pour inviter l'utilisateur à ressaisir.
+     * [EnrollState.Error] avec [EnrollFailure.PinRequired] pour inviter l'utilisateur à ressaisir.
      *
-     * @param pin PIN saisi par l'utilisateur. Null ou vide si la clé n'a pas de PIN.
-     *            Wipé automatiquement par [Fido2EnrollManager.detectAndEnroll].
+     * @param pin PIN saisi par l'utilisateur. Null ou vide si la clé n'a pas de PIN: un tableau vide
+     *            est pris pour l'absence de PIN, la clé ne le verrait pas autrement.
+     *            This ViewModel owns the array from here on and zeroes it, whatever the outcome
+     *            ([Fido2EnrollManager.detectAndEnroll] zeroes it too, once it has it).
+     *
+     * Ignored while an enrollment is under way (or done): a second press during the fade of the
+     * screen would otherwise start a second one on the same key.
      */
     fun startEnroll(pin: CharArray?) {
+        val current = _state.value
+        if (current is EnrollState.WaitingForKey || current is EnrollState.Success) {
+            // Nothing will use this PIN either: it does not stay in memory as typed.
+            pin?.let(::wipe)
+            return
+        }
         if (label.isBlank()) {
-            _state.value = EnrollState.Error("Le nom de la clé ne peut pas être vide")
+            // Nothing will use the PIN: it does not stay in memory as typed.
+            pin?.let(::wipe)
+            _state.value = EnrollState.Error(EnrollFailure.NameMissing)
             return
         }
         _state.value = EnrollState.WaitingForKey
 
         val currentLabel = label.trim()
         val currentRpId = rpId.trim().ifBlank { "ssh:" }
+        // An empty array is no PIN (the manager would ask the key to check one): null says so.
+        val secret = pin?.takeIf { it.isNotEmpty() }
 
         viewModelScope.launch {
             try {
@@ -128,59 +137,39 @@ class Fido2EnrollViewModel @Inject constructor(
                     label = currentLabel,
                     rpId = currentRpId,
                     rpName = "NextSH",
-                    pin = pin,
+                    pin = secret,
                 )
                 try {
                     val sshKey = buildSshKey(currentLabel, currentRpId, result)
                     sshKeyRepository.save(sshKey)
-                    Timber.i("Fido2Enroll: key saved id=${sshKey.id} label=${sshKey.label} type=${result.keyType}")
+                    Timber.i("Fido2Enroll: key saved id=${LogId.of(sshKey.id)} type=${result.keyType}")
                     _state.value = EnrollState.Success(savedKey = sshKey)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // The key made the credential, the vault did not keep it: not a failure of the key.
+                    Timber.e("Fido2Enroll: key not saved, %s", e.javaClass.simpleName)
+                    _state.value = EnrollState.Error(EnrollFailure.NotSaved)
                 } finally {
                     result.wipe()
                 }
-            } catch (e: kotlinx.coroutines.CancellationException) {
+            } catch (e: CancellationException) {
                 // Re-throw : viewModelScope cancel intentionnel (sortie d'écran).
                 // Ne PAS afficher d'erreur UI.
                 throw e
-            } catch (e: Fido2EnrollManager.EnrollError.PinRequired) {
-                _state.value = EnrollState.Error(
-                    message = "Cette clé est protégée par un PIN. Saisissez-le dans le formulaire puis réessayez.",
-                    canRetry = true,
-                    isPinRequired = true,
-                )
-            } catch (e: Fido2EnrollManager.EnrollError.PinInvalid) {
-                _state.value = EnrollState.Error(
-                    message = "PIN incorrect. Vérifiez votre PIN et réessayez.",
-                    canRetry = true,
-                    isPinRequired = true,
-                )
-            } catch (e: Fido2EnrollManager.EnrollError.PinBlocked) {
-                _state.value = EnrollState.Error(
-                    message = "Clé bloquée après trop d'essais PIN incorrects. Un reset complet est requis.",
-                    canRetry = false,
-                )
-            } catch (e: Fido2EnrollManager.EnrollError.UnsupportedAlgorithm) {
-                _state.value = EnrollState.Error(
-                    message = "Cette clé ne supporte ni Ed25519 ni ECDSA P-256. Seules les YubiKey 5+ sont compatibles.",
-                    canRetry = false,
-                )
-            } catch (e: Fido2EnrollManager.EnrollError.Timeout) {
-                _state.value = EnrollState.Error(
-                    message = "Aucune clé détectée en 60 secondes. Branchez votre YubiKey ou approchez-la du téléphone (NFC).",
-                )
             } catch (e: Fido2EnrollManager.EnrollError) {
-                _state.value = EnrollState.Error(
-                    message = e.message ?: "Erreur d'enrôlement",
-                )
+                _state.value = EnrollState.Error(e.failure)
             } catch (e: Exception) {
-                // CancellationException déjà filtrée plus haut
-                Timber.e(e, "Fido2Enroll: unexpected error")
-                _state.value = EnrollState.Error(
-                    message = "Erreur inattendue : ${e.localizedMessage}",
-                )
+                // CancellationException déjà filtrée plus haut. Only the kind of failure is logged.
+                Timber.e("Fido2Enroll: unexpected error, %s", e.javaClass.simpleName)
+                _state.value = EnrollState.Error(EnrollFailure.Unexpected)
+            } finally {
+                pin?.let(::wipe)
             }
         }
     }
+
+    private fun wipe(pin: CharArray) = Arrays.fill(pin, '\u0000')
 
     /** Retour à l'état Idle pour une nouvelle tentative. */
     fun reset() {

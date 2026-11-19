@@ -10,7 +10,7 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
-import fr.techtical.nextsh.shared.core.sync.SyncScheduler
+import fr.techtical.nextsh.shared.util.errorClass
 import timber.log.Timber
 
 private const val TAG = "SyncWorker"
@@ -29,17 +29,19 @@ class SyncWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        Timber.d(TAG, "doWork: starting sync cycle")
+        Timber.tag(TAG).d("doWork: starting sync cycle")
         return try {
             val entryPoint = EntryPointAccessors.fromApplication(
                 applicationContext,
                 SyncWorkerEntryPoint::class.java,
             )
-            entryPoint.syncScheduler().forceSync()
-            Timber.d(TAG, "doWork: sync cycle completed")
+            // Background entry: returns at once (success, no retry cascade) while the vault is
+            // not open in this process, instead of trying to open it with nobody to authenticate.
+            entryPoint.syncScheduler().syncInBackground()
+            Timber.tag(TAG).d("doWork: sync cycle completed")
             Result.success()
         } catch (e: Exception) {
-            Timber.w(TAG, "doWork, sync cycle failed: ${e.message}")
+            Timber.tag(TAG).w("doWork, sync cycle failed (${errorClass(e)})")
             // Delegate to WorkManager retry logic (max 3 auto-retries by default).
             // The scheduler itself does not retry above this: LanSyncClient handles its own
             // 3-attempt exponential back-off at the network level.
@@ -51,5 +53,6 @@ class SyncWorker(
 @EntryPoint
 @InstallIn(SingletonComponent::class)
 interface SyncWorkerEntryPoint {
-    fun syncScheduler(): SyncScheduler
+    /** The concrete scheduler (same singleton as the [fr.techtical.nextsh.shared.core.sync.SyncScheduler] binding): the worker needs the background entry. */
+    fun syncScheduler(): AndroidSyncScheduler
 }

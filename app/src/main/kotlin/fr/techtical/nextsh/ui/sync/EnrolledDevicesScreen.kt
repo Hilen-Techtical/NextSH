@@ -3,7 +3,6 @@
 
 package fr.techtical.nextsh.ui.sync
 
-import android.text.format.DateUtils
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,9 +32,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -51,13 +48,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import kotlinx.coroutines.launch
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Monitor
 import com.composables.icons.lucide.RefreshCcw
@@ -66,6 +63,8 @@ import com.composables.icons.lucide.Users
 import fr.techtical.nextsh.R
 import fr.techtical.nextsh.shared.core.sync.EnrolledDevice
 import fr.techtical.nextsh.shared.core.sync.Platform
+import fr.techtical.nextsh.ui.components.NextShMessage
+import fr.techtical.nextsh.ui.components.relativeTimeText
 import fr.techtical.nextsh.ui.theme.Border1
 import fr.techtical.nextsh.ui.theme.ErrorRed
 import fr.techtical.nextsh.ui.theme.Gold
@@ -81,6 +80,18 @@ import fr.techtical.nextsh.ui.theme.TextDisabled
 import fr.techtical.nextsh.ui.theme.TextPrimary
 import fr.techtical.nextsh.ui.theme.TextSecondary
 import fr.techtical.nextsh.ui.theme.White
+
+/**
+ * Gravité d un message de l écran : un échec de révocation et un appareil introuvable sont des
+ * erreurs (rouges, 7 s : le second porte le conseil réseau et VPN), le reste est une information.
+ */
+internal fun enrolledMessageIsError(event: EnrolledDevicesViewModel.Event): Boolean = when (event) {
+    is EnrolledDevicesViewModel.Event.Error,
+    is EnrolledDevicesViewModel.Event.SearchNotFound -> true
+    is EnrolledDevicesViewModel.Event.Revoked,
+    is EnrolledDevicesViewModel.Event.SearchStarted,
+    is EnrolledDevicesViewModel.Event.SearchFound -> false
+}
 
 /**
  * EnrolledDevicesScreen : refonte Phase 3.2 (DA Techtical).
@@ -99,14 +110,16 @@ fun EnrolledDevicesScreen(
 ) {
     val devices by viewModel.devices.collectAsState()
     val searchingDeviceId by viewModel.searchingDeviceId.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
+    // Un nouveau message remplace l ancien : « Recherche de X… » cède la place à son résultat dès
+    // qu il arrive, et le collecteur d événements n attend jamais la disparition d un message.
+    var message by remember { mutableStateOf<String?>(null) }
+    var messageIsError by remember { mutableStateOf(false) }
     var deviceToRevoke by remember { mutableStateOf<EnrolledDevice?>(null) }
     val context = LocalContext.current
 
     LaunchedEffect(Unit) {
-        val effectScope = this
         viewModel.events.collect { event ->
-            val message = when (event) {
+            val text = when (event) {
                 is EnrolledDevicesViewModel.Event.Revoked ->
                     context.getString(R.string.enrolled_status_revoked, event.deviceName)
                 is EnrolledDevicesViewModel.Event.Error ->
@@ -118,27 +131,18 @@ fun EnrolledDevicesScreen(
                 is EnrolledDevicesViewModel.Event.SearchNotFound ->
                     context.getString(R.string.enrolled_search_not_found, event.deviceName)
             }
-            val duration = when (event) {
-                // The "not found" message carries the actionable hint (same network? VPN?):
-                // it needs long enough to be read.
-                is EnrolledDevicesViewModel.Event.SearchNotFound -> SnackbarDuration.Long
-                else -> SnackbarDuration.Short
-            }
-            // Retire the in-flight snackbar before showing the next one: "Recherche de X…" must
-            // give way to its own result the moment it arrives, not linger for its full duration.
-            snackbarHostState.currentSnackbarData?.dismiss()
-            // Shown from a child coroutine on purpose: showSnackbar() suspends until the snackbar
-            // is dismissed, so awaiting it here would block the collector and delay the result
-            // event by the full display duration of the "searching" message.
-            effectScope.launch { snackbarHostState.showSnackbar(message, duration = duration) }
+            // « Introuvable » porte le conseil réseau et VPN : en erreur, donc affiché 7 s.
+            messageIsError = enrolledMessageIsError(event)
+            message = text
         }
     }
 
     val total = devices.size
-    val subtitle = when {
-        total == 0 -> "Aucun appareil enrôlé"
-        total == 1 -> "1 appareil enrôlé"
-        else -> "$total appareils enrôlés"
+    // The zero case is its own sentence: French plural "one" covers 0 and 1.
+    val subtitle = if (total == 0) {
+        stringResource(R.string.enrolled_empty)
+    } else {
+        pluralStringResource(R.plurals.enrolled_devices_count, total, total)
     }
 
     Scaffold(
@@ -172,7 +176,15 @@ fun EnrolledDevicesScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = NearBlack),
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        // Le slot du Scaffold superpose le message en bas de la liste sans la redimensionner.
+        snackbarHost = {
+            NextShMessage(
+                message   = message,
+                isError   = messageIsError,
+                onDismiss = { message = null },
+                modifier  = Modifier.padding(Spacing.Md),
+            )
+        },
         containerColor = NearBlack,
     ) { padding ->
         if (devices.isEmpty()) {
@@ -304,7 +316,7 @@ private fun DeviceCard(
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             val hostColor = if (device.lastKnownHost == null) ErrorRed else TextPrimary
             MetaLine(
-                label = "HOST",
+                label = stringResource(R.string.enrolled_meta_host),
                 value = device.lastKnownHost ?: "-",
                 valueColor = hostColor,
             )
@@ -317,12 +329,12 @@ private fun DeviceCard(
                 value = device.tlsCertFingerprint?.take(16) ?: "-",
             )
             MetaLine(
-                label = "ENROLLED",
-                value = relativeTime(device.enrolledAt),
+                label = stringResource(R.string.enrolled_meta_enrolled),
+                value = relativeTimeText(device.enrolledAt),
             )
             MetaLine(
-                label = "LAST SYNC",
-                value = device.lastSyncAt?.let { relativeTime(it) }
+                label = stringResource(R.string.enrolled_meta_last_sync),
+                value = device.lastSyncAt?.let { relativeTimeText(it) }
                     ?: stringResource(R.string.enrolled_last_sync_never),
             )
         }
@@ -403,16 +415,30 @@ private fun PlatformBadge(platform: Platform) {
     }
 }
 
+/**
+ * Minimum width of the label column, in dp. It is a floor, not a width that follows the font scale:
+ * a width in sp converted to dp does not follow the text either, because Android 14+ scales sp
+ * non-linearly, so at 130 % the label outgrew it and "DERNIÈRE SYNC" was cut. The longest label
+ * (13 characters of mono 9sp plus spacing, about 77dp at the normal size) fits under this floor, so
+ * the values line up; with a larger font a long label widens its own line and pushes its value, it is
+ * never cut (see [MetaLine]).
+ */
+private val MetaLabelMinWidth = 80.dp
+
 @Composable
 private fun MetaLine(label: String, value: String, valueColor: Color = TextSecondary) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
-            text = label,
+            // Capitals at display time (Locale.ROOT): the resources stay in sentence case.
+            text = label.uppercase(),
             color = TextDisabled,
             fontFamily = JetBrainsMonoFamily,
             fontSize = 9.sp,
             letterSpacing = 0.5.sp,
-            modifier = Modifier.width(72.dp),
+            maxLines = 1,
+            softWrap = false,
+            // The gap is outside the floor: padding first, then the minimum width of the label itself.
+            modifier = Modifier.padding(end = Spacing.Sm).widthIn(min = MetaLabelMinWidth),
         )
         Text(
             text = value,
@@ -462,10 +488,3 @@ private fun Platform.icon(): ImageVector = when (this) {
     Platform.ANDROID -> Lucide.Smartphone
     Platform.DESKTOP -> Lucide.Monitor
 }
-
-private fun relativeTime(timestampMs: Long): String =
-    DateUtils.getRelativeTimeSpanString(
-        timestampMs,
-        System.currentTimeMillis(),
-        DateUtils.MINUTE_IN_MILLIS,
-    ).toString()

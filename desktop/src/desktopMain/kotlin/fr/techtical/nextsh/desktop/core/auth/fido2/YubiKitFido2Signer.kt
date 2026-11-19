@@ -8,8 +8,7 @@ import java.security.MessageDigest
 /**
  * Adapte [YubiKitFidoManager] vers l'interface [Fido2Signer].
  *
- * Permet à [fr.techtical.nextsh.desktop.core.ssh.fido2.SkFido2PrivateKey] et
- * [fr.techtical.nextsh.desktop.core.ssh.fido2.SkFido2Signature] de dépendre
+ * Permet à [fr.techtical.nextsh.desktop.core.ssh.DesktopSshSessionManager] de dépendre
  * de l'interface [Fido2Signer] (testable) plutôt que de la classe concrète
  * [YubiKitFidoManager] (qui requiert PC/SC physique).
  *

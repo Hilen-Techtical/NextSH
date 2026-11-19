@@ -5,6 +5,9 @@ package fr.techtical.nextsh.core.ssh
 
 import fr.techtical.nextsh.domain.model.SshKey
 import fr.techtical.nextsh.domain.model.SshKeyType
+import fr.techtical.nextsh.shared.core.ssh.OpenSshPrivateKeyWriter
+import fr.techtical.nextsh.shared.util.LogId
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import net.schmizz.sshj.common.KeyType
@@ -72,22 +75,25 @@ class SshKeyManager @Inject constructor() : fr.techtical.nextsh.shared.domain.ss
             SshKeyType.ECDSA_256 -> generateEcdsaKeyPair("secp256r1")
             SshKeyType.ECDSA_384 -> generateEcdsaKeyPair("secp384r1")
             SshKeyType.ECDSA_521 -> generateEcdsaKeyPair("secp521r1")
+            // An sk-* key pair is not made here: the private half never leaves the security key, so
+            // there is no software key pair to generate. The enrollment screen has the key make the
+            // credential (Fido2EnrollManager) and saves its public half, never this function.
             SshKeyType.SK_ED25519,
             SshKeyType.SK_ECDSA_256 -> throw IllegalArgumentException(
-                "Les clés FIDO2 (sk-*) ne peuvent pas être générées in-app : utilisez ssh-keygen sur un poste avec la clé matérielle"
+                "sk-* keys are made on a security key by the FIDO2 enrollment, not generated as a software key pair"
             )
         }
 
         val publicKeyOpenSsh = formatPublicKeyOpenSsh(keyPair, keyType)
         val privateKeyPem = if (keyType == SshKeyType.ED25519) {
-            formatEd25519OpenSshV1(keyPair, label)
+            formatEd25519OpenSshV1(keyPair)
         } else {
             formatPrivateKeyPem(keyPair)
         }
 
         val id = UUID.randomUUID().toString()
 
-        Timber.i("Generated $keyType key pair: $label")
+        Timber.i("Generated $keyType key pair id=${LogId.of(id)}")
 
         GeneratedKeyPair(
             sshKey = SshKey(
@@ -121,7 +127,7 @@ class SshKeyManager @Inject constructor() : fr.techtical.nextsh.shared.domain.ss
             "${keyType.toString()} $encoded nextsh-imported"
         } catch (e: Exception) {
             passphrase?.fill('\u0000')
-            Timber.e(e, "Failed to extract public key from PEM")
+            Timber.e("Failed to extract public key from PEM (${errorClass(e)})")
             null
         }
     }
@@ -145,6 +151,20 @@ class SshKeyManager @Inject constructor() : fr.techtical.nextsh.shared.domain.ss
         // Charger la clé privée normalement
         val baseProvider = loadKeyProviderFromString(privateKeyPem, passphrase)
 
+        val certPublicKey = readCertificatePublicKey(certificatePem)
+
+        Timber.d("Certificate loaded, algo: ${certPublicKey.algorithm}")
+
+        // Wrapper : retourne le cert comme PublicKey, la clé privée pour signer
+        return object : net.schmizz.sshj.userauth.keyprovider.KeyProvider {
+            override fun getPublic(): java.security.PublicKey = certPublicKey
+            override fun getPrivate(): java.security.PrivateKey = baseProvider.private
+            override fun getType(): net.schmizz.sshj.common.KeyType =
+                net.schmizz.sshj.common.KeyType.fromKey(certPublicKey)
+        }
+    }
+
+    internal fun readCertificatePublicKey(certificatePem: String): java.security.PublicKey {
         // Parser le certificat OpenSSH :
         // format attendu : "<algo> <base64> [comment]"
         val certLine = certificatePem.trim().lines()
@@ -156,17 +176,13 @@ class SshKeyManager @Inject constructor() : fr.techtical.nextsh.shared.domain.ss
         val certBase64 = parts[1]
 
         val certBytes = java.util.Base64.getDecoder().decode(certBase64)
-        val certPublicKey = net.schmizz.sshj.common.Buffer.PlainBuffer(certBytes)
-            .readPublicKey()
-
-        Timber.d("Certificate loaded, algo: ${certPublicKey.algorithm}")
-
-        // Wrapper : retourne le cert comme PublicKey, la clé privée pour signer
-        return object : net.schmizz.sshj.userauth.keyprovider.KeyProvider {
-            override fun getPublic(): java.security.PublicKey = certPublicKey
-            override fun getPrivate(): java.security.PrivateKey = baseProvider.private
-            override fun getType(): net.schmizz.sshj.common.KeyType =
-                net.schmizz.sshj.common.KeyType.fromKey(certPublicKey)
+        // SSHJ allocates the length announced in the blob without bounding it: a certificate that
+        // came from a backup can announce gigabytes. An OutOfMemoryError there is an unreadable
+        // certificate, same path as an invalid one, nothing of its content in the message.
+        return try {
+            net.schmizz.sshj.common.Buffer.PlainBuffer(certBytes).readPublicKey()
+        } catch (e: OutOfMemoryError) {
+            throw IllegalArgumentException("Certificat illisible")
         }
     }
 
@@ -225,31 +241,6 @@ class SshKeyManager @Inject constructor() : fr.techtical.nextsh.shared.domain.ss
         return "${sshKeyType.toString()} $encoded $comment"
     }
 
-    /**
-     * Crée un KeyProvider SSHJ backed par une clé du Keystore Android.
-     * La clé privée reste dans le Keystore ; les opérations de signature
-     * passent par le Keystore hardware (TEE/StrongBox).
-     *
-     * IMPORTANT: L'appelant doit d'abord authentifier via BiometricPrompt
-     * avant d'utiliser ce KeyProvider pour la signature SSH.
-     *
-     * @param alias Alias de la clé dans le Keystore Android
-     * @param publicKey Clé publique correspondante (pour envoyer au serveur)
-     * @param privateKey Clé privée du Keystore (ne quitte pas le hardware)
-     */
-    fun getKeystoreKeyProvider(
-        alias: String,
-        publicKey: java.security.PublicKey,
-        privateKey: java.security.PrivateKey,
-    ): net.schmizz.sshj.userauth.keyprovider.KeyProvider {
-        return object : net.schmizz.sshj.userauth.keyprovider.KeyProvider {
-            override fun getPublic(): java.security.PublicKey = publicKey
-            override fun getPrivate(): java.security.PrivateKey = privateKey
-            override fun getType(): net.schmizz.sshj.common.KeyType =
-                net.schmizz.sshj.common.KeyType.fromKey(publicKey)
-        }
-    }
-
     // ── Key generation ──────────────────────────────────────────────────────────
 
     private fun generateEd25519KeyPair(): KeyPair {
@@ -300,50 +291,17 @@ class SshKeyManager @Inject constructor() : fr.techtical.nextsh.shared.domain.ss
     }
 
     /**
-     * Serialises an Ed25519 keypair in OpenSSH v1 format: the only format SSHJ
-     * 0.38.0 can round-trip for Ed25519 (PKCS8 chokes on OID 1.3.101.112).
-     * Mirrors the Desktop implementation; see `DesktopSshKeyManager` for the
-     * format spec reference.
+     * Serialises an Ed25519 keypair in OpenSSH v1 format (the only one SSHJ 0.38.0 can round-trip for
+     * Ed25519: its PKCS8 reader chokes on OID 1.3.101.112), with the writer shared by both platforms.
+     * The comment is the constant [GENERATED_PRIVATE_COMMENT]: the label typed by the user never enters
+     * the private part of the file.
      */
-    private fun formatEd25519OpenSshV1(keyPair: KeyPair, comment: String): String {
+    private fun formatEd25519OpenSshV1(keyPair: KeyPair): String {
         val privKey = keyPair.private as net.i2p.crypto.eddsa.EdDSAPrivateKey
-        val pubKey = keyPair.public as net.i2p.crypto.eddsa.EdDSAPublicKey
-        val seed = privKey.seed
-        val A = pubKey.abyte
+        return OpenSshPrivateKeyWriter.ed25519(privKey.seed, GENERATED_PRIVATE_COMMENT)
+    }
 
-        val publicKeyBlock = net.schmizz.sshj.common.Buffer.PlainBuffer().apply {
-            putString("ssh-ed25519")
-            putBytes(A)
-        }.compactData
-
-        val checkInt = java.security.SecureRandom().nextInt()
-        val privateBuf = net.schmizz.sshj.common.Buffer.PlainBuffer()
-        privateBuf.putUInt32(checkInt.toLong() and 0xFFFFFFFFL)
-        privateBuf.putUInt32(checkInt.toLong() and 0xFFFFFFFFL)
-        privateBuf.putString("ssh-ed25519")
-        privateBuf.putBytes(A)
-        privateBuf.putBytes(seed + A)
-        privateBuf.putString(comment.ifBlank { "nextsh-generated" })
-        var padByte = 1
-        while (privateBuf.wpos() % 8 != 0) {
-            privateBuf.putByte(padByte++.toByte())
-        }
-        val privateSection = privateBuf.compactData
-
-        val container = net.schmizz.sshj.common.Buffer.PlainBuffer()
-        container.putRawBytes("openssh-key-v1\u0000".toByteArray(Charsets.ISO_8859_1))
-        container.putString("none")
-        container.putString("none")
-        container.putString("")
-        container.putUInt32(1L)
-        container.putBytes(publicKeyBlock)
-        container.putBytes(privateSection)
-
-        val b64 = Base64.getEncoder().encodeToString(container.compactData)
-        return buildString {
-            appendLine("-----BEGIN OPENSSH PRIVATE KEY-----")
-            b64.chunked(70).forEach { appendLine(it) }
-            appendLine("-----END OPENSSH PRIVATE KEY-----")
-        }
+    private companion object {
+        const val GENERATED_PRIVATE_COMMENT = "nextsh-generated"
     }
 }

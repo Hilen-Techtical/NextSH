@@ -55,16 +55,16 @@ class SidebarHostStatusTest {
         SessionTab(tabId = tabId, host = host(hostId), content = content)
 
     private fun connecting(tabId: String, hostId: String) =
-        tab(tabId, hostId, TabContent.Terminal(theme, TerminalTabStatus.Connecting))
+        tab(tabId, hostId, TabContent.Terminal(theme, TerminalTabStatus.Connecting, host(hostId)))
 
     private fun connected(tabId: String, hostId: String) =
-        tab(tabId, hostId, TabContent.Sftp(linkedSshSessionId = "ssh-$tabId", state = SftpTabState.Open(cwd = "/home")))
+        tab(tabId, hostId, TabContent.Sftp(linkedSshSessionId = "ssh-$tabId", state = SftpTabState.Open(cwd = "/home"), host = host(hostId)))
 
     private fun error(tabId: String, hostId: String) =
-        tab(tabId, hostId, TabContent.Terminal(theme, TerminalTabStatus.Error("boom")))
+        tab(tabId, hostId, TabContent.Terminal(theme, TerminalTabStatus.Error("boom"), host(hostId)))
 
     private fun disconnected(tabId: String, hostId: String) =
-        tab(tabId, hostId, TabContent.Terminal(theme, TerminalTabStatus.Disconnected("gone")))
+        tab(tabId, hostId, TabContent.Terminal(theme, TerminalTabStatus.Disconnected("gone"), host(hostId)))
 
     // ── sessionStatusPriority ────────────────────────────────────────────────
 

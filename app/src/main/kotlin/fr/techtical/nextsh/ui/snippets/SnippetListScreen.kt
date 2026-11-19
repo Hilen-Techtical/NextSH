@@ -16,10 +16,12 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,6 +39,9 @@ import fr.techtical.nextsh.R
 import fr.techtical.nextsh.domain.model.Host
 import fr.techtical.nextsh.domain.model.Snippet
 import fr.techtical.nextsh.ui.components.ConfirmDeleteDialog
+import fr.techtical.nextsh.ui.components.NextShMessage
+import fr.techtical.nextsh.ui.components.SavedTextLimits
+import fr.techtical.nextsh.ui.components.boundedTextSaver
 import fr.techtical.nextsh.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,18 +52,17 @@ fun SnippetListScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val hosts by viewModel.hosts.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
-
-    LaunchedEffect(uiState.error, uiState.successMessage) {
-        val msg = uiState.error ?: uiState.successMessage
-        if (msg != null) {
-            snackbarHostState.showSnackbar(message = msg, duration = SnackbarDuration.Short)
-            viewModel.clearMessage()
-        }
-    }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        // Le slot du Scaffold superpose le message en bas de la liste sans la redimensionner.
+        snackbarHost = {
+            NextShMessage(
+                message   = uiState.error ?: uiState.successMessage,
+                isError   = uiState.error != null,
+                onDismiss = viewModel::clearMessage,
+                modifier  = Modifier.padding(Spacing.Md),
+            )
+        },
         topBar = {
             TopAppBar(
                 title = {
@@ -73,7 +77,7 @@ fun SnippetListScreen(
                         val total = uiState.snippets.size
                         if (total > 0) {
                             Text(
-                                text       = if (total == 1) "1 snippet" else "$total snippets",
+                                text       = pluralStringResource(R.plurals.snippet_list_count, total, total),
                                 fontFamily = JetBrainsMonoFamily,
                                 fontSize   = 11.sp,
                                 color      = TextDisabled,
@@ -379,14 +383,34 @@ private fun SnippetEditSheet(
     onDismiss: () -> Unit,
     onSave: (label: String, command: String, category: String?, hostId: String?) -> Unit,
 ) {
-    var label    by remember(snippet) { mutableStateOf(snippet?.label ?: "") }
-    var command  by remember(snippet) { mutableStateOf(snippet?.command ?: "") }
-    var category by remember(snippet) { mutableStateOf(snippet?.category ?: "") }
-    var selectedHostId by remember(snippet) { mutableStateOf(snippet?.hostId) }
+    // Saveable par identifiant : la feuille reste ouverte à la rotation (le ViewModel la tient) et ses
+    // champs gardent la saisie. Textes bornés : un très gros texte collé ne doit pas faire échouer la
+    // sauvegarde d'état de l'activité. Le contenu d'un snippet est déjà en clair en base.
+    var label by rememberSaveable(snippet?.id, stateSaver = boundedTextSaver(SavedTextLimits.LABEL_BYTES)) {
+        mutableStateOf(snippet?.label ?: "")
+    }
+    var command by rememberSaveable(snippet?.id, stateSaver = boundedTextSaver(SavedTextLimits.COMMAND_BYTES)) {
+        mutableStateOf(snippet?.command ?: "")
+    }
+    var category by rememberSaveable(snippet?.id, stateSaver = boundedTextSaver(SavedTextLimits.LABEL_BYTES)) {
+        mutableStateOf(snippet?.category ?: "")
+    }
+    var selectedHostId by rememberSaveable(snippet?.id) { mutableStateOf(snippet?.hostId) }
     var hostDropdownExpanded by remember { mutableStateOf(false) }
 
     val selectedHostLabel = hosts.find { it.id == selectedHostId }?.label
         ?: stringResource(R.string.label_snippet_global)
+
+    // The rules of a restore of the backup, shown under the field as soon as one is broken. An
+    // untouched empty field says nothing yet (the button stays off all the same).
+    val labelProblem = snippetLabelFieldProblem(label)
+    val commandProblem = snippetCommandFieldProblem(command)
+    val categoryProblem = snippetCategoryFieldProblem(category)
+    val canSave = labelProblem == null && commandProblem == null && categoryProblem == null
+    val labelError = labelProblem?.takeIf { label.isNotEmpty() }?.let { stringResource(backupFieldProblemRes(it)) }
+    val commandError = commandProblem?.takeIf { command.isNotEmpty() }
+        ?.let { stringResource(backupFieldProblemRes(it, isCommand = true)) }
+    val categoryError = categoryProblem?.let { stringResource(backupFieldProblemRes(it)) }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -442,6 +466,7 @@ private fun SnippetEditSheet(
                 onValueChange = { label = it },
                 label         = stringResource(R.string.label_snippet_label),
                 mono          = false,
+                error         = labelError,
             )
 
             EditField(
@@ -451,6 +476,7 @@ private fun SnippetEditSheet(
                 mono          = true,
                 singleLine    = false,
                 minLines      = 3,
+                error         = commandError,
             )
 
             EditField(
@@ -458,6 +484,7 @@ private fun SnippetEditSheet(
                 onValueChange = { category = it },
                 label         = stringResource(R.string.label_snippet_category),
                 mono          = false,
+                error         = categoryError,
             )
 
             Column {
@@ -558,8 +585,11 @@ private fun SnippetEditSheet(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(Radii.Md))
-                        .background(Burgundy, RoundedCornerShape(Radii.Md))
-                        .clickable {
+                        .background(
+                            Burgundy.copy(alpha = if (canSave) 1f else 0.4f),
+                            RoundedCornerShape(Radii.Md),
+                        )
+                        .clickable(enabled = canSave) {
                             onSave(label, command, category.takeIf { it.isNotBlank() }, selectedHostId)
                         }
                         .padding(vertical = Spacing.Sm),
@@ -586,6 +616,7 @@ private fun EditField(
     mono: Boolean,
     singleLine: Boolean = true,
     minLines: Int = 1,
+    error: String? = null,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.Xs)) {
         Text(
@@ -600,6 +631,8 @@ private fun EditField(
             onValueChange = onValueChange,
             singleLine    = singleLine,
             minLines      = minLines,
+            isError       = error != null,
+            supportingText = if (error != null) {{ Text(error, color = ErrorRed, fontSize = 11.sp) }} else null,
             shape         = RoundedCornerShape(Radii.Md),
             textStyle     = androidx.compose.ui.text.TextStyle(
                 fontFamily = if (mono) JetBrainsMonoFamily else SpaceGroteskFamily,

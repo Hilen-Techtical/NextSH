@@ -237,7 +237,7 @@ public class TerminalSession extends TerminalOutput {
             try {
                 Os.kill(mShellPid, OsConstants.SIGKILL);
             } catch (ErrnoException e) {
-                Logger.logWarn(mClient, LOG_TAG, "Failed sending SIGKILL: " + e.getMessage());
+                Logger.logWarn(mClient, LOG_TAG, "Failed sending SIGKILL (" + e.getClass().getSimpleName() + ")");
             }
         }
     }

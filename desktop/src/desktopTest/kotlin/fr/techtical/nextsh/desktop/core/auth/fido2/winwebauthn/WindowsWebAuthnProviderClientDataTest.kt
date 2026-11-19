@@ -6,8 +6,11 @@ package fr.techtical.nextsh.desktop.core.auth.fido2.winwebauthn
 import com.sun.jna.Pointer
 import com.sun.jna.WString
 import com.sun.jna.ptr.PointerByReference
+import fr.techtical.nextsh.desktop.assertNothingScrubbed
+import fr.techtical.nextsh.desktop.captureLogs
 import fr.techtical.nextsh.desktop.core.auth.fido2.Fido2Signer
 import fr.techtical.nextsh.desktop.core.auth.fido2.YubiKitFidoManager
+import fr.techtical.nextsh.desktop.taggedBy
 import kotlinx.coroutines.test.runTest
 import java.security.MessageDigest
 import kotlin.test.Test
@@ -16,6 +19,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 /**
  * Tests du client data envoyé à `webauthn.dll` pour un GetAssertion SSH (contrat :
@@ -159,6 +163,41 @@ class WindowsWebAuthnProviderClientDataTest {
         }
 
         assertContentEquals(challenge, assertNotNull(lib.capturedClientDataBytes))
+    }
+
+    // ── Journaux ────────────────────────────────────────────────────────────
+
+    @Test
+    fun `the diagnostic logs carry no rp id, no key label and no native pointer`() = runTest {
+        val provider = WindowsWebAuthnProvider(lib = CapturingWebAuthnLibrary())
+        // Single words the scrubber cannot recognise by shape: only the call sites keep them out.
+        val rpId = "ssh:corpvaultrp"
+        val userName = "aliceyubikeyfive"
+        val displayName = "Aliceworkkey"
+
+        val captured = captureLogs {
+            runCatching {
+                provider.makeCredential(
+                    rpId = rpId,
+                    rpName = "NextSH",
+                    userName = userName,
+                    userDisplayName = displayName,
+                    pin = null,
+                    timeoutMs = 5_000,
+                )
+            }
+            runCatching {
+                provider.signChallenge(rpId = rpId, challenge = ByteArray(32) { it.toByte() }, credentialId = credentialId)
+            }
+        }
+
+        // The sink is global: judge the provider's own lines for content, every line for the leak.
+        val lines = captured.taggedBy("WinWebAuthn")
+        assertTrue(lines.any { it.contains("makeCredential: PRE-CALL diagnostics") }, "got $captured")
+        assertTrue(lines.any { it.contains("signChallenge: PRE-CALL diagnostics") }, "got $captured")
+        val leaked = listOf("corpvaultrp", userName, displayName, "native@")
+        assertTrue(captured.none { line -> leaked.any { line.contains(it) } }, "a private value leaked: $captured")
+        assertNothingScrubbed(lines)
     }
 }
 

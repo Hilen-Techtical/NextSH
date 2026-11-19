@@ -1,0 +1,48 @@
+{
+  "exportedAt": 1750000000000,
+  "hosts": [
+    {
+      "id": "1a2b3c4d-0000-4000-8000-000000000001",
+      "label": "Legacy web",
+      "hostname": "legacy.fixture.test",
+      "username": "root",
+      "authType": "PASSWORD",
+      "credentialId": "legacy-cred-1"
+    },
+    {
+      "id": "1a2b3c4d-0000-4000-8000-000000000002",
+      "label": "Legacy key host",
+      "hostname": "legacy-key.fixture.test",
+      "port": 2200,
+      "username": "git",
+      "authType": "SSH_KEY",
+      "credentialId": "legacy-key-1",
+      "terminalTheme": "DRACULA"
+    }
+  ],
+  "sshKeys": [
+    {
+      "id": "legacy-key-1",
+      "label": "Legacy key",
+      "keyType": "ED25519",
+      "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuIMek2W/uP4SbNqKjs93fVaAPm7ymy6RBjcJZssbhi legacy"
+    }
+  ],
+  "tunnels": [
+    {
+      "id": "legacy-tunnel-1",
+      "label": "Legacy tunnel",
+      "hostId": "1a2b3c4d-0000-4000-8000-000000000001",
+      "type": "LOCAL_FORWARD",
+      "localPort": 8080,
+      "remoteHost": "127.0.0.1",
+      "remotePort": 80
+    }
+  ],
+  "credentials": {
+    "legacy-cred-1": "FIXTURE-legacy-password"
+  },
+  "privateKeys": {
+    "legacy-key-1": "FIXTURE-NOT-A-REAL-PRIVATE-KEY"
+  }
+}

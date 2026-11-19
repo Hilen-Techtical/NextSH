@@ -3,6 +3,7 @@
 
 package fr.techtical.nextsh.ui
 
+import fr.techtical.nextsh.testutil.ProjectFiles
 import java.io.File
 
 /**
@@ -13,24 +14,13 @@ import java.io.File
 internal object SourceGuardSupport {
 
     /**
-     * Locates a file of the `app` module by walking up from the test's working directory, which
-     * Gradle sets to the module directory (`app/`) but which other runners may point at the
-     * repository root. A miss FAILS: the files live in the same module as the tests, so it means
-     * the guard went stale, not that the runner is unusual.
+     * Locates a file of the `app` module, through [ProjectFiles]: from the root of the checkout the
+     * tests run in (Gradle runs them from `app/`, an IDE may run them from the repository root),
+     * never from a folder above it, where a worktree would find the main checkout. A miss FAILS:
+     * the files live in the same module as the tests, so it means the guard went stale, not that
+     * the runner is unusual.
      */
-    fun locate(pathFromModuleRoot: String): File {
-        val fromRepoRoot = "app/$pathFromModuleRoot"
-        var dir: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
-        while (dir != null) {
-            File(dir, pathFromModuleRoot).takeIf { it.isFile }?.let { return it }
-            File(dir, fromRepoRoot).takeIf { it.isFile }?.let { return it }
-            dir = dir.parentFile
-        }
-        throw AssertionError(
-            "$pathFromModuleRoot not found from working dir ${System.getProperty("user.dir")}: " +
-                "the guard cannot check it",
-        )
-    }
+    fun locate(pathFromModuleRoot: String): File = ProjectFiles.appFile(pathFromModuleRoot)
 
     /** Source of a Kotlin file under `src/main/kotlin/fr/techtical/nextsh/`, comments removed. */
     fun mainSource(pathUnderNextSh: String): String =
@@ -41,28 +31,13 @@ internal object SourceGuardSupport {
      * (recursively), comments removed, keyed by its path relative to `nextsh/` with `/` separators.
      */
     fun mainSources(dirUnderNextSh: String): Map<String, String> {
-        val nextSh = locateDir("src/main/kotlin/fr/techtical/nextsh")
+        val nextSh = ProjectFiles.mainSourceDir()
         val root = File(nextSh, dirUnderNextSh)
         val files = root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
         if (files.isEmpty()) throw AssertionError("no Kotlin source under ${root.path}: the guard cannot check it")
         return files.associate { file ->
             file.relativeTo(nextSh).path.replace('\\', '/') to withoutComments(file.readText())
         }
-    }
-
-    /** Same walk as [locate], for a directory. */
-    private fun locateDir(pathFromModuleRoot: String): File {
-        val fromRepoRoot = "app/$pathFromModuleRoot"
-        var dir: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
-        while (dir != null) {
-            File(dir, pathFromModuleRoot).takeIf { it.isDirectory }?.let { return it }
-            File(dir, fromRepoRoot).takeIf { it.isDirectory }?.let { return it }
-            dir = dir.parentFile
-        }
-        throw AssertionError(
-            "$pathFromModuleRoot not found from working dir ${System.getProperty("user.dir")}: " +
-                "the guard cannot check it",
-        )
     }
 
     /**

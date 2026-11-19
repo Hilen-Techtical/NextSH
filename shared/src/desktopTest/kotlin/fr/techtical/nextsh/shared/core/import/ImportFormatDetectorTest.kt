@@ -87,7 +87,7 @@ class ImportFormatDetectorTest {
 
     @Test
     fun `tolerates leading BOM and whitespace before the marker`() {
-        val withBom = "﻿  \n{\"format\":\"nextsh-hosts\",\"hosts\":[]}"
+        val withBom = "\uFEFF  \n{\"format\":\"nextsh-hosts\",\"hosts\":[]}"
         assertEquals(ImportFormat.NEXTSH, ImportFormatDetector.detect(withBom))
     }
 

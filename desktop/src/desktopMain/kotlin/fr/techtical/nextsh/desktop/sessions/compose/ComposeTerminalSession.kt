@@ -13,6 +13,7 @@ import com.jediterm.terminal.model.JediTerminal
 import com.jediterm.terminal.model.StyleState
 import com.jediterm.terminal.model.TerminalModelListener
 import com.jediterm.terminal.model.TerminalTextBuffer
+import fr.techtical.nextsh.desktop.core.ssh.ShellEndInfo
 import fr.techtical.nextsh.desktop.sessions.TechticalTerminalSettings
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -103,6 +104,17 @@ class ComposeTerminalSession(
 
     private val started = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
+    private val shellExitReported = AtomicBoolean(false)
+
+    /**
+     * True once the shell stream is over (remote `exit`): the terminal stays on screen, read-only. Keystrokes,
+     * pastes and mouse reports are dropped instead of being written to a closed channel, and are not relayed to
+     * the other panes of a broadcast. A resize only reaches the local model (see [resize]).
+     */
+    @Volatile
+    var shellEnded: Boolean = false
+        private set
+
 
     /**
      * Optional broadcast hook, installed by [fr.techtical.nextsh.desktop.sessions.DesktopSessionManager]
@@ -140,6 +152,17 @@ class ComposeTerminalSession(
      */
     @Volatile
     var onUserInput: ((ByteArray) -> Unit)? = null
+
+    /**
+     * Called ONCE, from the emulator thread, when the remote shell ended by itself (`exit`,
+     * Ctrl+D): the emulator loop left normally, this session was not closed and the connector
+     * did not close the shell on our side (see [ShellEndInfo.closedLocally], which covers the
+     * watchdog shutdown). The argument is the exit code the server reported, null when unknown.
+     * Never called after [close], nor when the link broke (an exception ends the loop).
+     * Installed by [fr.techtical.nextsh.desktop.sessions.DesktopSessionManager], like [onUserInput].
+     */
+    @Volatile
+    var onShellExited: ((exitCode: Int?) -> Unit)? = null
 
     /**
      * Cursor position (1-based, [JediTerminal] convention) captured on the
@@ -202,15 +225,39 @@ class ComposeTerminalSession(
     fun start() {
         if (!started.compareAndSet(false, true)) return
         executorMgr.unboundedExecutorService.submit {
+            var returned = false
             try {
                 starter.start()
+                returned = true
             } catch (t: Throwable) {
                 // Emulator thread death is normal at session shutdown
                 // (channel closed → IOException). Suppressing here matches
                 // JediTerm's TerminalPanel behaviour: log if needed but
-                // don't propagate.
+                // don't propagate. A failure while the connector is still
+                // connected is a broken link, not an `exit`: no callback.
+            }
+            // JediTerm 3.40 leaves the loop normally on end of stream (and when it was
+            // stopped or the connector closed): that is the one case reported below.
+            if (returned) {
+                // The stream is over: whatever the cause, nothing can be written to this shell any more.
+                shellEnded = true
+                reportShellExit()
             }
         }
+    }
+
+    private fun reportShellExit() {
+        if (closed.get()) return
+        val end = connector as? ShellEndInfo
+        // Closed on our side (watchdog shutdown, local close): the stream end is our own doing.
+        if (end?.closedLocally == true) return
+        // The exit code may need a short wait (the server sends it after the end of the stream): read
+        // it here, on the emulator thread, then look again, since a close may have come meanwhile.
+        val code = runCatching { end?.exitCode() }.getOrNull()
+        if (closed.get() || end?.closedLocally == true) return
+        if (!shellExitReported.compareAndSet(false, true)) return
+        val callback = onShellExited ?: return
+        runCatching { callback(code) }
     }
 
     /**
@@ -221,13 +268,13 @@ class ComposeTerminalSession(
      * disabled it's purely informational.
      */
     fun sendBytes(bytes: ByteArray, userInput: Boolean = true) {
-        if (closed.get()) return
+        if (closed.get() || shellEnded) return
         starter.sendBytes(bytes, userInput)
         if (userInput) onUserInput?.invoke(bytes)
     }
 
     fun sendString(text: String, userInput: Boolean = true) {
-        if (closed.get()) return
+        if (closed.get() || shellEnded) return
         starter.sendString(text, userInput)
         if (userInput) onUserInput?.invoke(text.toByteArray())
     }
@@ -242,6 +289,15 @@ class ComposeTerminalSession(
     fun resize(columns: Int, rows: Int, origin: RequestOrigin = RequestOrigin.User) {
         if (closed.get()) return
         if (columns <= 0 || rows <= 0) return
+        if (shellEnded) {
+            // The shell channel is closed: only the local model follows the view (the last lines must not
+            // slide under the banner). A window-change sent on that channel makes sshd drop the WHOLE
+            // connection ("unknown channel"), killing the SFTP pane that still uses it.
+            executorMgr.singleThreadScheduledExecutor.execute {
+                runCatching { terminal.resize(TermSize(columns, rows), origin) }
+            }
+            return
+        }
         starter.postResize(TermSize(columns, rows), origin)
     }
 
@@ -252,6 +308,7 @@ class ComposeTerminalSession(
     fun close() {
         if (!closed.compareAndSet(false, true)) return
         onUserInput = null
+        onShellExited = null
         runCatching { starter.close() }
         runCatching { connector.close() }
         runCatching { executorMgr.shutdownWhenAllExecuted() }

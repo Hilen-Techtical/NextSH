@@ -3,7 +3,10 @@
 
 package fr.techtical.nextsh.desktop.sync
 
+import fr.techtical.nextsh.desktop.assertNothingScrubbed
+import fr.techtical.nextsh.desktop.captureLogs
 import fr.techtical.nextsh.desktop.data.preferences.DesktopSettingsStore
+import fr.techtical.nextsh.desktop.taggedBy
 import fr.techtical.nextsh.shared.util.AppScope
 import io.mockk.every
 import io.mockk.mockk
@@ -21,6 +24,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import java.net.InetAddress
 import java.net.SocketException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -95,6 +99,15 @@ class LanSyncServerLifecycleTest {
         return store
     }
 
+    /** A settings store whose sync flag really changes when the lifecycle writes it, like the real one. */
+    private fun statefulSettingsStore(initial: Boolean): DesktopSettingsStore {
+        val enabled = AtomicBoolean(initial)
+        val store = mockk<DesktopSettingsStore>(relaxed = true)
+        every { store.syncEnabled } answers { enabled.get() }
+        every { store.updateSyncEnabled(any()) } answers { enabled.set(firstArg()) }
+        return store
+    }
+
     /** [LanAddressDetector] is a real singleton hitting actual NetworkInterface APIs, mocked per-test for the watcher tests below. Always unmocked afterwards since mockkObject is a JVM-global transform. */
     @AfterTest
     fun unmockLanAddressDetector() {
@@ -115,6 +128,58 @@ class LanSyncServerLifecycleTest {
         advanceUntilIdle()
 
         assertEquals(1, server.startCount, "should start exactly once on first-try success")
+        assertTrue(server.state.value is LanSyncServer.State.Listening)
+    }
+
+    // ── The vault opens when it is created: the first session ────────────────────
+    //
+    // After the first launch the lifecycle must have been told the vault is open (VaultReady.kt), even
+    // though sync is off by default and nothing starts then. Otherwise turning sync on in Settings, after
+    // enrolling a phone, would only be honoured at the next unlock.
+
+    @Test
+    fun `turning sync on after the vault opened with sync off starts the server at once`() = runTest {
+        val server = FakeSyncServer(listOf(LanSyncServer.State.Listening("192.168.1.10", 47731)))
+        val lifecycle = LanSyncServerLifecycle(server, statefulSettingsStore(initial = false), TestAppScope(this))
+
+        lifecycle.onVaultUnlocked() // the first launch is over: sync is opt-in, nothing starts
+        advanceUntilIdle()
+        assertEquals(0, server.startCount, "a fresh vault has sync off: no server, no endpoint on the LAN")
+
+        lifecycle.applySettingsChange(enabled = true)
+        advanceUntilIdle()
+
+        assertEquals(1, server.startCount, "the toggle must take effect in this session")
+        assertTrue(server.state.value is LanSyncServer.State.Listening)
+    }
+
+    @Test
+    fun `turning sync on before the lifecycle was told the vault is open waits for the unlock`() = runTest {
+        // What the first session used to be: nobody called onVaultUnlocked after the vault creation.
+        val server = FakeSyncServer(listOf(LanSyncServer.State.Listening("192.168.1.10", 47731)))
+        val lifecycle = LanSyncServerLifecycle(server, statefulSettingsStore(initial = false), TestAppScope(this))
+
+        lifecycle.applySettingsChange(enabled = true)
+        advanceUntilIdle()
+        assertEquals(0, server.startCount, "the vault is not known to be open: the toggle waits")
+
+        lifecycle.onVaultUnlocked()
+        advanceUntilIdle()
+        assertEquals(1, server.startCount, "the pending toggle is honoured as soon as the vault opens")
+    }
+
+    @Test
+    fun `the vault being signalled open by several paths starts the server once`() = runTest {
+        val server = FakeSyncServer(listOf(LanSyncServer.State.Listening("192.168.1.10", 47731)))
+        val lifecycle = LanSyncServerLifecycle(server, statefulSettingsStore(initial = true), TestAppScope(this))
+
+        lifecycle.onVaultUnlocked()
+        lifecycle.onVaultUnlocked() // a second path before the first start ran: it replaces the pending start
+        advanceUntilIdle()
+        lifecycle.onVaultUnlocked() // a third one once the server listens: nothing left to do
+        advanceUntilIdle()
+
+        assertEquals(1, server.startCount)
         assertTrue(server.state.value is LanSyncServer.State.Listening)
     }
 
@@ -282,6 +347,40 @@ class LanSyncServerLifecycleTest {
         assertEquals("192.168.1.20", listening?.addr, "the re-emitted state must carry the new address")
 
         lifecycle.stopNetworkWatcher()
+    }
+
+    @Test
+    fun `lifecycle logs name the server state and never an address`() = runTest {
+        val server = FakeSyncServer(
+            listOf(
+                LanSyncServer.State.Listening("192.168.1.10", 47731),
+                LanSyncServer.State.Listening("192.168.1.20", 47731),
+            ),
+        )
+        val lifecycle = LanSyncServerLifecycle(server, settingsStore(syncEnabled = true), TestAppScope(this))
+
+        val captured = captureLogs {
+            lifecycle.onVaultUnlocked()
+            advanceUntilIdle()
+            // Already listening: ensureRunning logs the state it found.
+            lifecycle.ensureRunning()
+            advanceUntilIdle()
+
+            // The LAN address changes: the watcher logs the re-bind.
+            mockkObject(LanAddressDetector)
+            every { LanAddressDetector.detect() } returns lanInterface("192.168.1.20")
+            lifecycle.startNetworkWatcher()
+            advanceTimeBy(networkWatchIntervalMs + 500)
+            runCurrent()
+            lifecycle.stopNetworkWatcher()
+        }
+
+        // The sink is global: keep only what the lifecycle itself wrote.
+        val lines = captured.taggedBy("LanSyncServerLifecycle")
+        assertTrue(lines.any { it.contains("serveur déjà actif (Listening)") }, "expected the state name, got $lines")
+        assertTrue(lines.any { it.contains("Changement d'adresse LAN détecté") }, "expected the re-bind line, got $lines")
+        assertTrue(lines.none { it.contains("192.168") }, "an address leaked into the log: $lines")
+        assertNothingScrubbed(lines)
     }
 
     @Test

@@ -6,6 +6,7 @@ package fr.techtical.nextsh.ui.sftp
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
+import fr.techtical.nextsh.ui.lock.LocalAppLocked
 
 /**
  * Embedded SFTP browser pour les panes split-screen.
@@ -34,8 +35,14 @@ fun EmbeddedSftpBrowser(
         sessionId         = sessionId,
         hostLabel         = hostLabel,
         onBack            = onBack,
+        // Le panneau est dans l'écran du terminal, plusieurs niveaux sous NavGraph : le verrou lui
+        // vient de là (LocalAppLocked), et le dialogue de remplacement attend le déverrouillage.
+        locked            = LocalAppLocked.current,
         modifier          = modifier,
         enableBackHandler = enableBackHandler,
+        // Le panneau emprunte la session de l'onglet à côté de lui : son ViewModel survit au
+        // panneau (clé du nav entry du terminal) et ne doit pas la tenir ouverte pour lui.
+        ownsSession       = false,
         viewModel         = viewModel,
     )
 }

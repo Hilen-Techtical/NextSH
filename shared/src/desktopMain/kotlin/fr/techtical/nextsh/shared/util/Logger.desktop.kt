@@ -3,7 +3,32 @@
 
 package fr.techtical.nextsh.shared.util
 
+import java.util.Collections
+
+/**
+ * Desktop actual: debug lines go to stdout, warnings and errors to stderr. On Linux both
+ * usually end up in the systemd user journal, on disk, so every mode applies the same rule:
+ *
+ * - every message goes through [LogScrubber.clean]: a line carrying an unmistakable secret
+ *   (PEM block, `password=`, `passphrase=`, `secret=`, `token=` ...) is replaced as a whole
+ *   by [LogScrubber.REDACTED_LINE], other lines have their values masked;
+ * - every tag goes through [LogScrubber.scrub]: values masked, never dropped as a whole;
+ * - in both, line breaks and other control characters are neutralised, so a record is one
+ *   line; the only line breaks printed are those between a debug message and its trace;
+ * - a throwable is reduced to its class chain ([errorClass]) in release, and to class names
+ *   plus frames ([safeStackTrace]) in debug. Its message is never printed.
+ *
+ * Debug mode only decides whether [d] prints and whether frames follow an error; it never
+ * relaxes the scrubbing. No call ever throws: every helper fails closed.
+ */
 actual object Logger {
+
+    enum class Level { DEBUG, WARN, ERROR }
+
+    /** Test hook: receives each record exactly as it would be printed (already scrubbed). */
+    fun interface Sink {
+        fun write(level: Level, text: String)
+    }
 
     @Volatile
     private var debugEnabled: Boolean = run {
@@ -15,23 +40,13 @@ actual object Logger {
             ?: (System.getProperty("compose.application.resources.dir") == null)
     }
 
-    private val sensitivePatterns = Regex(
-        "password|pwd|key_|credential|passphrase|secret|token|fido2|ctap|assertion|authenticator|signature|signing",
-        RegexOption.IGNORE_CASE,
-    )
-
     /**
-     * Tags whose messages are never redacted, even in release mode.
-     *
-     * Rationale: diagnostic tags like "YubiKit" emit device enumeration info
-     * (transport counts, error codes, device labels) that contain no credentials.
-     * They match the sensitivePatterns regex incidentally (e.g. "fido2", "authenticator"
-     * appear in technical context strings, not in actual secret values). Whitelisting
-     * the tag is simpler and safer than modifying the expect/actual API surface.
+     * Test hook, not for production code: when non null, records go to this sink instead of
+     * stdout / stderr. Always null in production. Prefer [capture], which restores the
+     * previous sink. Public so that tests of other modules (`:desktop`) can use [capture].
      */
-    private val diagnosticTagPrefixes = setOf("YubiKit", "WinWebAuthn")
-
-    private const val REDACTED = "[REDACTED, sensitive data]"
+    @Volatile
+    var sink: Sink? = null
 
     fun setDebugEnabled(enabled: Boolean) {
         debugEnabled = enabled
@@ -39,23 +54,49 @@ actual object Logger {
 
     fun isDebugEnabled(): Boolean = debugEnabled
 
+    /**
+     * Test helper, not for production code: runs [block] with a capturing [sink] and
+     * returns the records it produced,
+     * each one being the full printed text (`W/Tag: message`, stack trace lines included).
+     * The previous sink is restored afterwards. Usable from a suspend test body.
+     */
+    inline fun capture(block: () -> Unit): List<String> {
+        val previous = sink
+        val records = Collections.synchronizedList(ArrayList<String>())
+        sink = Sink { _, text -> records += text }
+        try {
+            block()
+        } finally {
+            sink = previous
+        }
+        return synchronized(records) { records.toList() }
+    }
+
     actual fun d(tag: String, message: String) {
         if (!debugEnabled) return
-        println("D/$tag: $message")
+        emit(Level.DEBUG, "D/${LogScrubber.scrub(tag)}: ${LogScrubber.clean(message)}")
     }
 
     actual fun w(tag: String, message: String) {
-        System.err.println("W/$tag: ${sanitize(tag, message)}")
+        emit(Level.WARN, "W/${LogScrubber.scrub(tag)}: ${LogScrubber.clean(message)}")
     }
 
     actual fun e(tag: String, message: String, throwable: Throwable?) {
-        System.err.println("E/$tag: ${sanitize(tag, message)}")
-        throwable?.printStackTrace(System.err)
+        val line = "E/${LogScrubber.scrub(tag)}: ${LogScrubber.clean(message)}"
+        val text = when {
+            throwable == null -> line
+            debugEnabled -> "$line [${errorClass(throwable)}]\n${safeStackTrace(throwable)}"
+            else -> "$line [${errorClass(throwable)}]"
+        }
+        emit(Level.ERROR, text)
     }
 
-    private fun isDiagnosticTag(tag: String): Boolean =
-        diagnosticTagPrefixes.any { tag.startsWith(it) }
-
-    private fun sanitize(tag: String, message: String): String =
-        if (!debugEnabled && !isDiagnosticTag(tag) && sensitivePatterns.containsMatchIn(message)) REDACTED else message
+    private fun emit(level: Level, text: String) {
+        val target = sink
+        when {
+            target != null -> target.write(level, text)
+            level == Level.DEBUG -> System.out.println(text)
+            else -> System.err.println(text)
+        }
+    }
 }

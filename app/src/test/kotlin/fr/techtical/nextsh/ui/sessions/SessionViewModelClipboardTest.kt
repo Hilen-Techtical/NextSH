@@ -13,7 +13,9 @@ import org.junit.jupiter.api.Test
  *
  * These tests verify the SettingsDataStore.Settings data class behaviour
  * without instantiating SessionViewModel (which requires an Android Context
- * and other platform-bound dependencies).
+ * and other platform-bound dependencies). The clipboard itself, and its
+ * automatic clearing, now live in TerminalTabStore and are covered by
+ * TerminalTabStoreTest.
  *
  * Tests verify:
  * - Clipboard timeout default is 60 seconds

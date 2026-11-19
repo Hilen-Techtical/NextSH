@@ -3,6 +3,7 @@
 
 package fr.techtical.nextsh.desktop.core.ssh
 
+import fr.techtical.nextsh.shared.core.ssh.OpenSshPrivateKeyWriter
 import fr.techtical.nextsh.shared.domain.model.SshKeyType
 import fr.techtical.nextsh.shared.domain.ssh.SshKeyManager
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +28,13 @@ import java.util.Base64
  */
 class DesktopSshKeyManager : SshKeyManager {
 
+    /**
+     * The [comment] (the label typed by the user) is deliberately NOT written into the
+     * key: both the public line and the private section carry the constant
+     * [GENERATED_KEY_COMMENT], as on Android. A label with a line break or an invisible
+     * format character would otherwise split or disguise the `authorized_keys` line.
+     */
+    @Suppress("UNUSED_PARAMETER")
     override suspend fun generateKeyPair(
         keyType: SshKeyType,
         comment: String,
@@ -49,11 +57,11 @@ class DesktopSshKeyManager : SshKeyManager {
                 throw IllegalArgumentException("Les clés FIDO2 (sk-*) ne sont pas générables in-app")
         }
         val pem = if (keyType == SshKeyType.ED25519) {
-            formatEd25519OpenSshV1(keyPair, comment)
+            formatEd25519OpenSshV1(keyPair)
         } else {
             formatPkcs8Pem(keyPair)
         }
-        pem to formatPublicKeyOpenSsh(keyPair, comment)
+        pem to formatPublicKeyOpenSsh(keyPair)
     }
 
     override suspend fun extractPublicKey(
@@ -81,12 +89,12 @@ class DesktopSshKeyManager : SshKeyManager {
     private fun generateEcdsa(curve: String): KeyPair =
         KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec(curve)) }.generateKeyPair()
 
-    private fun formatPublicKeyOpenSsh(keyPair: KeyPair, comment: String): String {
+    private fun formatPublicKeyOpenSsh(keyPair: KeyPair): String {
         val sshKeyType = KeyType.fromKey(keyPair.public)
         val encoded = Base64.getEncoder().encodeToString(
             Buffer.PlainBuffer().putPublicKey(keyPair.public).compactData,
         )
-        return "$sshKeyType $encoded ${comment.ifBlank { "nextsh-generated" }}"
+        return "$sshKeyType $encoded $GENERATED_KEY_COMMENT"
     }
 
     /** PKCS#8 PEM: works for RSA and EC, SSHJ reads it via `PKCS8KeyFile`. */
@@ -100,66 +108,22 @@ class DesktopSshKeyManager : SshKeyManager {
     }
 
     /**
-     * Serialises an Ed25519 keypair as OpenSSH v1 PEM: the format ssh-keygen
-     * produces by default and the only one SSHJ can round-trip for Ed25519
-     * (`PKCS8KeyFile` doesn't understand the Ed25519 OID 1.3.101.112 in SSHJ
-     * 0.38.0). Format per OpenSSH's PROTOCOL.key:
-     *
-     * ```
-     * "openssh-key-v1\0"
-     * string ciphername  = "none"
-     * string kdfname     = "none"
-     * string kdfoptions  = ""
-     * uint32 nkeys       = 1
-     * string public-key  = (ssh-ed25519, A)
-     * string private     = (checkint, checkint, ssh-ed25519, A, seed||A, comment, pad 1..)
-     * ```
-     *
-     * Requires the keypair to come from the i2p EdDSA provider: raw seed/pubkey
-     * bytes are read via the i2p key interfaces.
+     * OpenSSH v1 PEM of an Ed25519 keypair, written by the shared writer: the format ssh-keygen produces by
+     * default and the only one SSHJ can round-trip for Ed25519 (`PKCS8KeyFile` doesn't understand the Ed25519
+     * OID 1.3.101.112 in SSHJ 0.38.0). Requires the keypair to come from the i2p EdDSA provider: the seed is
+     * read from it, the public key is computed from the seed.
      */
-    private fun formatEd25519OpenSshV1(keyPair: KeyPair, comment: String): String {
-        val privKey = keyPair.private as net.i2p.crypto.eddsa.EdDSAPrivateKey
-        val pubKey = keyPair.public as net.i2p.crypto.eddsa.EdDSAPublicKey
-        val seed = privKey.seed  // 32 bytes
-        val A = pubKey.abyte     // 32 bytes (public key point)
-
-        // Public key field
-        val publicKeyBlock = Buffer.PlainBuffer().apply {
-            putString("ssh-ed25519")
-            putBytes(A)
-        }.compactData
-
-        // Private section (unencrypted)
-        val checkInt = java.security.SecureRandom().nextInt()
-        val privateBuf = Buffer.PlainBuffer()
-        privateBuf.putUInt32(checkInt.toLong() and 0xFFFFFFFFL)
-        privateBuf.putUInt32(checkInt.toLong() and 0xFFFFFFFFL)
-        privateBuf.putString("ssh-ed25519")
-        privateBuf.putBytes(A)
-        privateBuf.putBytes(seed + A)  // 64-byte OpenSSH Ed25519 private: seed || pubkey
-        privateBuf.putString(comment.ifBlank { "nextsh-generated" })
-        var padByte = 1
-        while (privateBuf.wpos() % 8 != 0) {
-            privateBuf.putByte(padByte++.toByte())
+    private fun formatEd25519OpenSshV1(keyPair: KeyPair): String {
+        val seed = (keyPair.private as net.i2p.crypto.eddsa.EdDSAPrivateKey).seed.copyOf() // 32 bytes
+        return try {
+            OpenSshPrivateKeyWriter.ed25519(seed, GENERATED_KEY_COMMENT)
+        } finally {
+            seed.fill(0)
         }
-        val privateSection = privateBuf.compactData
+    }
 
-        // Outer container
-        val container = Buffer.PlainBuffer()
-        container.putRawBytes("openssh-key-v1\u0000".toByteArray(Charsets.ISO_8859_1))
-        container.putString("none")  // ciphername
-        container.putString("none")  // kdfname
-        container.putString("")      // kdfoptions
-        container.putUInt32(1L)      // number of keys
-        container.putBytes(publicKeyBlock)
-        container.putBytes(privateSection)
-
-        val b64 = Base64.getEncoder().encodeToString(container.compactData)
-        return buildString {
-            appendLine("-----BEGIN OPENSSH PRIVATE KEY-----")
-            b64.chunked(70).forEach { appendLine(it) }
-            appendLine("-----END OPENSSH PRIVATE KEY-----")
-        }
+    companion object {
+        /** Constant comment of every generated key (public line and private section). */
+        const val GENERATED_KEY_COMMENT = "nextsh-generated"
     }
 }

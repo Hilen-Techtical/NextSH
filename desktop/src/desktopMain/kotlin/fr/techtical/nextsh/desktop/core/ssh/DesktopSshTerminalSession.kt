@@ -5,6 +5,7 @@ package fr.techtical.nextsh.desktop.core.ssh
 
 import fr.techtical.nextsh.desktop.core.clipboard.RemoteClipboardWriter
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +33,7 @@ private const val TAG = "DesktopSshTerminalSession"
  * (xterm modes 1000/1002/1003).
  *
  * A per-session RTT watchdog runs on [scope] and emits round-trip latency (ms)
- * every 20 s via [latencyMs]. Pattern adapted from [DesktopTunnelManager]'s
+ * every 15 s via [latencyMs]. Pattern adapted from [DesktopTunnelManager]'s
  * liveness watchdog: here we measure RTT instead of just detecting loss.
  */
 class DesktopSshTerminalSession(
@@ -58,14 +59,14 @@ class DesktopSshTerminalSession(
     /**
      * Live RTT in milliseconds from the most recent `keepalive@openssh.com`
      * probe. `null` means either the first probe hasn't completed yet or the
-     * last probe timed out / threw. The watchdog continues running after a
-     * failure: it does NOT close the session; that responsibility stays with
-     * [DesktopSshSessionManager].
+     * last probe timed out / threw. A single failed probe only resets this to
+     * `null`; after 2 consecutive failures the watchdog declares the session
+     * dead and calls [shutdown] itself.
      *
-     * SSHJ's built-in [net.schmizz.keepalive.KeepAliveProvider.HEARTBEAT]
-     * uses `keepalive@openssh.com` with wantReply=false and swallows errors.
-     * Our watchdog sends a separate global request with wantReply=true and
-     * measures the RTT around the reply: no conflict.
+     * SSHJ's own keep-alive is not used on Desktop (its interval is never
+     * set, so its thread never starts). Liveness is ensured by this probe, a
+     * `keepalive@openssh.com` global request with wantReply=true sent every
+     * 15 s, whose reply time is the RTT.
      */
     val latencyMs: StateFlow<Long?> = _latencyMs.asStateFlow()
 
@@ -116,14 +117,14 @@ class DesktopSshTerminalSession(
                         elapsedNanos / 1_000_000L
                     } else {
                         if (!loggedFirstFailure) {
-                            Logger.w(TAG, "Latency probe timed out: ${e.message}")
+                            Logger.w(TAG, "Latency probe timed out (${errorClass(e)})")
                             loggedFirstFailure = true
                         }
                         null
                     }
                 } catch (e: Exception) {
                     if (!loggedFirstFailure) {
-                        Logger.w(TAG, "Latency probe failed: ${e::class.simpleName} ${e.message}")
+                        Logger.w(TAG, "Latency probe failed (${errorClass(e)})")
                         loggedFirstFailure = true
                     }
                     null
@@ -169,6 +170,9 @@ class DesktopSshTerminalSession(
         if (!closed.compareAndSet(false, true)) return
         // Cancel the watchdog first to avoid a probe racing with disconnect.
         scope.cancel()
+        // Through the connector, not `shell.close()`: it marks the end as OURS, so the terminal
+        // does not take the stream end it causes for a remote `exit` ("Session ended").
+        try { connector.close() } catch (_: Exception) {}
         try { shell.close() } catch (_: Exception) {}
         try { session.close() } catch (_: Exception) {}
         try { sshClient.disconnect() } catch (_: Exception) {}

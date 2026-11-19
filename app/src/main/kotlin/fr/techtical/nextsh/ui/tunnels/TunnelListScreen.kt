@@ -30,8 +30,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -39,13 +37,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -62,12 +66,15 @@ import com.composables.icons.lucide.Server
 import com.composables.icons.lucide.Shield
 import com.composables.icons.lucide.Square
 import com.composables.icons.lucide.Star
+import com.composables.icons.lucide.X
 import fr.techtical.nextsh.R
+import fr.techtical.nextsh.core.ssh.isRunning
 import fr.techtical.nextsh.domain.model.Host
 import fr.techtical.nextsh.domain.model.TunnelConfig
 import fr.techtical.nextsh.domain.model.TunnelState
 import fr.techtical.nextsh.domain.model.TunnelStatus
 import fr.techtical.nextsh.domain.model.TunnelType
+import fr.techtical.nextsh.ui.components.NextShMessage
 import fr.techtical.nextsh.ui.components.NotificationPermissionEffect
 import fr.techtical.nextsh.ui.theme.Border1
 import fr.techtical.nextsh.ui.theme.Border2
@@ -112,14 +119,21 @@ fun TunnelListScreen(
     val uiState by viewModel.uiState.collectAsState()
     val browserActiveTunnelId by viewModel.browserActiveTunnelId.collectAsState()
 
-    val snackbarHostState = remember { SnackbarHostState() }
+    // Un nouveau message remplace l ancien : le collecteur d événements n attend jamais sa disparition.
+    var message by remember { mutableStateOf<String?>(null) }
     val serviceRefusedMessage = stringResource(R.string.tunnel_service_start_refused)
+    val tunnelUnavailableMessage = stringResource(R.string.tunnel_start_unavailable)
 
     LaunchedEffect(Unit) { viewModel.autoStartTunnels() }
     LaunchedEffect(startTunnelId) { startTunnelId?.let { viewModel.autoStartTunnelById(it) } }
+    // Tunnels that waited for the user while the app was hidden, restarted now that the user came
+    // back through the notification. Keyed on the flag: it also fires when the user is already on
+    // this list as the notification is tapped.
+    val authResumePending by viewModel.authResumePending.collectAsState()
+    LaunchedEffect(authResumePending) { if (authResumePending) viewModel.resumeAuthTunnels() }
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
-            // Pas de snackbar pour `TunnelEvent.Error` : depuis le fix
+            // Pas de message pour `TunnelEvent.Error` : depuis le fix
             // `markStarting`/`markError` du StartTunnelUseCase, l'erreur
             // est déjà rendue dans la card via la StatusPill ERREUR + le
             // banner ErrorRed (avec le message). Doublon retiré.
@@ -128,20 +142,26 @@ fun TunnelListScreen(
                 // Le tunnel tourne mais ne survivra pas à l'arrière-plan :
                 // aucune card ne peut le montrer, son statut reste ACTIF.
                 is TunnelEvent.ForegroundServiceRefused ->
-                    snackbarHostState.showSnackbar(serviceRefusedMessage)
+                    message = serviceRefusedMessage
+                // Démarrage refusé : le tunnel ou son hôte a été supprimé. Sans message, le bouton
+                // semblerait ne rien faire.
+                is TunnelEvent.TunnelUnavailable ->
+                    message = tunnelUnavailableMessage
                 else -> {}
             }
         }
     }
 
     val total = uiState.tunnels.size
-    val active = uiState.tunnelStates.values.count {
-        it.status in listOf(TunnelStatus.ACTIVE, TunnelStatus.STARTING, TunnelStatus.RECONNECTING)
-    }
-    val subtitle = when {
-        total == 0 -> "Aucun tunnel configuré"
-        active == 0 -> "$total tunnel${if (total > 1) "s" else ""} · 0 actif"
-        else -> "$total tunnel${if (total > 1) "s" else ""} · $active actif${if (active > 1) "s" else ""}"
+    val active = uiState.tunnelStates.values.count { it.status.isRunning() }
+    val subtitle = if (total == 0) {
+        stringResource(R.string.empty_no_tunnels_title)
+    } else {
+        stringResource(
+            R.string.tunnels_subtitle,
+            pluralStringResource(R.plurals.tunnels_count_total, total, total),
+            pluralStringResource(R.plurals.tunnels_count_active, active, active),
+        )
     }
 
     // Un tunnel actif implique une notification persistante : demander la
@@ -149,7 +169,15 @@ fun TunnelListScreen(
     NotificationPermissionEffect(trigger = active > 0)
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        // Le slot du Scaffold superpose le message en bas de la liste sans la redimensionner.
+        snackbarHost = {
+            NextShMessage(
+                message   = message,
+                isError   = true,
+                onDismiss = { message = null },
+                modifier  = Modifier.padding(Spacing.Md),
+            )
+        },
         topBar = {
             TopAppBar(
                 title = {
@@ -221,6 +249,7 @@ fun TunnelListScreen(
                         onEdit = { onNavigateToConfig(tunnel.id) },
                         onOpenBrowser = { onOpenBrowser(tunnel.id) },
                         onToggleFavorite = { viewModel.toggleFavorite(tunnel) },
+                        onDismissError = { viewModel.dismissTunnelError(tunnel.id) },
                     )
                 }
             }
@@ -240,9 +269,10 @@ private fun TunnelCard(
     onEdit: () -> Unit,
     onOpenBrowser: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onDismissError: () -> Unit,
 ) {
     val status = tunnelState?.status ?: TunnelStatus.STOPPED
-    val isActive = status in listOf(TunnelStatus.ACTIVE, TunnelStatus.STARTING, TunnelStatus.RECONNECTING)
+    val isActive = status.isRunning()
 
     Column(
         modifier = Modifier
@@ -305,24 +335,66 @@ private fun TunnelCard(
         // ── Diagramme 3 nœuds Local → Gateway → Distant (parité Desktop) ──
         // Erreur : on remplace le diagramme par un banner ErrorRed pour ne
         // pas montrer un état "actif visuel" trompeur.
-        val errorMsg = tunnelState?.takeIf { it.status == TunnelStatus.ERROR }?.errorMessage
-        if (errorMsg != null) {
+        val cardMessage = tunnelCardMessage(tunnelState)
+        val errorMsg = (cardMessage as? TunnelCardMessage.Failed)?.message
+        if (cardMessage is TunnelCardMessage.Reconnecting) {
+            // The reason of a reconnection (network lost, server silent...): amber, no dismiss
+            // button, the Stop button below stays. Announced politely to screen readers when it
+            // changes. WarningAmber on Surface is about 8:1, well above the 4.5:1 of text.
+            Text(
+                text = tunnelErrorMessageRes(cardMessage.message)?.let { stringResource(it) }
+                    ?: cardMessage.message,
+                color = WarningAmber,
+                fontSize = 11.sp,
+                fontFamily = JetBrainsMonoFamily,
+                maxLines = 5, // like the red banner: a remote forward refusal needs its advice
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { liveRegion = LiveRegionMode.Polite }
+                    .background(WarningAmber.copy(alpha = 0.08f), RoundedCornerShape(Radii.Md))
+                    .border(1.dp, WarningAmber.copy(alpha = 0.30f), RoundedCornerShape(Radii.Md))
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+            )
+        } else if (errorMsg != null) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(ErrorRed.copy(alpha = 0.08f), RoundedCornerShape(Radii.Md))
                     .border(1.dp, ErrorRed.copy(alpha = 0.30f), RoundedCornerShape(Radii.Md))
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                    // The vertical padding is the text's own, and almost none at the end: the dismiss
+                    // button below is 48 dp (the Material touch target) and sits against the border.
+                    .padding(start = 10.dp, end = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = errorMsg,
+                    // The messages the tunnel manager makes up are French literals: said in the
+                    // language of the user here (see tunnelErrorMessageRes).
+                    text = tunnelErrorMessageRes(errorMsg)?.let { stringResource(it) } ?: errorMsg,
                     color = ErrorRed,
                     fontSize = 11.sp,
                     fontFamily = JetBrainsMonoFamily,
-                    maxLines = 2,
+                    // Five lines: the longest reasons (a remote port the server refused, a local
+                    // port taken by another app) say what to do in their second sentence, which
+                    // two lines cut off on a phone, and the reconnection quotes them after its own
+                    // "failed after 5 attempts".
+                    maxLines = 5,
                     overflow = TextOverflow.Ellipsis,
+                    // Takes the room the button leaves, so that the text never runs under it.
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(vertical = 8.dp),
                 )
+                // Clears the error: the card goes back to stopped. An IconButton takes the tap, so
+                // the card behind it (which opens the form) does not.
+                IconButton(onClick = onDismissError, modifier = Modifier.size(48.dp)) {
+                    Icon(
+                        Lucide.X,
+                        contentDescription = stringResource(R.string.action_dismiss_tunnel_error),
+                        tint = ErrorRed,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
             }
         } else {
             TunnelDiagram(config = config, host = host, active = isActive)
@@ -362,12 +434,13 @@ private fun TunnelCard(
 
 @Composable
 private fun StatusPill(status: TunnelStatus) {
-    val (label, color) = when (status) {
-        TunnelStatus.ACTIVE -> "ACTIF" to SuccessGreen
-        TunnelStatus.STARTING -> "DÉMARRAGE" to GoldLight
-        TunnelStatus.RECONNECTING -> "RECONNEXION" to WarningAmber
-        TunnelStatus.ERROR -> "ERREUR" to ErrorRed
-        TunnelStatus.STOPPED -> "ARRÊTÉ" to TextDisabled
+    val label = stringResource(tunnelStatusLabelRes(status)).uppercase()
+    val color = when (status) {
+        TunnelStatus.ACTIVE -> SuccessGreen
+        TunnelStatus.STARTING -> GoldLight
+        TunnelStatus.RECONNECTING -> WarningAmber
+        TunnelStatus.ERROR -> ErrorRed
+        TunnelStatus.STOPPED -> TextDisabled
     }
     val animatedColor by animateColorAsState(
         targetValue = color,
@@ -403,11 +476,7 @@ private fun StatusPill(status: TunnelStatus) {
 
 @Composable
 private fun TypeBadge(type: TunnelType) {
-    val label = when (type) {
-        TunnelType.LOCAL_FORWARD -> "LOCAL"
-        TunnelType.REMOTE_FORWARD -> "REMOTE"
-        TunnelType.DYNAMIC_SOCKS5 -> "SOCKS5"
-    }
+    val label = stringResource(tunnelTypeLabelRes(type)).uppercase()
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(Radii.Xs))
@@ -470,7 +539,7 @@ private fun BtnTogglePrimary(isActive: Boolean, onClick: () -> Unit) {
                 Icon(Lucide.Square, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    text = "Stopper",
+                    text = stringResource(R.string.action_stop),
                     color = TextPrimary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
@@ -490,7 +559,7 @@ private fun BtnTogglePrimary(isActive: Boolean, onClick: () -> Unit) {
                 Icon(Lucide.Play, contentDescription = null, tint = White, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    text = "Démarrer",
+                    text = stringResource(R.string.action_start),
                     color = White,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
@@ -544,6 +613,10 @@ private fun TunnelDiagram(
     host: Host?,
     active: Boolean,
 ) {
+    val localRole = stringResource(R.string.tunnel_node_local)
+    val gatewayRole = stringResource(R.string.tunnel_node_gateway)
+    val remoteRole = stringResource(R.string.tunnel_node_remote)
+    val localhost = stringResource(R.string.tunnel_node_localhost)
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -551,17 +624,17 @@ private fun TunnelDiagram(
         when (config.type) {
             TunnelType.LOCAL_FORWARD -> {
                 TunnelNode(
-                    role = "Local",
+                    role = localRole,
                     nodeRole = NodeRole.LOCAL,
                     icon = Lucide.Laptop,
-                    address = "localhost",
+                    address = localhost,
                     sub = ":${config.localPort}",
                     active = active,
                     modifier = Modifier.weight(1f),
                 )
                 TunnelWire(active, modifier = Modifier.width(20.dp))
                 TunnelNode(
-                    role = "SSH Gateway",
+                    role = gatewayRole,
                     nodeRole = NodeRole.GATEWAY,
                     icon = Lucide.Shield,
                     address = host?.label ?: host?.hostname ?: "?",
@@ -571,7 +644,7 @@ private fun TunnelDiagram(
                 )
                 TunnelWire(active, modifier = Modifier.width(20.dp))
                 TunnelNode(
-                    role = "Distant",
+                    role = remoteRole,
                     nodeRole = NodeRole.REMOTE,
                     icon = Lucide.Server,
                     address = config.remoteHost,
@@ -582,7 +655,7 @@ private fun TunnelDiagram(
             }
             TunnelType.REMOTE_FORWARD -> {
                 TunnelNode(
-                    role = "Distant",
+                    role = remoteRole,
                     nodeRole = NodeRole.REMOTE,
                     icon = Lucide.Server,
                     address = config.remoteHost,
@@ -592,7 +665,7 @@ private fun TunnelDiagram(
                 )
                 TunnelWire(active, modifier = Modifier.width(20.dp))
                 TunnelNode(
-                    role = "SSH Gateway",
+                    role = gatewayRole,
                     nodeRole = NodeRole.GATEWAY,
                     icon = Lucide.Shield,
                     address = host?.label ?: host?.hostname ?: "?",
@@ -602,10 +675,10 @@ private fun TunnelDiagram(
                 )
                 TunnelWire(active, modifier = Modifier.width(20.dp))
                 TunnelNode(
-                    role = "Local",
+                    role = localRole,
                     nodeRole = NodeRole.LOCAL,
                     icon = Lucide.Laptop,
-                    address = "localhost",
+                    address = localhost,
                     sub = ":${config.localPort}",
                     active = active,
                     modifier = Modifier.weight(1f),
@@ -613,17 +686,17 @@ private fun TunnelDiagram(
             }
             TunnelType.DYNAMIC_SOCKS5 -> {
                 TunnelNode(
-                    role = "Local",
+                    role = localRole,
                     nodeRole = NodeRole.LOCAL,
                     icon = Lucide.Laptop,
-                    address = "localhost",
+                    address = localhost,
                     sub = ":${config.localPort}",
                     active = active,
                     modifier = Modifier.weight(1f),
                 )
                 TunnelWire(active, modifier = Modifier.width(20.dp))
                 TunnelNode(
-                    role = "SSH Gateway",
+                    role = gatewayRole,
                     nodeRole = NodeRole.GATEWAY,
                     icon = Lucide.Shield,
                     address = host?.label ?: host?.hostname ?: "?",
@@ -633,11 +706,11 @@ private fun TunnelDiagram(
                 )
                 TunnelWire(active, modifier = Modifier.width(20.dp))
                 TunnelNode(
-                    role = "Multi-cible",
+                    role = stringResource(R.string.tunnel_node_multi_target),
                     nodeRole = NodeRole.MULTI_TARGET,
                     icon = Lucide.Globe,
                     address = "★",
-                    sub = "via SOCKS5",
+                    sub = stringResource(R.string.tunnel_node_via_socks5),
                     active = active,
                     modifier = Modifier.weight(1f),
                 )

@@ -9,8 +9,12 @@ import fr.techtical.nextsh.desktop.core.sync.DesktopSyncScheduler
 import fr.techtical.nextsh.desktop.core.vault.VaultPinManager
 import fr.techtical.nextsh.desktop.data.db.DesktopDatabase
 import fr.techtical.nextsh.desktop.data.di.DesktopContainer
+import fr.techtical.nextsh.desktop.vault.VaultError
+import fr.techtical.nextsh.desktop.data.di.VaultWipeRunner
+import fr.techtical.nextsh.desktop.data.di.VaultWipeState
 import fr.techtical.nextsh.desktop.data.preferences.DesktopSettingsStore
 import fr.techtical.nextsh.desktop.data.preferences.LanguagePref
+import fr.techtical.nextsh.desktop.scope.ScreenViewModel
 import fr.techtical.nextsh.desktop.service.DesktopTunnelTray
 import fr.techtical.nextsh.desktop.sync.LanSyncServer
 import fr.techtical.nextsh.desktop.sync.LanSyncServerLifecycle
@@ -29,24 +33,33 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class SettingsViewModel(
+/**
+ * ViewModel de l'écran Réglages. Les observateurs (langue, thèmes personnalisés) vivent dans le scope de
+ * l'écran ; l'effacement du coffre, la génération de la phrase de récupération et l'enregistrement d'un
+ * thème restent dans le scope de l'app : ils vont au bout même si l'écran est quitté juste après.
+ */
+class SettingsViewModel internal constructor(
     val store: DesktopSettingsStore = DesktopContainer.settingsStore,
     private val vaultManager: VaultManager = DesktopContainer.vaultManager,
     private val database: DesktopDatabase = DesktopContainer.database,
     private val knownHostsStore: DesktopKnownHostsStore = DesktopContainer.knownHostsStore,
-    private val appScope: AppScope = DesktopContainer.appScope,
+    appScope: AppScope = DesktopContainer.appScope,
     private val syncLifecycle: LanSyncServerLifecycle = DesktopContainer.lanSyncServerLifecycle,
     private val syncServer: LanSyncServer = DesktopContainer.lanSyncServer,
     private val syncScheduler: DesktopSyncScheduler = DesktopContainer.syncScheduler,
     private val customThemeRepository: CustomTerminalThemeRepository = DesktopContainer.customThemeRepository,
     private val pinManager: VaultPinManager = DesktopContainer.vaultPinManager,
     private val tunnelTray: DesktopTunnelTray = DesktopContainer.tunnelTray,
-) {
+    /** The vault wipe state, shared by the whole app (see [DesktopContainer.vaultWipeState]). */
+    private val wipeStateSource: StateFlow<VaultWipeState> = DesktopContainer.vaultWipeState,
+    /** The wipe runner. Lazy: nothing of the container is built until a wipe is asked for. */
+    private val wipeRunner: () -> VaultWipeRunner = { DesktopContainer.vaultWipeRunner },
+) : ScreenViewModel(appScope) {
     val settings: StateFlow<DesktopSettingsStore.Settings> = store.settings
     val syncState: StateFlow<LanSyncServer.State> = syncServer.state
     val languagePreference: StateFlow<LanguagePref> = store.settings
         .map { it.languagePreference }
-        .stateIn(appScope.coroutineScope, SharingStarted.Eagerly, LanguagePref.SYSTEM)
+        .stateIn(screenScope, SharingStarted.Eagerly, LanguagePref.SYSTEM)
 
     /** Scheduler state, exposes [lastSyncAt] to the settings UI. */
     val schedulerState: StateFlow<SyncState> = syncScheduler.syncState
@@ -58,7 +71,7 @@ class SettingsViewModel(
      */
     val customThemes: StateFlow<List<CustomTerminalTheme>> =
         customThemeRepository.observeAll()
-            .stateIn(appScope.coroutineScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            .stateIn(screenScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
      * State of the recovery-phrase management row.
@@ -73,7 +86,7 @@ class SettingsViewModel(
     data class RecoveryState(
         val exists: Boolean = false,
         val words: List<String>? = null,
-        val error: String? = null,
+        val error: VaultError? = null,
         val isBusy: Boolean = false,
     )
 
@@ -96,10 +109,15 @@ class SettingsViewModel(
             } else {
                 _recoveryState.value.copy(
                     isBusy = false,
-                    error = "Échec de la génération de la phrase de récupération",
+                    error = VaultError.RECOVERY_GENERATION_FAILED,
                 )
             }
         }
+    }
+
+    /** Dismisses the notice of a failed generation. */
+    fun dismissRecoveryError() {
+        _recoveryState.value = _recoveryState.value.copy(error = null)
     }
 
     /** Dismisses the one-time word display, dropping the plaintext words. */
@@ -171,19 +189,25 @@ class SettingsViewModel(
         }
     }
 
-    fun wipeVault(onDone: () -> Unit) {
-        appScope.coroutineScope.launch {
-            // Purge credential blobs AND all persisted metadata (hosts, tunnels, keys, snippets,
-            // conflicts, enrolled devices) AND trusted host keys so the app returns to a true
-            // first-launch state. Wave 4 added known-hosts wipe, previously missing.
-            vaultManager.wipeVault()
-            withContext(Dispatchers.IO) {
-                database.wipeAllTables()
-                knownHostsStore.deleteAll()
-            }
-            onDone()
-        }
-    }
+    /**
+     * Progress of the vault wipe: held by the container, so the progress modal, the global shortcuts and this
+     * view model all see the same state, whichever screen is shown.
+     */
+    val wipeState: StateFlow<VaultWipeState> = wipeStateSource
+
+
+    /**
+     * Wipes the vault and returns the app to a true first-launch state, staying in the app: see
+     * [VaultWipeRunner]. Closes everything that is open first (sessions, tunnels, transfers, LAN sync, see
+     * [stopVaultDependentWork]), then erases the vault, every table, the known hosts, the sync switch and
+     * the credential metadata (see [eraseVaultData]). A second request while one runs is ignored.
+     *
+     * [onDone] (navigation to the creation of the new vault) runs ONLY at the end, once everything is erased:
+     * navigating earlier would let the user create a vault that the erase then deletes, and navigating with
+     * data left behind would hide an incomplete wipe. A step that fails is replayed once; if it still fails
+     * the state is FAILED (the failure dialog offers "Retry") and [onDone] is not called.
+     */
+    fun wipeVault(onDone: () -> Unit) = wipeRunner().start(onDone)
 
     /**
      * Complete, irreversible purge of ALL local data for a clean uninstall,

@@ -9,6 +9,10 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.techtical.nextsh.domain.model.AuthType
 import fr.techtical.nextsh.domain.repository.HostRepository
 import fr.techtical.nextsh.domain.repository.SshKeyRepository
+import fr.techtical.nextsh.core.vault.VaultWipeGate
+import fr.techtical.nextsh.core.vault.WipeGatedHostRepository
+import fr.techtical.nextsh.core.vault.WipeGatedSshKeyRepository
+import fr.techtical.nextsh.core.vault.WipeGatedVaultManager
 import fr.techtical.nextsh.shared.core.`import`.HostImportService
 import fr.techtical.nextsh.shared.core.`import`.ImportFormatDetector
 import fr.techtical.nextsh.shared.core.`import`.ImportResult
@@ -17,6 +21,8 @@ import fr.techtical.nextsh.shared.core.`import`.NextShImporter
 import fr.techtical.nextsh.shared.core.`import`.ParsedHost
 import fr.techtical.nextsh.shared.core.`import`.TermiusImporter
 import fr.techtical.nextsh.shared.domain.vault.VaultManager
+import fr.techtical.nextsh.shared.util.errorClass
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -104,7 +110,16 @@ class HostImportViewModel @Inject constructor(
     private val hostRepository: HostRepository,
     private val vaultManager: VaultManager,
     private val sshKeyRepository: SshKeyRepository,
+    /** The wipe of the vault: nothing is imported while the app is closed. */
+    private val wipeGate: VaultWipeGate,
 ) : ViewModel() {
+
+    /** Without the wipe gate of the app (tests). Not an injection point. */
+    constructor(
+        hostRepository: HostRepository,
+        vaultManager: VaultManager,
+        sshKeyRepository: SshKeyRepository,
+    ) : this(hostRepository, vaultManager, sshKeyRepository, VaultWipeGate())
 
     private val importService = HostImportService()
 
@@ -134,7 +149,7 @@ class HostImportViewModel @Inject constructor(
                     detectedFormat = parsed.format.toUiFormat(),
                 )
             } catch (e: Exception) {
-                Timber.w("Host import parse failed: ${e.message}")
+                Timber.w("Host import parse failed (${errorClass(e)})")
                 _uiState.value = HostImportUiState(error = HostImportError.Generic)
             }
         }
@@ -185,15 +200,24 @@ class HostImportViewModel @Inject constructor(
             return
         }
 
+        if (wipeGate.isClosed()) {
+            // The wipe of the vault has the app closed: nothing is imported.
+            clear()
+            _uiState.value = HostImportUiState(error = HostImportError.Generic)
+            return
+        }
         _uiState.value = state.copy(isImporting = true)
         viewModelScope.launch {
             try {
                 val result: ImportResult = withContext(Dispatchers.IO) {
+                    // Checked right before the writes: the wipe of the vault may have closed the app.
+                    check(!wipeGate.isClosed()) { "The vault is being wiped" }
                     importService.import(
                         entries = toImport,
-                        hostRepository = hostRepository,
-                        vaultManager = vaultManager,
-                        sshKeyRepository = sshKeyRepository,
+                        // Gated writes: the loop of the service has no transaction and the wipe does not wait for it.
+                        hostRepository = WipeGatedHostRepository(hostRepository, wipeGate),
+                        vaultManager = WipeGatedVaultManager(vaultManager, wipeGate),
+                        sshKeyRepository = WipeGatedSshKeyRepository(sshKeyRepository, wipeGate),
                     )
                 }
                 // Wipe entries the user chose NOT to import (imported ones are
@@ -201,8 +225,13 @@ class HostImportViewModel @Inject constructor(
                 parsedHosts.filterIndexed { i, _ -> i !in selectedIndices }.forEach { it.wipeSecrets() }
                 parsedHosts = emptyList()
                 _uiState.value = HostImportUiState(result = result)
+            } catch (e: CancellationException) {
+                // Never swallowed: the parsed secrets are wiped, then the cancellation goes on.
+                parsedHosts.forEach { it.wipeSecrets() }
+                parsedHosts = emptyList()
+                throw e
             } catch (e: Exception) {
-                Timber.w("Host import failed: ${e.message}")
+                Timber.w("Host import failed (${errorClass(e)})")
                 parsedHosts.forEach { it.wipeSecrets() }
                 parsedHosts = emptyList()
                 _uiState.value = HostImportUiState(error = HostImportError.Generic)

@@ -77,6 +77,7 @@ import fr.techtical.nextsh.desktop.vault.CenteredPassphraseField
 import fr.techtical.nextsh.desktop.vault.RecoveryPhraseDisplay
 import fr.techtical.nextsh.desktop.vault.VaultSetupViewModel
 import fr.techtical.nextsh.desktop.vault.vaultHaloBackground
+import fr.techtical.nextsh.desktop.vault.vaultErrorText
 import fr.techtical.nextsh.desktop.generated.resources.Res
 import fr.techtical.nextsh.desktop.generated.resources.firstlaunch_step_count
 import fr.techtical.nextsh.desktop.generated.resources.firstlaunch_sync_configure
@@ -358,7 +359,7 @@ private fun CreateVaultPane(
             imeAction = ImeAction.Done,
         )
 
-        val err = state.error
+        val err = state.error?.let { vaultErrorText(it) }
         if (err != null) {
             Spacer(Modifier.height(Spacing.Sm))
             Text(

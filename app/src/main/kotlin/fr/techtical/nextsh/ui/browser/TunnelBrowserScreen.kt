@@ -44,12 +44,20 @@ import timber.log.Timber
  * WebChromeClient, gestion d'erreurs SSL, intent picker externe) sont
  * conservés verbatim, seul le chrome (top bar, bandeaux, dialog) est
  * porté sur les tokens DA.
+ *
+ * [locked] : l'app est derrière l'écran de verrou (`AppLock`). Les deux dialogues de cet overlay
+ * (l'avertissement de navigation externe, le défi d'authentification HTTP) sont des fenêtres à part,
+ * posées dans l'ordre de leur création : l'une créée après l'écran de verrou passerait au-dessus. Ils
+ * ne s'affichent donc pas tant que l'app est verrouillée. L'état reste dans le ViewModel (la
+ * demande, le défi) et le dialogue réapparaît au déverrouillage, comme à la restauration du navigateur
+ * quand il est réduit. Sans valeur par défaut : un appelant qui l'oublierait laisserait passer ces dialogues.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun BrowserOverlay(
     sessionHolder: BrowserSessionHolder,
+    locked: Boolean,
     viewModel: TunnelBrowserViewModel = hiltViewModel(),
 ) {
     val visibleTunnelId by sessionHolder.visibleTunnelId.collectAsState()
@@ -74,7 +82,7 @@ fun BrowserOverlay(
         }
     }
 
-    if (uiState.showExternalNavWarning) {
+    if (uiState.showExternalNavWarning && !locked) {
         AlertDialog(
             onDismissRequest = { viewModel.cancelExternalNavigation() },
             containerColor = Surface,
@@ -170,9 +178,10 @@ fun BrowserOverlay(
 
     // Jamais affiché tant que le navigateur est réduit : un dialogue qui prend le
     // focus par-dessus un autre écran pourrait capter ce que l'utilisateur y tape.
-    // Le défi reste en attente et le dialogue réapparaît à la restauration.
+    // Le défi reste en attente et le dialogue réapparaît à la restauration. Même chose tant que l'app
+    // est verrouillée : il réapparaît au déverrouillage.
     val authPrompt = uiState.authPrompt
-    if (authPrompt != null && isVisible) {
+    if (authPrompt != null && isVisible && !locked) {
         HttpAuthDialog(
             prompt   = authPrompt,
             onSubmit = viewModel::submitAuth,
@@ -295,7 +304,6 @@ fun BrowserOverlay(
                                         request: WebResourceRequest,
                                     ): Boolean {
                                         val url = request.url.toString()
-                                        Timber.d("WebView shouldOverrideUrlLoading: $url")
                                         return !viewModel.onNavigationRequested(url)
                                     }
 
@@ -304,14 +312,14 @@ fun BrowserOverlay(
                                         url: String?,
                                         favicon: android.graphics.Bitmap?,
                                     ) {
-                                        Timber.d("WebView onPageStarted: $url")
+                                        Timber.d("WebView onPageStarted")
                                         viewModel.clearWebError()
                                         viewModel.onLoadingChanged(true)
                                         url?.let { viewModel.onUrlChanged(it) }
                                     }
 
                                     override fun onPageFinished(view: WebView, url: String?) {
-                                        Timber.d("WebView onPageFinished: $url")
+                                        Timber.d("WebView onPageFinished")
                                         viewModel.onLoadingChanged(false)
                                         url?.let { viewModel.onUrlChanged(it) }
                                         viewModel.onNavigationStateChanged(
@@ -333,9 +341,12 @@ fun BrowserOverlay(
                                         request: WebResourceRequest,
                                         error: WebResourceError,
                                     ) {
-                                        Timber.e("WebView onReceivedError: ${error.errorCode} ${error.description} url=${request.url}")
+                                        Timber.e("WebView onReceivedError: code=${error.errorCode}")
                                         if (request.isForMainFrame) {
-                                            viewModel.onWebError("Erreur ${error.errorCode}: ${error.description}")
+                                            // La description vient de WebView : le système la dit, pas NextSH.
+                                            viewModel.onWebError(
+                                                ctx.getString(R.string.browser_error_load, error.errorCode, error.description),
+                                            )
                                         }
                                     }
 
@@ -344,14 +355,18 @@ fun BrowserOverlay(
                                         request: WebResourceRequest,
                                         errorResponse: WebResourceResponse,
                                     ) {
-                                        Timber.e("WebView onReceivedHttpError: ${errorResponse.statusCode} ${errorResponse.reasonPhrase} url=${request.url}")
+                                        Timber.e("WebView onReceivedHttpError: status=${errorResponse.statusCode}")
                                         if (request.isForMainFrame) {
                                             // Un 401 vient d'identifiants absents ou refusés :
                                             // message localisé plutôt que « HTTP 401 ».
                                             val message = if (errorResponse.statusCode == 401) {
                                                 ctx.getString(R.string.browser_auth_error_banner)
                                             } else {
-                                                "HTTP ${errorResponse.statusCode}: ${errorResponse.reasonPhrase}"
+                                                ctx.getString(
+                                                    R.string.browser_error_http,
+                                                    errorResponse.statusCode,
+                                                    errorResponse.reasonPhrase,
+                                                )
                                             }
                                             viewModel.onWebError(message)
                                         }
@@ -379,15 +394,17 @@ fun BrowserOverlay(
                                         error: android.net.http.SslError,
                                     ) {
                                         val url = error.url ?: ""
-                                        Timber.d("WebView onReceivedSslError: $url primaryError=${error.primaryError}")
+                                        Timber.d("WebView onReceivedSslError: primaryError=${error.primaryError}")
                                         if (viewModel.isLocalhostUrl(url)) handler.proceed() else handler.cancel()
                                     }
                                 })
 
                                 setWebChromeClient(object : WebChromeClient() {
                                     override fun onConsoleMessage(msg: ConsoleMessage?): Boolean {
+                                        // Niveau seulement : le message et la source peuvent
+                                        // contenir l'URL de la page (avec sa requête) ou un jeton.
                                         msg?.let {
-                                            Timber.d("WebView JS [${it.messageLevel()}] ${it.message()} (${it.sourceId()}:${it.lineNumber()})")
+                                            Timber.d("WebView JS console [${it.messageLevel()}]")
                                         }
                                         return true
                                     }
@@ -419,7 +436,7 @@ fun BrowserOverlay(
                                 sessionHolder.setWebView(this)
                                 webView = this
 
-                                Timber.d("WebView created, loading initialUrl=${uiState.initialUrl}")
+                                Timber.d("WebView created, loading the tunnel start page")
                                 post { loadUrl(uiState.initialUrl) }
                             }
                         },

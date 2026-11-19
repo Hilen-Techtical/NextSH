@@ -4,44 +4,69 @@
 package fr.techtical.nextsh.ui.hosts
 
 import androidx.biometric.BiometricPrompt
-import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
-import fr.techtical.nextsh.core.crypto.BiometricHelper
+import fr.techtical.nextsh.core.lock.AppLock
+import fr.techtical.nextsh.core.ssh.BiometricPromptCoordinator
+import fr.techtical.nextsh.core.ssh.BiometricPromptResponse
+import fr.techtical.nextsh.core.ssh.SessionHandoff
+import fr.techtical.nextsh.core.ssh.VaultAuthPurpose
+import fr.techtical.nextsh.core.ssh.biometricResponseForError
+import fr.techtical.nextsh.core.ssh.SshTerminalSession
+import fr.techtical.nextsh.core.ssh.SshTunnelManager
 import fr.techtical.nextsh.core.vault.VaultAuthExpiredException
 import fr.techtical.nextsh.core.vault.VaultManager
 import fr.techtical.nextsh.domain.model.AuthType
+import fr.techtical.nextsh.domain.model.Fido2Mode
 import fr.techtical.nextsh.domain.model.Host
+import fr.techtical.nextsh.domain.model.SessionStatus
 import fr.techtical.nextsh.domain.model.SshKey
 import fr.techtical.nextsh.domain.model.SshKeyType
+import fr.techtical.nextsh.domain.model.SshSession
+import fr.techtical.nextsh.shared.domain.model.SshErrorCode
+import fr.techtical.nextsh.shared.domain.model.SshResult
+import fr.techtical.nextsh.domain.model.TunnelConfig
+import fr.techtical.nextsh.domain.model.TunnelState
+import fr.techtical.nextsh.domain.model.TunnelStatus
+import fr.techtical.nextsh.domain.model.TunnelType
 import fr.techtical.nextsh.domain.repository.CustomTerminalThemeRepository
 import fr.techtical.nextsh.domain.repository.HostRepository
 import fr.techtical.nextsh.domain.repository.SshKeyRepository
 import fr.techtical.nextsh.domain.usecase.ConnectSessionUseCase
+import fr.techtical.nextsh.domain.usecase.StopTunnelUseCase
 import fr.techtical.nextsh.shared.core.sync.SyncScheduler
 import fr.techtical.nextsh.shared.core.sync.SyncState
 import fr.techtical.nextsh.shared.core.sync.SyncStatus
+import fr.techtical.nextsh.ui.sessions.SessionTab
+import fr.techtical.nextsh.ui.sessions.TerminalTabStore
+import fr.techtical.nextsh.ui.sessions.TerminalTabsState
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
-import io.mockk.Runs
 import io.mockk.every
+import io.mockk.mockk
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
 import io.mockk.coJustRun
+import io.mockk.Runs
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -54,6 +79,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertSame
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -71,6 +98,9 @@ class HostViewModelTest {
     private lateinit var connectSession: ConnectSessionUseCase
 
     @MockK
+    private lateinit var sessionHandoff: SessionHandoff
+
+    @MockK
     private lateinit var vaultManager: VaultManager
 
     @MockK
@@ -83,7 +113,24 @@ class HostViewModelTest {
     private lateinit var syncScheduler: SyncScheduler
 
     @MockK
-    private lateinit var biometricHelper: BiometricHelper
+    private lateinit var tunnelManager: SshTunnelManager
+
+    @MockK
+    private lateinit var stopTunnel: StopTunnelUseCase
+
+    @MockK
+    private lateinit var tabStore: TerminalTabStore
+
+    private val tunnelStates = MutableStateFlow<Map<String, TunnelState>>(emptyMap())
+
+    @MockK
+    private lateinit var biometricPrompts: BiometricPromptCoordinator
+
+    /** The real lock on a clock that never moves. It starts locked, like the app: the tests unlock it. */
+    private val appLock = AppLock { 0L }
+
+    /** The terminal tabs the store holds: none, unless a test opens some. */
+    private val tabsState = MutableStateFlow(TerminalTabsState())
 
     private val testDispatcher = UnconfinedTestDispatcher()
 
@@ -98,9 +145,13 @@ class HostViewModelTest {
         every { sshKeyRepository.observeAll() } returns flowOf(emptyList())
         every { customThemeRepository.observeAll() } returns flowOf(emptyList())
         every { syncScheduler.syncState } returns MutableStateFlow(SyncState(SyncStatus.IDLE, null))
+        every { tunnelManager.tunnelStates } returns tunnelStates
+        every { tabStore.state } returns tabsState
         // Par défaut aucun id n'est celui d'une clé SSH.
         coEvery { sshKeyRepository.getById(any()) } returns null
 
+        every { sessionHandoff.offer(any()) } just Runs
+        appLock.unlock()
         viewModel = newViewModel()
     }
 
@@ -108,12 +159,17 @@ class HostViewModelTest {
     private fun newViewModel(ioDispatcher: CoroutineDispatcher = testDispatcher) = HostViewModel(
         hostRepository = hostRepository,
         connectSession = connectSession,
+        sessionHandoff = sessionHandoff,
         vaultManager = vaultManager,
         sshKeyRepository = sshKeyRepository,
         customThemeRepository = customThemeRepository,
         syncScheduler = syncScheduler,
-        biometricHelper = biometricHelper,
+        tunnelManager = tunnelManager,
+        stopTunnel = stopTunnel,
+        biometricPrompts = biometricPrompts,
+        appLock = appLock,
         ioDispatcher = ioDispatcher,
+        tabStore = tabStore,
     )
 
     @AfterEach
@@ -200,6 +256,1354 @@ class HostViewModelTest {
         val hostSlot = slot<Host>()
         coVerify(exactly = 1) { hostRepository.save(capture(hostSlot)) }
         assertFalse(hostSlot.captured.isFavorite, "isFavorite should be false for new host")
+    }
+
+    @Test
+    fun `saveHost writes the host name without the spaces around it`() = runTest {
+        coJustRun { hostRepository.save(any()) }
+        coJustRun { vaultManager.storePassword(any(), any()) }
+        viewModel.updateForm {
+            copy(
+                label = "Padded",
+                hostname = "  padded.example.com  ",
+                port = " 2222 ",
+                username = "user",
+                authType = AuthType.PASSWORD,
+                password = "pass",
+            )
+        }
+
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        val hostSlot = slot<Host>()
+        coVerify(exactly = 1) { hostRepository.save(capture(hostSlot)) }
+        assertEquals("padded.example.com", hostSlot.captured.hostname)
+        assertEquals(2222, hostSlot.captured.port)
+    }
+
+    @Test
+    fun `saveHost writes nothing for a host name that a restore would refuse`() = runTest {
+        coJustRun { hostRepository.save(any()) }
+        viewModel.updateForm {
+            copy(
+                label = "Spaced",
+                hostname = "inner space.example.com",
+                username = "user",
+                authType = AuthType.PASSWORD,
+                password = "pass",
+            )
+        }
+
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { hostRepository.save(any()) }
+    }
+
+    @Test
+    fun `saveHost writes nothing for a port out of range`() = runTest {
+        coJustRun { hostRepository.save(any()) }
+        listOf("0", "65536").forEach { badPort ->
+            viewModel.updateForm {
+                copy(
+                    label = "Port",
+                    hostname = "port.example.com",
+                    port = badPort,
+                    username = "user",
+                    authType = AuthType.PASSWORD,
+                    password = "pass",
+                )
+            }
+
+            viewModel.saveHost()
+            advanceUntilIdle()
+        }
+
+        coVerify(exactly = 0) { hostRepository.save(any()) }
+    }
+
+    // ── Editing a host deleted meanwhile ────────────────────────────────────
+
+    @Test
+    fun `saveHost on a host deleted meanwhile writes nothing and reports it`() = runTest {
+        val host = makeHost("h1", isFavorite = false)
+        // The form loads the host, then the stored row is gone (a sync deleted it) when saving.
+        coEvery { hostRepository.getById("h1") } returnsMany listOf(host, null)
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.loadHostForEdit("h1")
+        advanceUntilIdle()
+        viewModel.updateForm { copy(password = "secret") }
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        assertEquals(listOf<HostEvent>(HostEvent.HostNoLongerExists), events)
+        coVerify(exactly = 0) { hostRepository.update(any()) }
+        coVerify(exactly = 0) { hostRepository.save(any()) }
+        // Not even the password is written for a host that no longer exists...
+        coVerify(exactly = 0) { vaultManager.storePassword(any(), any()) }
+        // ...and the typed password does not stay in the form state.
+        assertEquals("", viewModel.formState.value.password)
+        collector.cancel()
+    }
+
+    @Test
+    fun `saveHost on an existing host reports HostSaved`() = runTest {
+        val host = makeHost("h1", isFavorite = false)
+        coEvery { hostRepository.getById("h1") } returns host
+        coJustRun { hostRepository.update(any()) }
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.loadHostForEdit("h1")
+        advanceUntilIdle()
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        assertEquals(listOf<HostEvent>(HostEvent.HostSaved), events)
+        collector.cancel()
+    }
+
+    // ── The form after a save: the screen leaves on HostSaved, it must not be seen resetting ──
+
+    /** A form with every visible field off its default, and a typed password. */
+    private fun HostFormState.typed() = copy(
+        label = "Prod",
+        hostname = "prod.example.com",
+        port = "2222",
+        username = "root",
+        authType = AuthType.PASSWORD,
+        password = "s3cret",
+        group = "work",
+        keepAliveSeconds = "45",
+        autoReconnect = false,
+    )
+
+    @Test
+    fun `saveHost keeps the visible fields as typed and drops only the password`() = runTest {
+        coJustRun { hostRepository.save(any()) }
+        // Read at the call: the ViewModel zeroes the array it hands over once the vault returns.
+        val stored = mutableListOf<String>()
+        every { vaultManager.storePassword(any(), any()) } answers { stored += secondArg<CharArray>().concatToString() }
+        viewModel.updateForm { typed() }
+        val typed = viewModel.formState.value
+
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        // The password did reach the vault, then left the form state at once...
+        assertEquals(listOf("s3cret"), stored)
+        assertEquals("", viewModel.formState.value.password)
+        // ...and nothing else changed: the options do not flip to their defaults.
+        assertEquals(typed.copy(password = ""), viewModel.formState.value)
+        assertFalse(viewModel.formState.value.autoReconnect)
+        assertEquals("2222", viewModel.formState.value.port)
+        assertEquals("work", viewModel.formState.value.group)
+    }
+    private suspend fun TestScope.loadedKeepAlive(stored: Int): String {
+        coEvery { hostRepository.getById("h1") } returns makeHost("h1", isFavorite = false).copy(keepAliveSeconds = stored)
+        viewModel.loadHostForEdit("h1")
+        advanceUntilIdle()
+        return viewModel.formState.value.keepAliveSeconds
+    }
+
+    @Test
+    fun `a stored keepalive out of the bounds loads bounded, without any write`() = runTest {
+        assertEquals("60", loadedKeepAlive(120))
+        assertTrue(viewModel.formState.value.isValid)
+        coVerify(exactly = 0) { hostRepository.update(any()) }
+        coVerify(exactly = 0) { hostRepository.save(any()) }
+    }
+
+    @Test
+    fun `a stored keepalive below 15 loads as 15, 0 stays 0 and a negative one loads as 0`() = runTest {
+        assertEquals("15", loadedKeepAlive(5))
+        assertEquals("0", loadedKeepAlive(0))
+        assertEquals("0", loadedKeepAlive(-3))
+        assertEquals("30", loadedKeepAlive(30))
+    }
+
+
+    @Test
+    fun `saveHost leaves an edited host form as loaded`() = runTest {
+        val host = makeHost("h1", isFavorite = false).copy(autoReconnect = false, keepAliveSeconds = 45)
+        coEvery { hostRepository.getById("h1") } returns host
+        coJustRun { hostRepository.update(any()) }
+        viewModel.loadHostForEdit("h1")
+        advanceUntilIdle()
+        val loaded = viewModel.formState.value
+
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { hostRepository.update(any()) }
+        assertEquals(loaded, viewModel.formState.value)
+    }
+
+    @Test
+    fun `opening the screen for a new host after a save starts from the defaults`() = runTest {
+        coJustRun { hostRepository.save(any()) }
+        coJustRun { vaultManager.storePassword(any(), any()) }
+        viewModel.updateForm { typed() }
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        // What HostDetailScreen does on entry for a new host.
+        viewModel.resetForm()
+
+        assertEquals(HostFormState(), viewModel.formState.value)
+    }
+
+    @Test
+    fun `opening the screen to edit a host after a save loads the stored host`() = runTest {
+        coJustRun { hostRepository.save(any()) }
+        coJustRun { vaultManager.storePassword(any(), any()) }
+        viewModel.updateForm { typed() }
+        viewModel.saveHost()
+        advanceUntilIdle()
+        coEvery { hostRepository.getById("h2") } returns makeHost("h2", isFavorite = false)
+
+        // What HostDetailScreen does on entry for an existing host.
+        viewModel.loadHostForEdit("h2")
+        advanceUntilIdle()
+
+        val form = viewModel.formState.value
+        assertEquals("h2", form.id)
+        assertEquals("Host h2", form.label)
+        assertEquals("", form.password)
+        assertTrue(form.autoReconnect)
+    }
+
+    @Test
+    fun `a second tap on Save while the screen is leaving saves once and reports once`() = runTest {
+        // The form stays valid after a save, so the guard is what stops a second new host.
+        coJustRun { hostRepository.save(any()) }
+        coJustRun { vaultManager.storePassword(any(), any()) }
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+        viewModel.updateForm { typed() }
+
+        viewModel.saveHost()
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { hostRepository.save(any()) }
+        assertEquals(listOf<HostEvent>(HostEvent.HostSaved), events)
+        collector.cancel()
+    }
+
+    @Test
+    fun `a save refused because the host is gone can be tried again`() = runTest {
+        val host = makeHost("h1", isFavorite = false)
+        // load, first save (row gone), second save (row back)
+        coEvery { hostRepository.getById("h1") } returnsMany listOf(host, null, host)
+        coJustRun { hostRepository.update(any()) }
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.loadHostForEdit("h1")
+        advanceUntilIdle()
+        viewModel.saveHost()
+        advanceUntilIdle()
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        assertEquals(listOf<HostEvent>(HostEvent.HostNoLongerExists, HostEvent.HostSaved), events)
+        coVerify(exactly = 1) { hostRepository.update(any()) }
+        collector.cancel()
+    }
+
+    // ── The save guard is released whatever ends the save ───────────────────
+
+    @Test
+    fun `the save guard is released when the repository throws, the next tap saves`() = runTest {
+        // The ViewModel catches the failure of a write and shows SAVE_FAILED (see the tests of the
+        // save errors): what matters here is that the guard does not stay shut behind it.
+        coEvery { hostRepository.save(any()) } throws IllegalStateException("database is locked") andThen Unit
+        coJustRun { vaultManager.storePassword(any(), any()) }
+        every { vaultManager.deletePassword(any()) } just Runs
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+        viewModel.updateForm { typed() }
+
+        viewModel.saveHost()
+        advanceUntilIdle()
+        assertTrue(events.isEmpty(), "a failed write reports nothing as saved")
+        assertEquals(HostSaveError.SAVE_FAILED, viewModel.saveError.value)
+        assertEquals(HostSavePhase.IDLE, viewModel.savePhase.value)
+
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        coVerify(exactly = 2) { hostRepository.save(any()) }
+        assertEquals(listOf<HostEvent>(HostEvent.HostSaved), events)
+        assertNull(viewModel.saveError.value)
+        collector.cancel()
+    }
+
+    @Test
+    fun `the save guard is released when the save is cancelled, the next tap saves`() = runTest {
+        // The write is in flight when the scope is cancelled (screen left, ViewModel cleared).
+        coEvery { hostRepository.save(any()) } coAnswers { awaitCancellation() }
+        coJustRun { vaultManager.storePassword(any(), any()) }
+        viewModel.updateForm { typed() }
+        viewModel.saveHost()
+        coVerify(exactly = 1) { hostRepository.save(any()) }
+
+        viewModel.viewModelScope.coroutineContext[Job]!!.cancelChildren()
+        advanceUntilIdle()
+        // Cancelled before the write ended: the form still holds what the user typed.
+        assertEquals("s3cret", viewModel.formState.value.password)
+
+        coEvery { hostRepository.save(any()) } just Runs
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        coVerify(exactly = 2) { hostRepository.save(any()) }
+        assertEquals("", viewModel.formState.value.password)
+    }
+
+    // ── deleteHost: running tunnels are stopped first ───────────────────────
+
+    private fun tunnelState(id: String, hostId: String, status: TunnelStatus) = TunnelState(
+        config = TunnelConfig(
+            id = id,
+            label = "Tunnel $id",
+            hostId = hostId,
+            type = TunnelType.LOCAL_FORWARD,
+            localPort = 8080,
+            remoteHost = "localhost",
+            remotePort = 80,
+        ),
+        status = status,
+    )
+
+    @Test
+    fun `deleteHost stops the tunnels of that host in every state, then deletes it`() = runTest {
+        tunnelStates.value = linkedMapOf(
+            "t-active" to tunnelState("t-active", "h1", TunnelStatus.ACTIVE),
+            "t-starting" to tunnelState("t-starting", "h1", TunnelStatus.STARTING),
+            "t-reconnecting" to tunnelState("t-reconnecting", "h1", TunnelStatus.RECONNECTING),
+            "t-error" to tunnelState("t-error", "h1", TunnelStatus.ERROR),
+            "t-other-host" to tunnelState("t-other-host", "h2", TunnelStatus.ACTIVE),
+        )
+        coEvery { stopTunnel(any()) } returns SshResult.Success(Unit)
+        coEvery { hostRepository.getById("h1") } returns null
+        coJustRun { hostRepository.delete("h1") }
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.deleteHost("h1")
+        advanceUntilIdle()
+
+        // Every stop happens before the delete: once the rows are tombstoned the list no longer
+        // shows the tunnels, so they could not be stopped from the UI any more.
+        coVerifyOrder {
+            stopTunnel("t-active")
+            stopTunnel("t-starting")
+            stopTunnel("t-reconnecting")
+            stopTunnel("t-error")
+            hostRepository.delete("h1")
+        }
+        coVerify(exactly = 0) { stopTunnel("t-other-host") }
+        assertEquals(listOf<HostEvent>(HostEvent.HostDeleted), events)
+        collector.cancel()
+    }
+
+    @Test
+    fun `deleteHost of a host without running tunnel stops nothing`() = runTest {
+        tunnelStates.value = mapOf("t-other-host" to tunnelState("t-other-host", "h2", TunnelStatus.ACTIVE))
+        coEvery { hostRepository.getById("h1") } returns null
+        coJustRun { hostRepository.delete("h1") }
+
+        viewModel.deleteHost("h1")
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { stopTunnel(any()) }
+        coVerify(exactly = 1) { hostRepository.delete("h1") }
+    }
+
+    @Test
+    fun `deleteHost still deletes when a tunnel stop reports a failure`() = runTest {
+        // Same as TunnelViewModel.deleteTunnel: a failed teardown must not make the host undeletable.
+        tunnelStates.value = mapOf("t1" to tunnelState("t1", "h1", TunnelStatus.ACTIVE))
+        coEvery { stopTunnel("t1") } returns SshResult.Error(SshErrorCode.UNKNOWN, "teardown failed")
+        coEvery { hostRepository.getById("h1") } returns null
+        coJustRun { hostRepository.delete("h1") }
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.deleteHost("h1")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { hostRepository.delete("h1") }
+        assertEquals(listOf<HostEvent>(HostEvent.HostDeleted), events)
+        collector.cancel()
+    }
+
+    @Test
+    fun `deleteHost reports an error and keeps the host when stopping a tunnel throws`() = runTest {
+        tunnelStates.value = mapOf("t1" to tunnelState("t1", "h1", TunnelStatus.ACTIVE))
+        coEvery { stopTunnel("t1") } throws IllegalStateException("boom")
+        coEvery { hostRepository.getById("h1") } returns null
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.deleteHost("h1")
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { hostRepository.delete(any()) }
+        // A typed event, with no payload: the screen shows a localized text, and nothing from the
+        // exception (message included) can reach the user.
+        assertEquals(listOf<HostEvent>(HostEvent.DeleteFailed), events)
+        collector.cancel()
+    }
+
+    @Test
+    fun `deleteHost reports an error when the repository delete throws`() = runTest {
+        coEvery { hostRepository.getById("h1") } returns null
+        coEvery { hostRepository.delete("h1") } throws IllegalStateException("database is locked")
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.deleteHost("h1")
+        advanceUntilIdle()
+
+        assertEquals(listOf<HostEvent>(HostEvent.DeleteFailed), events)
+        collector.cancel()
+    }
+
+    @Test
+    fun `deleteHost lets a cancellation through instead of reporting an error`() = runTest {
+        tunnelStates.value = mapOf("t1" to tunnelState("t1", "h1", TunnelStatus.ACTIVE))
+        coEvery { stopTunnel("t1") } throws CancellationException("cancelled")
+        coEvery { hostRepository.getById("h1") } returns null
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.deleteHost("h1")
+        advanceUntilIdle()
+
+        assertTrue(events.isEmpty(), "a cancellation is not a failure to show: $events")
+        coVerify(exactly = 0) { hostRepository.delete(any()) }
+        collector.cancel()
+    }
+
+    // ── Connecting from the list: one connection, handed over to the terminal ───
+
+    private fun connectedSession(host: Host, sessionId: String) =
+        SshSession(id = sessionId, host = host, status = SessionStatus.CONNECTED)
+
+    @Test
+    fun `connectToHost connects once and reports the session id with the host id`() = runTest {
+        val host = makeHost("h1", isFavorite = false)
+        coEvery { connectSession(host) } returns SshResult.Success(connectedSession(host, "session-42"))
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.connectToHost(host)
+        advanceUntilIdle()
+
+        // The event used to carry the HOST id under the name sessionId: the terminal then connected
+        // a second time to a host it believed it was handed.
+        assertEquals(listOf<HostEvent>(HostEvent.Connected(sessionId = "session-42", hostId = "h1")), events)
+        coVerify(exactly = 1) { connectSession(any()) }
+        // The reference of the connection is on offer to the terminal, which claims it.
+        verify(exactly = 1) { sessionHandoff.offer("session-42") }
+        assertNull(viewModel.uiState.value.connectingHostId)
+        collector.cancel()
+    }
+
+    @Test
+    fun `connectToHost offers the session before announcing it`() = runTest {
+        val host = makeHost("h1", isFavorite = false)
+        coEvery { connectSession(host) } returns SshResult.Success(connectedSession(host, "session-42"))
+        val order = mutableListOf<String>()
+        every { sessionHandoff.offer("session-42") } answers { order += "offer" }
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect { order += "event" }
+        }
+
+        viewModel.connectToHost(host)
+        advanceUntilIdle()
+
+        // The receiver claims as soon as it hears: the offer has to be there by then.
+        assertEquals(listOf("offer", "event"), order)
+        collector.cancel()
+    }
+
+    @Test
+    fun `connectToHost reports the error in the list and opens no terminal`() = runTest {
+        val host = makeHost("h1", isFavorite = false)
+        coEvery { connectSession(host) } returns SshResult.Error(SshErrorCode.AUTH_FAILED, "refused")
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.connectToHost(host)
+        advanceUntilIdle()
+
+        assertEquals(listOf<HostEvent>(HostEvent.Error("refused")), events)
+        assertNull(viewModel.uiState.value.connectingHostId)
+        verify(exactly = 0) { sessionHandoff.offer(any()) }
+        collector.cancel()
+    }
+
+    @Test
+    fun `connectToHost offers the session even when the list was left before the connection ended`() = runTest {
+        val host = makeHost("h1", isFavorite = false)
+        coEvery { connectSession(host) } returns SshResult.Success(connectedSession(host, "session-42"))
+        // No collector: the user switched to another tab while the connection was being made, the
+        // event is dropped and the terminal never opens. The offer is what keeps the session from
+        // staying open, unseen: nobody claims it and the hand-over releases it after its window.
+
+        viewModel.connectToHost(host)
+        advanceUntilIdle()
+
+        verify(exactly = 1) { sessionHandoff.offer("session-42") }
+        assertNull(viewModel.uiState.value.connectingHostId)
+    }
+
+    // ── Connecting from the list to a host that has a terminal tab ──────────
+
+    private fun terminalTab(host: Host, status: SessionStatus = SessionStatus.CONNECTED, sessionId: String = "session-${host.id}") =
+        SessionTab(sessionId = sessionId, host = host, terminalSession = mockk<SshTerminalSession>(), status = status)
+
+    @Test
+    fun `connectToHost on a host that has a tab opens the terminal on it and connects nothing`() = runTest {
+        val host = makeHost("h1", isFavorite = false)
+        tabsState.value = TerminalTabsState(tabs = listOf(terminalTab(host)))
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.connectToHost(host)
+        advanceUntilIdle()
+
+        assertEquals(listOf<HostEvent>(HostEvent.OpenTerminal("h1")), events)
+        coVerify(exactly = 0) { connectSession(any()) }
+        // Nothing was connected, so there is nothing to hand over to the terminal.
+        verify(exactly = 0) { sessionHandoff.offer(any()) }
+        assertNull(viewModel.uiState.value.connectingHostId)
+        collector.cancel()
+    }
+
+    @Test
+    fun `connectToHost on a host whose tab is disconnected opens the terminal too, whatever the status`() = runTest {
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        for (status in SessionStatus.entries) {
+            val host = makeHost("h-$status", isFavorite = false)
+            tabsState.value = TerminalTabsState(tabs = listOf(terminalTab(host, status)))
+
+            viewModel.connectToHost(host)
+            advanceUntilIdle()
+        }
+
+        assertEquals(SessionStatus.entries.map { HostEvent.OpenTerminal("h-$it") }, events)
+        coVerify(exactly = 0) { connectSession(any()) }
+        verify(exactly = 0) { sessionHandoff.offer(any()) }
+        collector.cancel()
+    }
+
+    @Test
+    fun `connectToHost on a host that has no tab connects as before even if other hosts have one`() = runTest {
+        val open = makeHost("h1", isFavorite = false)
+        val host = makeHost("h2", isFavorite = false)
+        tabsState.value = TerminalTabsState(tabs = listOf(terminalTab(open)))
+        coEvery { connectSession(host) } returns SshResult.Success(connectedSession(host, "session-42"))
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.connectToHost(host)
+        advanceUntilIdle()
+
+        assertEquals(listOf<HostEvent>(HostEvent.Connected(sessionId = "session-42", hostId = "h2")), events)
+        coVerify(exactly = 1) { connectSession(host) }
+        verify(exactly = 1) { sessionHandoff.offer("session-42") }
+        collector.cancel()
+    }
+
+    @Test
+    fun `connectToHost connects again once the tab of the host was closed`() = runTest {
+        val host = makeHost("h1", isFavorite = false)
+        tabsState.value = TerminalTabsState(tabs = listOf(terminalTab(host)))
+        tabsState.value = TerminalTabsState()
+        coEvery { connectSession(host) } returns SshResult.Success(connectedSession(host, "session-42"))
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.connectToHost(host)
+        advanceUntilIdle()
+
+        assertEquals(listOf<HostEvent>(HostEvent.Connected(sessionId = "session-42", hostId = "h1")), events)
+        collector.cancel()
+    }
+
+    @Test
+    fun `connectForSftp still connects for a host that has a tab, it never opens the terminal`() = runTest {
+        val host = makeHost("h1", isFavorite = false)
+        tabsState.value = TerminalTabsState(tabs = listOf(terminalTab(host)))
+        coEvery { connectSession(host) } returns SshResult.Success(connectedSession(host, "session-42"))
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.connectForSftp(host)
+        advanceUntilIdle()
+
+        assertEquals(listOf<HostEvent>(HostEvent.SftpReady("session-42", "Host h1")), events)
+        coVerify(exactly = 1) { connectSession(host) }
+        collector.cancel()
+    }
+
+    // ── The terminal tabs in the state of the list ──────────────────────────
+
+    @Test
+    fun `without a tab the list shows no banner and no dot`() {
+        val state = viewModel.uiState.value
+
+        assertEquals(0, state.openTerminalCount)
+        assertEquals(0, state.disconnectedTerminalCount)
+        assertTrue(state.openTerminalHostIds.isEmpty())
+        assertTrue(state.connectedTerminalHostIds.isEmpty())
+        assertEquals(HostTerminalTab.NONE, state.terminalTabOf("h1"))
+    }
+
+    @Test
+    fun `the state counts every tab and tells connected hosts from those left with a disconnected tab`() {
+        val h1 = makeHost("h1", isFavorite = false)
+        val h2 = makeHost("h2", isFavorite = false)
+        val h3 = makeHost("h3", isFavorite = false)
+        tabsState.value = TerminalTabsState(
+            tabs = listOf(
+                terminalTab(h1, SessionStatus.CONNECTED, sessionId = "s1"),
+                terminalTab(h2, SessionStatus.DISCONNECTED, sessionId = "s2"),
+                // Two tabs on one host: a connected one and a disconnected one.
+                terminalTab(h1, SessionStatus.DISCONNECTED, sessionId = "s3"),
+            ),
+        )
+
+        val state = viewModel.uiState.value
+
+        assertEquals(3, state.openTerminalCount, "a tab is counted, not a host")
+        assertEquals(2, state.disconnectedTerminalCount, "the banner says how many of the three are dead")
+        assertEquals(setOf("h1", "h2"), state.openTerminalHostIds)
+        assertEquals(setOf("h1"), state.connectedTerminalHostIds)
+        assertEquals(HostTerminalTab.CONNECTED, state.terminalTabOf(h1.id), "a connected tab wins over a disconnected one")
+        assertEquals(HostTerminalTab.DISCONNECTED, state.terminalTabOf(h2.id))
+        assertEquals(HostTerminalTab.NONE, state.terminalTabOf(h3.id))
+    }
+
+    @Test
+    fun `a tab in error or reconnecting does not make its host a connected one`() {
+        val errored = makeHost("h1", isFavorite = false)
+        val reconnecting = makeHost("h2", isFavorite = false)
+        tabsState.value = TerminalTabsState(
+            tabs = listOf(
+                terminalTab(errored, SessionStatus.ERROR),
+                terminalTab(reconnecting, SessionStatus.RECONNECTING),
+            ),
+        )
+
+        val state = viewModel.uiState.value
+
+        assertEquals(setOf("h1", "h2"), state.openTerminalHostIds)
+        assertTrue(state.connectedTerminalHostIds.isEmpty())
+    }
+
+    @Test
+    fun `the banner counts the disconnected tabs apart from the total`() {
+        val host = makeHost("h1", isFavorite = false)
+        tabsState.value = TerminalTabsState(tabs = listOf(terminalTab(host, sessionId = "s1")))
+
+        val allConnected = viewModel.uiState.value
+        assertEquals(1, allConnected.openTerminalCount)
+        assertEquals(0, allConnected.disconnectedTerminalCount, "a live tab is not a disconnected one")
+
+        tabsState.value = TerminalTabsState(
+            tabs = listOf(
+                terminalTab(host, sessionId = "s1"),
+                terminalTab(host, SessionStatus.DISCONNECTED, sessionId = "s2"),
+                terminalTab(host, SessionStatus.ERROR, sessionId = "s3"),
+            ),
+        )
+
+        val mixed = viewModel.uiState.value
+        assertEquals(3, mixed.openTerminalCount, "the total keeps every tab")
+        assertEquals(2, mixed.disconnectedTerminalCount, "a tab in error is as dead as a disconnected one")
+    }
+
+    @Test
+    fun `one dead tab alone is one open tab, one of them disconnected`() {
+        tabsState.value = TerminalTabsState(
+            tabs = listOf(terminalTab(makeHost("h1", isFavorite = false), SessionStatus.DISCONNECTED)),
+        )
+
+        val state = viewModel.uiState.value
+
+        assertEquals(1, state.openTerminalCount)
+        assertEquals(1, state.disconnectedTerminalCount)
+    }
+
+    @Test
+    fun `the state follows the store as tabs fall, come back and close`() {
+        val host = makeHost("h1", isFavorite = false)
+        val connected = terminalTab(host)
+
+        tabsState.value = TerminalTabsState(tabs = listOf(connected))
+        assertEquals(HostTerminalTab.CONNECTED, viewModel.uiState.value.terminalTabOf("h1"))
+
+        tabsState.value = TerminalTabsState(tabs = listOf(connected.copy(status = SessionStatus.DISCONNECTED)))
+        assertEquals(HostTerminalTab.DISCONNECTED, viewModel.uiState.value.terminalTabOf("h1"))
+        assertEquals(1, viewModel.uiState.value.openTerminalCount, "a disconnected tab is still an open one")
+        assertEquals(1, viewModel.uiState.value.disconnectedTerminalCount)
+
+        tabsState.value = TerminalTabsState()
+        assertEquals(0, viewModel.uiState.value.openTerminalCount)
+        assertEquals(0, viewModel.uiState.value.disconnectedTerminalCount)
+        assertEquals(HostTerminalTab.NONE, viewModel.uiState.value.terminalTabOf("h1"))
+    }
+
+    @Test
+    fun `a change of the active tab alone does not touch the list state`() {
+        val tabs = listOf(terminalTab(makeHost("h1", isFavorite = false)), terminalTab(makeHost("h2", isFavorite = false)))
+        tabsState.value = TerminalTabsState(tabs = tabs)
+        val before = viewModel.uiState.value
+
+        // Selecting a tab, like dragging the split divider, republishes the state of the store
+        // without changing its tabs: the list has nothing to redraw.
+        tabsState.value = tabsState.value.copy(activeTabIndex = 1)
+
+        assertSame(before, viewModel.uiState.value)
+    }
+
+    // ── Connecting for the SFTP browser: the same hand-over ─────────────────
+
+    @Test
+    fun `connectForSftp offers the session and announces it with the label of the host`() = runTest {
+        val host = makeHost("h1", isFavorite = false)
+        coEvery { connectSession(host) } returns SshResult.Success(connectedSession(host, "session-42"))
+        val events = mutableListOf<HostEvent>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.events.toList(events) }
+
+        viewModel.connectForSftp(host)
+        advanceUntilIdle()
+
+        assertEquals(listOf<HostEvent>(HostEvent.SftpReady("session-42", "Host h1")), events)
+        verify(exactly = 1) { sessionHandoff.offer("session-42") }
+        assertNull(viewModel.uiState.value.connectingHostId)
+        collector.cancel()
+    }
+
+    @Test
+    fun `connectForSftp offers the session even when the list was left meanwhile`() = runTest {
+        val host = makeHost("h1", isFavorite = false)
+        coEvery { connectSession(host) } returns SshResult.Success(connectedSession(host, "session-42"))
+        // The event is dropped without a collector, and the session used to leak with it.
+
+        viewModel.connectForSftp(host)
+        advanceUntilIdle()
+
+        verify(exactly = 1) { sessionHandoff.offer("session-42") }
+    }
+
+    // ── FIDO2 mode: PASSKEY is only offered to a host that already has it ───
+
+    private val securityKey = SshKey("sk-1", "YubiKey", SshKeyType.SK_ED25519, "sk-ssh-ed25519@openssh.com AAAA", fido2CredentialId = "AAAA")
+    private val securityKeyEcdsa = SshKey("sk-2", "Other YubiKey", SshKeyType.SK_ECDSA_256, "sk-ecdsa-sha2-nistp256@openssh.com AAAA")
+    private val ordinaryKey = SshKey("key-1", "Laptop", SshKeyType.ED25519, "ssh-ed25519 AAAA")
+    private val biometricKey = SshKey("bio-1", "Phone", SshKeyType.ECDSA_256, "ecdsa-sha2-nistp256 AAAA", isBiometric = true, keystoreAlias = "alias")
+    private val allKeys = listOf(securityKey, securityKeyEcdsa, ordinaryKey, biometricKey)
+
+    private fun fido2Host(mode: Fido2Mode?, credentialId: String, authType: AuthType = AuthType.FIDO2) = Host(
+        id = "h1",
+        label = "Host h1",
+        hostname = "hosth1.example.com",
+        username = "user",
+        authType = authType,
+        credentialId = credentialId,
+        fido2Mode = mode,
+    )
+
+    /** A ViewModel whose key list is [keys]: the list the form filters by mode comes from there. */
+    private fun viewModelWithKeys(keys: List<SshKey>): HostViewModel {
+        every { sshKeyRepository.observeAll() } returns flowOf(keys)
+        // loadHostForEdit looks the key of a host up by id: the keys of the list exist in the Vault.
+        keys.forEach { key -> coEvery { sshKeyRepository.getById(key.id) } returns key }
+        return newViewModel()
+    }
+
+    private suspend fun kotlinx.coroutines.test.TestScope.load(vm: HostViewModel, host: Host) {
+        coEvery { hostRepository.getById(host.id) } returns host
+        vm.loadHostForEdit(host.id)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `a new host is a security key host and is not offered the mode`() {
+        val form = viewModel.formState.value
+
+        assertEquals(Fido2Mode.HARDWARE_KEY, form.fido2Mode)
+        assertFalse(form.showFido2ModeChoice)
+    }
+
+    @Test
+    fun `choosing FIDO2 for a new host keeps the security key mode and offers no choice`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+
+        vm.selectAuthType(AuthType.FIDO2)
+
+        assertEquals(AuthType.FIDO2, vm.formState.value.authType)
+        assertEquals(Fido2Mode.HARDWARE_KEY, vm.formState.value.fido2Mode)
+        assertFalse(vm.formState.value.showFido2ModeChoice)
+    }
+
+    @Test
+    fun `a new FIDO2 host is saved in security key mode`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        coJustRun { hostRepository.save(any()) }
+        vm.updateForm { copy(label = "Prod", hostname = "prod.example.com", username = "root") }
+        vm.selectAuthType(AuthType.FIDO2)
+        vm.updateForm { copy(selectedKeyId = "sk-1") }
+
+        vm.saveHost()
+        advanceUntilIdle()
+
+        val saved = slot<Host>()
+        coVerify(exactly = 1) { hostRepository.save(capture(saved)) }
+        assertEquals(Fido2Mode.HARDWARE_KEY, saved.captured.fido2Mode)
+        assertEquals("sk-1", saved.captured.credentialId)
+    }
+
+    @Test
+    fun `a host saved in security key mode is not offered the mode when it is opened again`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        load(vm, fido2Host(Fido2Mode.HARDWARE_KEY, "sk-1"))
+
+        assertEquals(Fido2Mode.HARDWARE_KEY, vm.formState.value.fido2Mode)
+        assertFalse(vm.formState.value.showFido2ModeChoice)
+        assertEquals("sk-1", vm.formState.value.selectedKeyId)
+    }
+
+    @Test
+    fun `a FIDO2 host from the Desktop, without a mode, is a security key host without a choice`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        load(vm, fido2Host(mode = null, credentialId = "sk-1"))
+
+        assertEquals(Fido2Mode.HARDWARE_KEY, vm.formState.value.fido2Mode)
+        assertFalse(vm.formState.value.showFido2ModeChoice)
+        assertEquals("sk-1", vm.formState.value.selectedKeyId)
+    }
+
+    @Test
+    fun `a host that is not FIDO2 does not bring a stale PASSKEY mode back`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        load(vm, fido2Host(Fido2Mode.PASSKEY, "cred-1", authType = AuthType.PASSWORD))
+
+        assertEquals(Fido2Mode.HARDWARE_KEY, vm.formState.value.fido2Mode)
+        assertFalse(vm.formState.value.showFido2ModeChoice)
+        // And switching it to FIDO2 gives a security key host, not a PASSKEY one without a way out.
+        vm.selectAuthType(AuthType.FIDO2)
+        assertEquals(Fido2Mode.HARDWARE_KEY, vm.formState.value.fido2Mode)
+        assertFalse(vm.formState.value.showFido2ModeChoice)
+    }
+
+    @Test
+    fun `a host already in PASSKEY mode keeps the mode, its key and the choice`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        load(vm, fido2Host(Fido2Mode.PASSKEY, "key-1"))
+
+        val form = vm.formState.value
+        assertEquals(Fido2Mode.PASSKEY, form.fido2Mode)
+        assertTrue(form.showFido2ModeChoice)
+        assertEquals("key-1", form.selectedKeyId)
+    }
+
+    @Test
+    fun `a host in PASSKEY mode can be saved as it is, still in PASSKEY mode`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        coJustRun { hostRepository.update(any()) }
+        load(vm, fido2Host(Fido2Mode.PASSKEY, "key-1"))
+
+        vm.saveHost()
+        advanceUntilIdle()
+
+        val saved = slot<Host>()
+        coVerify(exactly = 1) { hostRepository.update(capture(saved)) }
+        assertEquals(Fido2Mode.PASSKEY, saved.captured.fido2Mode)
+        assertEquals("key-1", saved.captured.credentialId)
+    }
+
+    @Test
+    fun `a host in PASSKEY mode can move to a security key, which drops its ordinary key`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        coJustRun { hostRepository.update(any()) }
+        load(vm, fido2Host(Fido2Mode.PASSKEY, "key-1"))
+
+        vm.selectFido2Mode(Fido2Mode.HARDWARE_KEY)
+
+        val form = vm.formState.value
+        assertEquals(Fido2Mode.HARDWARE_KEY, form.fido2Mode)
+        // The ordinary key is not in the list of security keys: it must not stay selected out of sight.
+        assertNull(form.selectedKeyId)
+        assertFalse(form.isValid, "a key has to be chosen before the host can be saved")
+        // The choice stays for the time of the edit, so the user can go back.
+        assertTrue(form.showFido2ModeChoice)
+
+        vm.updateForm { copy(selectedKeyId = "sk-1") }
+        vm.saveHost()
+        advanceUntilIdle()
+
+        val saved = slot<Host>()
+        coVerify(exactly = 1) { hostRepository.update(capture(saved)) }
+        assertEquals(Fido2Mode.HARDWARE_KEY, saved.captured.fido2Mode)
+        assertEquals("sk-1", saved.captured.credentialId)
+    }
+
+    @Test
+    fun `going back to PASSKEY mode does not bring a security key along`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        load(vm, fido2Host(Fido2Mode.PASSKEY, "key-1"))
+        vm.selectFido2Mode(Fido2Mode.HARDWARE_KEY)
+        vm.updateForm { copy(selectedKeyId = "sk-1") }
+
+        vm.selectFido2Mode(Fido2Mode.PASSKEY)
+
+        assertEquals(Fido2Mode.PASSKEY, vm.formState.value.fido2Mode)
+        assertNull(vm.formState.value.selectedKeyId)
+    }
+
+    @Test
+    fun `choosing the mode already in force changes nothing, the key stays selected`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        load(vm, fido2Host(Fido2Mode.PASSKEY, "key-1"))
+        val before = vm.formState.value
+
+        vm.selectFido2Mode(Fido2Mode.PASSKEY)
+
+        assertEquals(before, vm.formState.value)
+    }
+
+    @Test
+    fun `switching a host to FIDO2 drops an ordinary key that the security key list does not offer`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.selectAuthType(AuthType.SSH_KEY)
+        vm.updateForm { copy(selectedKeyId = "key-1") }
+
+        vm.selectAuthType(AuthType.FIDO2)
+
+        assertNull(vm.formState.value.selectedKeyId)
+    }
+
+    @Test
+    fun `switching a host to FIDO2 keeps a security key it was given`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.selectAuthType(AuthType.SSH_KEY)
+        vm.updateForm { copy(selectedKeyId = "sk-2") }
+
+        vm.selectAuthType(AuthType.FIDO2)
+
+        assertEquals("sk-2", vm.formState.value.selectedKeyId)
+    }
+
+    @Test
+    fun `switching between the other authentication types keeps the selected key`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.selectAuthType(AuthType.SSH_KEY)
+        vm.updateForm { copy(selectedKeyId = "key-1") }
+
+        vm.selectAuthType(AuthType.CERTIFICATE)
+
+        assertEquals("key-1", vm.formState.value.selectedKeyId)
+        assertEquals(AuthType.CERTIFICATE, vm.formState.value.authType)
+    }
+
+    @Test
+    fun `switching a host to SSH key drops a security key, which has no private key in the Vault`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.selectAuthType(AuthType.FIDO2)
+        vm.updateForm { copy(selectedKeyId = "sk-1") }
+
+        vm.selectAuthType(AuthType.SSH_KEY)
+
+        assertEquals(AuthType.SSH_KEY, vm.formState.value.authType)
+        assertNull(vm.formState.value.selectedKeyId, "it would be saved out of sight, and fail at connection")
+        assertFalse(vm.formState.value.isValid)
+    }
+
+    @Test
+    fun `switching a host to certificate drops a security key too`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.selectAuthType(AuthType.FIDO2)
+        vm.updateForm { copy(selectedKeyId = "sk-2") }
+
+        vm.selectAuthType(AuthType.CERTIFICATE)
+
+        assertNull(vm.formState.value.selectedKeyId)
+    }
+
+    @Test
+    fun `switching a host to SSH key keeps an ordinary key it was given`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.updateForm { copy(selectedKeyId = "key-1") }
+
+        vm.selectAuthType(AuthType.SSH_KEY)
+
+        assertEquals("key-1", vm.formState.value.selectedKeyId)
+    }
+
+    @Test
+    fun `switching a host to password keeps whatever was selected`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.selectAuthType(AuthType.FIDO2)
+        vm.updateForm { copy(selectedKeyId = "sk-1") }
+
+        vm.selectAuthType(AuthType.PASSWORD)
+
+        assertEquals("sk-1", vm.formState.value.selectedKeyId, "password has no list of keys: nothing to drop")
+    }
+
+    @Test
+    fun `choosing the authentication already in force changes nothing`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.selectAuthType(AuthType.SSH_KEY)
+        vm.updateForm { copy(selectedKeyId = "key-1") }
+        val before = vm.formState.value
+
+        vm.selectAuthType(AuthType.SSH_KEY)
+
+        assertEquals(before, vm.formState.value)
+    }
+
+    // ── An SSH key host saved with a security key before the lists stopped offering one ──
+
+    @Test
+    fun `opening an SSH key host saved with a security key drops the key, the form asks for another`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        coEvery { sshKeyRepository.getById("sk-1") } returns securityKey
+        coJustRun { hostRepository.update(any()) }
+
+        load(vm, fido2Host(mode = null, credentialId = "sk-1", authType = AuthType.SSH_KEY))
+
+        val form = vm.formState.value
+        assertEquals(AuthType.SSH_KEY, form.authType)
+        assertNull(form.selectedKeyId, "the list of an SSH key host does not show it: it must not stay selected")
+        assertFalse(form.selectedKeyMissing, "the key exists, it is only not offered: no missing key alert")
+        assertFalse(form.isValid, "a key has to be chosen before the host can be saved")
+        vm.saveHost()
+        advanceUntilIdle()
+        coVerify(exactly = 0) { hostRepository.update(any()) }
+
+        vm.updateForm { copy(selectedKeyId = "key-1") }
+        assertTrue(vm.formState.value.isValid)
+    }
+
+    @Test
+    fun `opening a certificate host saved with a security key drops it too`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        coEvery { sshKeyRepository.getById("sk-2") } returns securityKeyEcdsa
+
+        load(vm, fido2Host(mode = null, credentialId = "sk-2", authType = AuthType.CERTIFICATE))
+
+        assertNull(vm.formState.value.selectedKeyId)
+        assertFalse(vm.formState.value.selectedKeyMissing)
+        assertFalse(vm.formState.value.isValid)
+    }
+
+    @Test
+    fun `opening an SSH key host with an ordinary key keeps the key`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        coEvery { sshKeyRepository.getById("key-1") } returns ordinaryKey
+
+        load(vm, fido2Host(mode = null, credentialId = "key-1", authType = AuthType.SSH_KEY))
+
+        assertEquals("key-1", vm.formState.value.selectedKeyId)
+        assertTrue(vm.formState.value.isValid)
+    }
+
+    @Test
+    fun `opening an SSH key host whose key is no longer in the Vault clears the selection and flags the missing key`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        coEvery { sshKeyRepository.getById("gone") } returns null
+
+        load(vm, fido2Host(mode = null, credentialId = "gone", authType = AuthType.SSH_KEY))
+
+        val form = vm.formState.value
+        assertNull(form.selectedKeyId, "the dangling key must not stay selected out of sight")
+        assertTrue(form.selectedKeyMissing)
+        assertTrue(form.showMissingKeyError)
+        assertFalse(form.isValid, "a key has to be chosen before the host can be saved")
+    }
+
+    @Test
+    fun `the keys of an SSH key host are the ones with a private key in the Vault`() {
+        // A biometric key is not one: its private half never leaves the Keystore.
+        assertEquals(listOf(ordinaryKey), privateKeysFor(allKeys))
+        assertEquals(emptyList<SshKey>(), privateKeysFor(listOf(securityKey, securityKeyEcdsa)))
+        assertEquals(emptyList<SshKey>(), privateKeysFor(listOf(biometricKey)))
+    }
+
+    @Test
+    fun `the keys of a biometric key host are the biometric keys only`() {
+        assertEquals(listOf(biometricKey), biometricKeysFor(allKeys))
+        assertEquals(emptyList<SshKey>(), biometricKeysFor(listOf(securityKey, securityKeyEcdsa, ordinaryKey)))
+        assertEquals(emptyList<SshKey>(), biometricKeysFor(emptyList()))
+    }
+
+    @Test
+    fun `no key of the Vault is offered to both an SSH key host and a biometric key host`() {
+        val both = privateKeysFor(allKeys).toSet() intersect biometricKeysFor(allKeys).toSet()
+        assertTrue(both.isEmpty(), "a key in both lists would be picked for the wrong kind of host")
+    }
+
+    // ── BIOMETRIC_KEY: a fifth authentication type, with its own list of keys ──
+
+    @Test
+    fun `a biometric key host needs a key before it can be saved`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.updateForm { copy(label = "Prod", hostname = "prod.example.com", username = "root") }
+
+        vm.selectAuthType(AuthType.BIOMETRIC_KEY)
+
+        assertEquals(AuthType.BIOMETRIC_KEY, vm.formState.value.authType)
+        assertNull(vm.formState.value.selectedKeyId)
+        assertFalse(vm.formState.value.isValid, "a key has to be chosen before the host can be saved")
+
+        vm.updateForm { copy(selectedKeyId = "bio-1") }
+        assertTrue(vm.formState.value.isValid)
+    }
+
+    @Test
+    fun `a biometric key host with no biometric key in the Vault cannot be saved`() = runTest {
+        val vm = viewModelWithKeys(listOf(ordinaryKey, securityKey))
+        vm.updateForm { copy(label = "Prod", hostname = "prod.example.com", username = "root") }
+
+        vm.selectAuthType(AuthType.BIOMETRIC_KEY)
+        vm.saveHost()
+        advanceUntilIdle()
+
+        assertFalse(vm.formState.value.isValid)
+        coVerify(exactly = 0) { hostRepository.save(any()) }
+    }
+
+    @Test
+    fun `a new biometric key host is saved with the key as its credential`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        coJustRun { hostRepository.save(any()) }
+        vm.updateForm { copy(label = "Prod", hostname = "prod.example.com", username = "root") }
+        vm.selectAuthType(AuthType.BIOMETRIC_KEY)
+        vm.updateForm { copy(selectedKeyId = "bio-1") }
+
+        vm.saveHost()
+        advanceUntilIdle()
+
+        val saved = slot<Host>()
+        coVerify(exactly = 1) { hostRepository.save(capture(saved)) }
+        assertEquals(AuthType.BIOMETRIC_KEY, saved.captured.authType)
+        assertEquals("bio-1", saved.captured.credentialId)
+        assertNull(saved.captured.fido2Mode, "the FIDO2 mode is of no use to this kind of host")
+        // No password is typed or stored: the key is the credential.
+        coVerify(exactly = 0) { vaultManager.storePassword(any(), any()) }
+    }
+
+    @Test
+    fun `switching a host to a biometric key keeps a biometric key it was given`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.updateForm { copy(selectedKeyId = "bio-1") }
+
+        vm.selectAuthType(AuthType.BIOMETRIC_KEY)
+
+        assertEquals(AuthType.BIOMETRIC_KEY, vm.formState.value.authType)
+        assertEquals("bio-1", vm.formState.value.selectedKeyId)
+    }
+
+    @Test
+    fun `switching a host to a biometric key drops an ordinary key and a security key`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.selectAuthType(AuthType.SSH_KEY)
+        vm.updateForm { copy(selectedKeyId = "key-1") }
+
+        vm.selectAuthType(AuthType.BIOMETRIC_KEY)
+        assertNull(vm.formState.value.selectedKeyId, "an ordinary key is not in the list of biometric keys")
+
+        vm.selectAuthType(AuthType.FIDO2)
+        vm.updateForm { copy(selectedKeyId = "sk-1") }
+        vm.selectAuthType(AuthType.BIOMETRIC_KEY)
+        assertNull(vm.formState.value.selectedKeyId, "nor is a security key")
+        assertFalse(vm.formState.value.isValid)
+    }
+
+    @Test
+    fun `switching a biometric key host to SSH key, certificate or FIDO2 drops the biometric key`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+
+        listOf(AuthType.SSH_KEY, AuthType.CERTIFICATE, AuthType.FIDO2).forEach { type ->
+            vm.selectAuthType(AuthType.BIOMETRIC_KEY)
+            vm.updateForm { copy(selectedKeyId = "bio-1") }
+
+            vm.selectAuthType(type)
+
+            assertEquals(type, vm.formState.value.authType)
+            assertNull(vm.formState.value.selectedKeyId, "a biometric key is not offered to $type: it must not stay selected")
+            assertFalse(vm.formState.value.isValid)
+        }
+    }
+
+    @Test
+    fun `switching a biometric key host to password keeps whatever was selected`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.selectAuthType(AuthType.BIOMETRIC_KEY)
+        vm.updateForm { copy(selectedKeyId = "bio-1") }
+
+        vm.selectAuthType(AuthType.PASSWORD)
+
+        assertEquals("bio-1", vm.formState.value.selectedKeyId, "password has no list of keys: nothing to drop")
+    }
+
+    @Test
+    fun `a biometric key kept through password is dropped when the host goes on to SSH key or certificate`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+
+        listOf(AuthType.SSH_KEY, AuthType.CERTIFICATE).forEach { type ->
+            vm.selectAuthType(AuthType.BIOMETRIC_KEY)
+            vm.updateForm { copy(selectedKeyId = "bio-1") }
+            vm.selectAuthType(AuthType.PASSWORD)
+            assertEquals("bio-1", vm.formState.value.selectedKeyId, "kept while the host is on password")
+
+            vm.selectAuthType(type)
+
+            assertEquals(type, vm.formState.value.authType)
+            assertNull(vm.formState.value.selectedKeyId, "hidden on password, it must not come back as the $type key")
+            assertFalse(vm.formState.value.isValid)
+        }
+    }
+
+    @Test
+    fun `going from password to a biometric key drops a leftover ordinary key`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.updateForm { copy(selectedKeyId = "key-1") }
+
+        vm.selectAuthType(AuthType.BIOMETRIC_KEY)
+
+        assertNull(vm.formState.value.selectedKeyId)
+        assertFalse(vm.formState.value.isValid)
+    }
+
+    @Test
+    fun `going from password to a biometric key keeps a leftover biometric key`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.selectAuthType(AuthType.BIOMETRIC_KEY)
+        vm.updateForm { copy(selectedKeyId = "bio-1") }
+        vm.selectAuthType(AuthType.PASSWORD)
+
+        vm.selectAuthType(AuthType.BIOMETRIC_KEY)
+
+        assertEquals("bio-1", vm.formState.value.selectedKeyId)
+    }
+
+    @Test
+    fun `choosing the biometric key authentication already in force changes nothing`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        vm.selectAuthType(AuthType.BIOMETRIC_KEY)
+        vm.updateForm { copy(selectedKeyId = "bio-1") }
+        val before = vm.formState.value
+
+        vm.selectAuthType(AuthType.BIOMETRIC_KEY)
+
+        assertEquals(before, vm.formState.value)
+    }
+
+    @Test
+    fun `opening a biometric key host restores its key, and it can be saved as it is`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        coEvery { sshKeyRepository.getById("bio-1") } returns biometricKey
+        coJustRun { hostRepository.update(any()) }
+
+        load(vm, fido2Host(mode = null, credentialId = "bio-1", authType = AuthType.BIOMETRIC_KEY))
+
+        val form = vm.formState.value
+        assertEquals(AuthType.BIOMETRIC_KEY, form.authType)
+        assertEquals("bio-1", form.selectedKeyId)
+        assertTrue(form.isValid)
+
+        vm.saveHost()
+        advanceUntilIdle()
+
+        val saved = slot<Host>()
+        coVerify(exactly = 1) { hostRepository.update(capture(saved)) }
+        assertEquals(AuthType.BIOMETRIC_KEY, saved.captured.authType)
+        assertEquals("bio-1", saved.captured.credentialId)
+    }
+
+    @Test
+    fun `opening a biometric key host whose key is not a biometric key drops it, the form asks for another`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        coEvery { sshKeyRepository.getById("key-1") } returns ordinaryKey
+
+        load(vm, fido2Host(mode = null, credentialId = "key-1", authType = AuthType.BIOMETRIC_KEY))
+
+        assertNull(vm.formState.value.selectedKeyId, "the list of biometric keys does not show it")
+        assertFalse(vm.formState.value.selectedKeyMissing, "the key exists, it is only not offered: no missing key alert")
+        assertFalse(vm.formState.value.isValid)
+    }
+
+    @Test
+    fun `opening a biometric key host whose key is no longer in the Vault clears the selection and flags the missing key`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        coEvery { sshKeyRepository.getById("gone") } returns null
+
+        load(vm, fido2Host(mode = null, credentialId = "gone", authType = AuthType.BIOMETRIC_KEY))
+
+        val form = vm.formState.value
+        assertNull(form.selectedKeyId, "the dangling key must not stay selected out of sight")
+        assertTrue(form.selectedKeyMissing)
+        assertTrue(form.showMissingKeyError)
+        assertFalse(form.isValid, "a key has to be chosen before the host can be saved")
+    }
+
+    @Test
+    fun `opening an SSH key host saved with a biometric key drops the key, the form asks for another`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        coEvery { sshKeyRepository.getById("bio-1") } returns biometricKey
+        coJustRun { hostRepository.update(any()) }
+
+        load(vm, fido2Host(mode = null, credentialId = "bio-1", authType = AuthType.SSH_KEY))
+
+        val form = vm.formState.value
+        assertEquals(AuthType.SSH_KEY, form.authType)
+        assertNull(form.selectedKeyId, "the list of an SSH key host does not show it: it must not stay selected")
+        assertFalse(form.selectedKeyMissing, "the key exists, it is only not offered: no missing key alert")
+        assertFalse(form.isValid, "a key has to be chosen before the host can be saved")
+        vm.saveHost()
+        advanceUntilIdle()
+        coVerify(exactly = 0) { hostRepository.update(any()) }
+
+        vm.updateForm { copy(selectedKeyId = "key-1") }
+        assertTrue(vm.formState.value.isValid)
+    }
+
+    @Test
+    fun `opening a certificate host saved with a biometric key drops it too`() = runTest {
+        val vm = viewModelWithKeys(allKeys)
+        coEvery { sshKeyRepository.getById("bio-1") } returns biometricKey
+
+        load(vm, fido2Host(mode = null, credentialId = "bio-1", authType = AuthType.CERTIFICATE))
+
+        assertNull(vm.formState.value.selectedKeyId)
+        assertFalse(vm.formState.value.selectedKeyMissing)
+        assertFalse(vm.formState.value.isValid)
+    }
+
+    @Test
+    fun `the keys of each FIDO2 mode are the security keys, or the ordinary keys`() {
+        assertEquals(
+            listOf(securityKey, securityKeyEcdsa),
+            fido2KeysFor(Fido2Mode.HARDWARE_KEY, allKeys),
+        )
+        // PASSKEY signs in with a private key of the Vault: neither a security key nor a biometric key has one.
+        assertEquals(listOf(ordinaryKey), fido2KeysFor(Fido2Mode.PASSKEY, allKeys))
+        assertEquals(emptyList<SshKey>(), fido2KeysFor(Fido2Mode.HARDWARE_KEY, listOf(ordinaryKey)))
     }
 
     // ── Mot de passe d'un hôte : jamais sous l'id d'une clé SSH ─────────────
@@ -505,7 +1909,7 @@ class HostViewModelTest {
     @Test
     fun `loadHostForEdit clears the selection and flags a key that no longer exists`() = runTest {
         // sshKeyRepository.getById renvoie null par défaut : la clé n'existe plus.
-        for (authType in listOf(AuthType.SSH_KEY, AuthType.CERTIFICATE, AuthType.FIDO2)) {
+        for (authType in listOf(AuthType.SSH_KEY, AuthType.CERTIFICATE, AuthType.FIDO2, AuthType.BIOMETRIC_KEY)) {
             coEvery { hostRepository.getById("h1") } returns makeHostWith(authType, "key-gone")
 
             viewModel.loadHostForEdit("h1")
@@ -784,31 +2188,23 @@ class HostViewModelTest {
     private val errorCallbacks = mutableListOf<(Int, String) -> Unit>()
 
     /**
-     * Remplace l'invite système. Les rappels de CHAQUE invite sont empilés dans [successCallbacks]
-     * et [errorCallbacks] (rang 0 = première invite), les tests les déclenchent à la main.
+     * Remplace l'invite système, demandée au coordinateur. Chaque invite attend une réponse, que les
+     * tests donnent à la main par les rappels de CHAQUE invite, empilés dans [successCallbacks] et
+     * [errorCallbacks] (rang 0 = première invite) : un succès, ou un code d'erreur de BiometricPrompt
+     * traduit comme le fait le coordinateur ([biometricResponseForError]). Une invite ne répond
+     * qu'une fois : le second rappel de la même invite est sans effet.
      */
     private fun stubPrompt() {
-        every {
-            biometricHelper.authenticate(
-                activity = any(),
-                title = any(),
-                subtitle = any(),
-                onSuccess = capture(successCallbacks),
-                onError = capture(errorCallbacks),
-            )
-        } just Runs
+        coEvery { biometricPrompts.authenticateVault(any()) } coAnswers {
+            val answer = CompletableDeferred<BiometricPromptResponse?>()
+            successCallbacks += { _: BiometricPrompt.AuthenticationResult -> answer.complete(BiometricPromptResponse.Authorized) }
+            errorCallbacks += { errorCode: Int, _: String -> answer.complete(biometricResponseForError(errorCode)) }
+            answer.await()
+        }
     }
 
     private fun verifyPromptShown(times: Int) {
-        verify(exactly = times) {
-            biometricHelper.authenticate(
-                activity = any(),
-                title = any(),
-                subtitle = any(),
-                onSuccess = any(),
-                onError = any(),
-            )
-        }
+        coVerify(exactly = times) { biometricPrompts.authenticateVault(any()) }
     }
 
     private fun fillNewPasswordHost() {
@@ -824,8 +2220,8 @@ class HostViewModelTest {
     }
 
     /** Rôle de l'écran RESUMED : lance l'invite pour la demande de ré-authentification en attente. */
-    private fun confirmIdentity(activity: FragmentActivity? = mockk(relaxed = true)) {
-        viewModel.confirmIdentityAndSave(activity, "title", "subtitle")
+    private fun confirmIdentity() {
+        viewModel.confirmIdentityAndSave()
     }
 
     /** Le vault refuse toute écriture de mot de passe : authentification expirée. */
@@ -920,6 +2316,7 @@ class HostViewModelTest {
         stubPrompt()
         val events = collectEvents()
         fillNewPasswordHost()
+        val formBefore = viewModel.formState.value
 
         viewModel.saveHost()
         advanceUntilIdle()
@@ -943,7 +2340,8 @@ class HostViewModelTest {
         }
         assertEquals(HostSavePhase.IDLE, viewModel.savePhase.value)
         assertNull(viewModel.saveError.value)
-        assertEquals(HostFormState(), viewModel.formState.value, "the form is reset after a successful save")
+        // Only the password leaves the form: the screen is leaving, its options must not flip to their defaults.
+        assertEquals(formBefore.copy(password = ""), viewModel.formState.value)
     }
 
     @Test
@@ -971,25 +2369,98 @@ class HostViewModelTest {
     }
 
     @Test
-    fun `the prompt is shown with the title and subtitle given by the screen`() = runTest {
+    fun `the prompt is the confirm-save prompt of the coordinator, the screen gives it no activity`() = runTest {
         vaultExpired()
         stubPrompt()
-        val screenActivity = mockk<FragmentActivity>(relaxed = true)
         fillNewPasswordHost()
 
         viewModel.saveHost()
         advanceUntilIdle()
-        viewModel.confirmIdentityAndSave(screenActivity, "Confirm save", "The vault has locked.")
+        viewModel.confirmIdentityAndSave()
 
-        verify(exactly = 1) {
-            biometricHelper.authenticate(
-                activity = screenActivity,
-                title = "Confirm save",
-                subtitle = "The vault has locked.",
-                onSuccess = any(),
-                onError = any(),
-            )
-        }
+        coVerify(exactly = 1) { biometricPrompts.authenticateVault(VaultAuthPurpose.CONFIRM_SAVE) }
+    }
+
+    // ── Sous l'écran de verrou, la demande attend le déverrouillage ─────────
+
+    @Test
+    fun `under the lock screen the re-authentication request waits, intact, and no prompt is opened`() = runTest {
+        vaultExpired()
+        stubPrompt()
+        fillNewPasswordHost()
+        viewModel.saveHost()
+        advanceUntilIdle()
+        assertEquals(HostSavePhase.AWAITING_REAUTH, viewModel.savePhase.value)
+
+        appLock.lock() // the app locked while the user was filling the form
+        confirmIdentity()
+        confirmIdentity()
+
+        assertEquals(HostSavePhase.AWAITING_REAUTH, viewModel.savePhase.value, "neither consumed nor lost")
+        verifyPromptShown(times = 0)
+        assertNull(viewModel.saveError.value)
+        assertTrue(viewModel.appLocked.value, "the screen sees the lock and waits for it")
+    }
+
+    @Test
+    fun `the request goes out once the app is unlocked, the screen asks again when the lock falls`() = runTest {
+        vaultExpired()
+        stubPrompt()
+        fillNewPasswordHost()
+        viewModel.saveHost()
+        advanceUntilIdle()
+        appLock.lock()
+        confirmIdentity()
+        verifyPromptShown(times = 0)
+
+        appLock.unlock()
+        assertFalse(viewModel.appLocked.value)
+        confirmIdentity()
+
+        assertEquals(HostSavePhase.PROMPT_SHOWN, viewModel.savePhase.value)
+        verifyPromptShown(times = 1)
+    }
+
+    @Test
+    fun `a vault that refuses the write of the host does not lock the app, the save keeps its own retry`() = runTest {
+        vaultExpired()
+        fillNewPasswordHost()
+
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        assertEquals(HostSavePhase.AWAITING_REAUTH, viewModel.savePhase.value)
+        assertFalse(appLock.isLocked())
+    }
+
+    @Test
+    fun `a prompt that nobody answered in time shows the vault unavailable message`() = runTest {
+        vaultExpired()
+        coEvery { biometricPrompts.authenticateVault(any()) } returns null
+        fillNewPasswordHost()
+        val formBefore = viewModel.formState.value
+
+        viewModel.saveHost()
+        advanceUntilIdle()
+        confirmIdentity()
+
+        assertEquals(HostSaveError.VAULT_UNAVAILABLE, viewModel.saveError.value)
+        assertEquals(formBefore, viewModel.formState.value)
+        assertEquals(HostSavePhase.IDLE, viewModel.savePhase.value)
+    }
+
+    @Test
+    fun `a prompt cancelled by the system because the app was left says the vault stayed locked`() = runTest {
+        vaultExpired()
+        coEvery { biometricPrompts.authenticateVault(any()) } returns BiometricPromptResponse.Cancelled
+        fillNewPasswordHost()
+
+        viewModel.saveHost()
+        advanceUntilIdle()
+        confirmIdentity()
+
+        assertEquals(HostSaveError.VAULT_LOCKED, viewModel.saveError.value)
+        assertEquals(HostSavePhase.IDLE, viewModel.savePhase.value)
     }
 
     @Test
@@ -1301,31 +2772,9 @@ class HostViewModelTest {
     }
 
     @Test
-    fun `without an activity the prompt cannot open and the vault unavailable message is shown`() = runTest {
-        vaultExpired()
-        fillNewPasswordHost()
-
-        viewModel.saveHost()
-        advanceUntilIdle()
-        confirmIdentity(activity = null)
-
-        assertEquals(HostSaveError.VAULT_UNAVAILABLE, viewModel.saveError.value)
-        verifyPromptShown(times = 0)
-        assertEquals(HostSavePhase.IDLE, viewModel.savePhase.value)
-    }
-
-    @Test
     fun `a prompt that throws on opening shows the failure message instead of crashing`() = runTest {
         vaultExpired()
-        every {
-            biometricHelper.authenticate(
-                activity = any(),
-                title = any(),
-                subtitle = any(),
-                onSuccess = any(),
-                onError = any(),
-            )
-        } throws IllegalStateException("activity destroyed")
+        coEvery { biometricPrompts.authenticateVault(any()) } throws IllegalStateException("activity destroyed")
         fillNewPasswordHost()
 
         viewModel.saveHost()
@@ -1367,6 +2816,116 @@ class HostViewModelTest {
         assertEquals(listOf<HostEvent>(HostEvent.HostSaved), events)
         assertNull(viewModel.saveError.value)
         assertEquals(HostSavePhase.IDLE, viewModel.savePhase.value)
+    }
+
+    @Test
+    fun `a biometric key host also saves normally when the vault is expired`() = runTest {
+        coEvery { hostRepository.getById("h1") } returns makeHostWith(AuthType.BIOMETRIC_KEY, "bio-1")
+        coEvery { sshKeyRepository.getById("bio-1") } returns biometricKey
+        coJustRun { hostRepository.update(any()) }
+        vaultExpired()
+        val events = collectEvents()
+
+        viewModel.loadHostForEdit("h1")
+        advanceUntilIdle()
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        val hostSlot = slot<Host>()
+        coVerify(exactly = 1) { hostRepository.update(capture(hostSlot)) }
+        assertEquals("bio-1", hostSlot.captured.credentialId)
+        verify(exactly = 0) { vaultManager.storePassword(any(), any()) }
+        assertEquals(listOf<HostEvent>(HostEvent.HostSaved), events)
+        assertNull(viewModel.saveError.value)
+        assertEquals(HostSavePhase.IDLE, viewModel.savePhase.value)
+    }
+
+    // ── Vault reverrouillé et garde-fous de la 1.1.0 : ce qu'ils changent l'un pour l'autre ─
+
+    @Test
+    fun `a host deleted meanwhile is reported without asking for the vault even when it is expired`() = runTest {
+        val host = makeHostWith(AuthType.PASSWORD, "cred-h1")
+        // load, then the stored row is gone (a sync deleted it) when saving
+        coEvery { hostRepository.getById("h1") } returnsMany listOf(host, null)
+        vaultExpired()
+        val events = collectEvents()
+
+        viewModel.loadHostForEdit("h1")
+        advanceUntilIdle()
+        viewModel.updateForm { copy(password = "retyped") }
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        assertEquals(listOf<HostEvent>(HostEvent.HostNoLongerExists), events)
+        // The row is read before any write: nothing reached the vault, so there was nothing to refuse.
+        verify(exactly = 0) { vaultManager.storePassword(any(), any()) }
+        coVerify(exactly = 0) { hostRepository.update(any()) }
+        assertEquals("", viewModel.formState.value.password)
+        assertNull(viewModel.saveError.value)
+        assertEquals(HostSavePhase.IDLE, viewModel.savePhase.value)
+    }
+
+    @Test
+    fun `a host deleted during the re-authentication is reported by the retry and nothing is written`() = runTest {
+        val host = makeHostWith(AuthType.PASSWORD, "cred-h1")
+        // load, first attempt (vault refuses), retry after the prompt (row gone)
+        coEvery { hostRepository.getById("h1") } returnsMany listOf(host, host, null)
+        vaultExpiredForFirst(writes = 1)
+        stubPrompt()
+        val events = collectEvents()
+
+        viewModel.loadHostForEdit("h1")
+        advanceUntilIdle()
+        viewModel.updateForm { copy(password = "retyped") }
+        saveUntilPromptShown()
+        successCallbacks.last()(mockk())
+        advanceUntilIdle()
+
+        assertEquals(listOf<HostEvent>(HostEvent.HostNoLongerExists), events)
+        coVerify(exactly = 0) { hostRepository.update(any()) }
+        assertTrue(storedPasswords.isEmpty(), "the retry stopped before writing the password")
+        assertEquals("", viewModel.formState.value.password)
+        assertNull(viewModel.saveError.value)
+        verifyPromptShown(times = 1)
+        assertEquals(HostSavePhase.IDLE, viewModel.savePhase.value)
+    }
+
+    @Test
+    fun `a second tap after a save that went through the re-authentication saves once`() = runTest {
+        // The form stays valid after a save, so the guard is what stops a second new host.
+        vaultExpiredForFirst(writes = 1)
+        coJustRun { hostRepository.save(any()) }
+        stubPrompt()
+        val events = collectEvents()
+        fillNewPasswordHost()
+
+        saveUntilPromptShown()
+        successCallbacks.last()(mockk())
+        advanceUntilIdle()
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { hostRepository.save(any()) }
+        assertEquals(listOf<HostEvent>(HostEvent.HostSaved), events)
+        verifyPromptShown(times = 1)
+        assertEquals(HostSavePhase.IDLE, viewModel.savePhase.value)
+    }
+
+    @Test
+    fun `reopening the screen for a new host after a save lets it save again`() = runTest {
+        coJustRun { hostRepository.save(any()) }
+        recordStoredPasswords()
+        fillNewPasswordHost()
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        // What HostDetailScreen does on entry for a new host.
+        viewModel.resetForm()
+        fillNewPasswordHost()
+        viewModel.saveHost()
+        advanceUntilIdle()
+
+        coVerify(exactly = 2) { hostRepository.save(any()) }
     }
 
     // ── Panne hors vault : plus aucune exception ne sort de l'enregistrement ─

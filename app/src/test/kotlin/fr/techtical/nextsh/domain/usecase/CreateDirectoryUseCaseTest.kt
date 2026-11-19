@@ -3,6 +3,9 @@
 
 package fr.techtical.nextsh.domain.usecase
 
+import fr.techtical.nextsh.core.ssh.SFTP_FOLDER_EXISTS_MESSAGE
+import fr.techtical.nextsh.core.ssh.SFTP_FOLDER_NAME_INVALID_MESSAGE
+import fr.techtical.nextsh.core.ssh.SFTP_NAME_EMPTY_MESSAGE
 import fr.techtical.nextsh.core.ssh.SftpManager
 import fr.techtical.nextsh.domain.model.SshErrorCode
 import fr.techtical.nextsh.shared.domain.model.SshResult
@@ -37,49 +40,59 @@ class CreateDirectoryUseCaseTest {
         val sessionId = "session-1"
         val parentPath = "/home/user"
         val dirName = "newdir"
-        val expectedPath = "/home/user/newdir"
 
-        coEvery { sftpManager.sanitizeFilename(dirName) } returns dirName
-        coEvery { sftpManager.createDirectory(sessionId, expectedPath) } returns SshResult.Success(Unit)
+        coEvery { sftpManager.createDirectory(sessionId, parentPath, dirName) } returns SshResult.Success(Unit)
 
         val result = createDirectoryUseCase(sessionId, parentPath, dirName)
 
         assertTrue(result is SshResult.Success)
-        coVerify { sftpManager.createDirectory(sessionId, expectedPath) }
+        coVerify(exactly = 1) { sftpManager.createDirectory(sessionId, parentPath, dirName) }
     }
 
     @Test
-    fun `invoke trims trailing slash from parent path`() = runTest {
+    fun `invoke hands the parent path to the manager untouched, the manager resolves it`() = runTest {
         val sessionId = "session-1"
         val parentPath = "/home/user/"  // Trailing slash
         val dirName = "newdir"
-        val expectedPath = "/home/user/newdir"
 
-        coEvery { sftpManager.sanitizeFilename(dirName) } returns dirName
-        coEvery { sftpManager.createDirectory(sessionId, expectedPath) } returns SshResult.Success(Unit)
+        coEvery { sftpManager.createDirectory(sessionId, parentPath, dirName) } returns SshResult.Success(Unit)
 
         val result = createDirectoryUseCase(sessionId, parentPath, dirName)
 
         assertTrue(result is SshResult.Success)
-        coVerify { sftpManager.createDirectory(sessionId, expectedPath) }
+        coVerify(exactly = 1) { sftpManager.createDirectory(sessionId, parentPath, dirName) }
     }
 
     @Test
-    fun `invoke sanitizes filename before creating`() = runTest {
-        val sessionId = "session-1"
-        val parentPath = "/home/user"
-        val dirName = "new\\dir"  // Backslash should be removed
-        val sanitizedName = "newdir"
-        val expectedPath = "/home/user/newdir"
+    fun `invoke hands the root as the parent path`() = runTest {
+        coEvery { sftpManager.createDirectory("session-1", "/", "newdir") } returns SshResult.Success(Unit)
 
-        coEvery { sftpManager.sanitizeFilename(dirName) } returns sanitizedName
-        coEvery { sftpManager.createDirectory(sessionId, expectedPath) } returns SshResult.Success(Unit)
-
-        val result = createDirectoryUseCase(sessionId, parentPath, dirName)
+        val result = createDirectoryUseCase("session-1", "/", "newdir")
 
         assertTrue(result is SshResult.Success)
-        coVerify { sftpManager.sanitizeFilename(dirName) }
-        coVerify { sftpManager.createDirectory(sessionId, expectedPath) }
+        coVerify(exactly = 1) { sftpManager.createDirectory("session-1", "/", "newdir") }
+    }
+
+    @Test
+    fun `invoke removes the spaces around the name, and only those`() = runTest {
+        coEvery { sftpManager.createDirectory("session-1", "/home/user", "newdir") } returns SshResult.Success(Unit)
+
+        val result = createDirectoryUseCase("session-1", "/home/user", "  newdir  ")
+
+        assertTrue(result is SshResult.Success)
+        coVerify(exactly = 1) { sftpManager.createDirectory("session-1", "/home/user", "newdir") }
+    }
+
+    @Test
+    fun `invoke gives the manager a name with a plus, a percent or an encoded slash exactly as typed`() = runTest {
+        listOf("x+y", "100%", "a%2Fb", "..%2F..%2Ftmp%2Fx", "a b", "..x", "x..", "...", ".hidden").forEach { dirName ->
+            coEvery { sftpManager.createDirectory("session-1", "/home/user", dirName) } returns SshResult.Success(Unit)
+
+            val result = createDirectoryUseCase("session-1", "/home/user", dirName)
+
+            assertTrue(result is SshResult.Success, dirName)
+            coVerify(exactly = 1) { sftpManager.createDirectory("session-1", "/home/user", dirName) }
+        }
     }
 
     // ── Error cases ──────────────────────────────────────────────────────────────
@@ -94,7 +107,8 @@ class CreateDirectoryUseCaseTest {
 
         assertTrue(result is SshResult.Error)
         assertEquals(SshErrorCode.UNKNOWN, (result as SshResult.Error).code)
-        assertEquals("Le nom ne peut pas être vide", result.message)
+        assertEquals(SFTP_NAME_EMPTY_MESSAGE, result.message)
+        coVerify(exactly = 0) { sftpManager.createDirectory(any(), any(), any()) }
     }
 
     @Test
@@ -107,22 +121,46 @@ class CreateDirectoryUseCaseTest {
 
         assertTrue(result is SshResult.Error)
         assertEquals(SshErrorCode.UNKNOWN, (result as SshResult.Error).code)
-        assertEquals("Le nom ne peut pas être vide", result.message)
+        assertEquals(SFTP_NAME_EMPTY_MESSAGE, result.message)
+        coVerify(exactly = 0) { sftpManager.createDirectory(any(), any(), any()) }
     }
 
     @Test
-    fun `invoke returns error when sanitizeFilename returns null`() = runTest {
-        val sessionId = "session-1"
-        val parentPath = "/home/user"
-        val dirName = "/\\\u0000"  // Unsafe characters only
-
-        coEvery { sftpManager.sanitizeFilename(dirName) } returns null
-
-        val result = createDirectoryUseCase(sessionId, parentPath, dirName)
+    fun `invoke refuses a backslash instead of creating the folder without it`() = runTest {
+        // The name used to be cleaned: "new\dir" became "newdir", a folder nobody asked for.
+        val result = createDirectoryUseCase("session-1", "/home/user", "new\\dir")
 
         assertTrue(result is SshResult.Error)
         assertEquals(SshErrorCode.UNKNOWN, (result as SshResult.Error).code)
-        assertEquals("Nom de dossier invalide", result.message)
+        assertEquals(SFTP_FOLDER_NAME_INVALID_MESSAGE, result.message)
+        coVerify(exactly = 0) { sftpManager.createDirectory(any(), any(), any()) }
+    }
+
+    @Test
+    fun `invoke refuses every name that is not a bare name and asks the manager nothing`() = runTest {
+        val refused = listOf(
+            "a/b",
+            "/x",
+            "x/",
+            "../x",
+            ".",
+            "..",
+            " .. ",
+            "/\\\u0000",
+            "a\tb",
+            "x\u0001y",
+            "x\u007Fy",
+            "x\u0085y",
+            "a".repeat(256),
+        )
+
+        refused.forEach { dirName ->
+            val result = createDirectoryUseCase("session-1", "/home/user", dirName)
+
+            assertTrue(result is SshResult.Error, dirName)
+            assertEquals(SFTP_FOLDER_NAME_INVALID_MESSAGE, (result as SshResult.Error).message, dirName)
+        }
+        coVerify(exactly = 0) { sftpManager.createDirectory(any(), any(), any()) }
     }
 
     @Test
@@ -130,32 +168,14 @@ class CreateDirectoryUseCaseTest {
         val sessionId = "session-1"
         val parentPath = "/home/user"
         val dirName = "existing"
-        val expectedPath = "/home/user/existing"
 
-        coEvery { sftpManager.sanitizeFilename(dirName) } returns dirName
-        coEvery { sftpManager.createDirectory(sessionId, expectedPath) } returns
-            SshResult.Error(SshErrorCode.UNKNOWN, "Un dossier portant ce nom existe déjà")
+        coEvery { sftpManager.createDirectory(sessionId, parentPath, dirName) } returns
+            SshResult.Error(SshErrorCode.UNKNOWN, SFTP_FOLDER_EXISTS_MESSAGE)
 
         val result = createDirectoryUseCase(sessionId, parentPath, dirName)
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Un dossier portant ce nom existe déjà", (result as SshResult.Error).message)
-    }
-
-    @Test
-    fun `invoke handles root parent path`() = runTest {
-        val sessionId = "session-1"
-        val parentPath = "/"
-        val dirName = "newdir"
-        val expectedPath = "/newdir"
-
-        coEvery { sftpManager.sanitizeFilename(dirName) } returns dirName
-        coEvery { sftpManager.createDirectory(sessionId, expectedPath) } returns SshResult.Success(Unit)
-
-        val result = createDirectoryUseCase(sessionId, parentPath, dirName)
-
-        assertTrue(result is SshResult.Success)
-        coVerify { sftpManager.createDirectory(sessionId, expectedPath) }
+        assertEquals(SFTP_FOLDER_EXISTS_MESSAGE, (result as SshResult.Error).message)
     }
 
     @Test
@@ -163,10 +183,8 @@ class CreateDirectoryUseCaseTest {
         val sessionId = "session-1"
         val parentPath = "/root"
         val dirName = "newdir"
-        val expectedPath = "/root/newdir"
 
-        coEvery { sftpManager.sanitizeFilename(dirName) } returns dirName
-        coEvery { sftpManager.createDirectory(sessionId, expectedPath) } returns
+        coEvery { sftpManager.createDirectory(sessionId, parentPath, dirName) } returns
             SshResult.Error(SshErrorCode.AUTH_FAILED, "Permission refusée")
 
         val result = createDirectoryUseCase(sessionId, parentPath, dirName)

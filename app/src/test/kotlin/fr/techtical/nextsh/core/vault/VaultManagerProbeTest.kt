@@ -19,9 +19,14 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.function.Executable
 import java.security.GeneralSecurityException
 import java.security.Key
+import java.security.AlgorithmParameters
 import java.security.KeyStoreException
+import java.security.Provider
 import java.security.ProviderException
+import java.security.SecureRandom
+import java.security.spec.AlgorithmParameterSpec
 import javax.crypto.Cipher
+import javax.crypto.CipherSpi
 import javax.crypto.spec.SecretKeySpec
 
 /**
@@ -93,6 +98,36 @@ class VaultManagerProbeTest {
 
     private fun op(name: String, block: (VaultManager) -> Unit): Pair<String, (VaultManager) -> Unit> = name to block
 
+    // ── isOpen : état de l'ouvreur, sans jamais l'actionner ─────────────────────
+
+    @Test
+    fun `isOpen is false at the start and calls neither the probe nor the opener`() {
+        val manager = newManager()
+
+        assertFalse(manager.isOpen())
+        assertEquals(emptyList<String>(), calls)
+    }
+
+    @Test
+    fun `isOpen stays false after an expired window`() {
+        probeFailure = expiredWindow()
+        val manager = newManager()
+
+        assertThrows(VaultAuthExpiredException::class.java) { manager.getPassword("cred-1") }
+
+        assertFalse(manager.isOpen())
+    }
+
+    @Test
+    fun `isOpen is true once the vault is open, and calling it does not reopen`() {
+        val manager = newManager()
+        manager.getPassword("cred-1")
+        calls.clear()
+
+        assertTrue(manager.isOpen())
+        assertEquals(emptyList<String>(), calls)
+    }
+
     // ── Fenêtre expirée ─────────────────────────────────────────────────────────
 
     @Test
@@ -122,6 +157,7 @@ class VaultManagerProbeTest {
         val operations = listOf(
             op("storePassword") { it.storePassword("id", secret()) },
             op("getPassword") { it.getPassword("id") },
+            op("hasPassword") { it.hasPassword("id") },
             op("deletePassword") { it.deletePassword("id") },
             op("storePrivateKey") { it.storePrivateKey("id", "pem") },
             op("getPrivateKey") { it.getPrivateKey("id") },
@@ -134,7 +170,7 @@ class VaultManagerProbeTest {
             op("getCertificate") { it.getCertificate("id") },
             op("deleteCertificate") { it.deleteCertificate("id") },
             op("isInitialized") { it.isInitialized() },
-            op("wipeVault") { it.wipeVault() },
+            // wipeVault is not here on purpose: it works on the raw preferences and never probes (VaultManagerWipeTest).
             op("listStoredCredentialIds") { it.listStoredCredentialIds() },
             op("listStoredKeyIds") { it.listStoredKeyIds() },
             op("listStoredCertificateIds") { it.listStoredCertificateIds() },
@@ -196,6 +232,135 @@ class VaultManagerProbeTest {
 
         assertFalse(manager.isAuthRequired())
         assertEquals(listOf("ensureMasterKey", "probe", "open"), calls)
+    }
+
+    // ── Ouverture explicite, au déverrouillage de l'app ─────────────────────────
+
+    @Test
+    fun `open opens the vault now and touches nothing else`() {
+        newManager().open()
+
+        assertEquals(listOf("ensureMasterKey", "probe", "open"), calls)
+        verify(exactly = 0) { prefs.edit() }
+    }
+
+    @Test
+    fun `open decrypts no secret, a test of one key is enough to open the key set`() {
+        newManager().open()
+
+        // `all` would decrypt every value of the vault into a String at each unlock.
+        verify(exactly = 0) { prefs.all }
+        verify(exactly = 1) { prefs.contains(VaultManager.OPEN_PROBE_KEY) }
+        verify(exactly = 0) { prefs.getString(any(), any()) }
+    }
+
+    @Test
+    fun `isAuthRequired decrypts no secret either`() {
+        val manager = newManager()
+
+        assertFalse(manager.isAuthRequired())
+
+        verify(exactly = 0) { prefs.all }
+        verify(exactly = 1) { prefs.contains(VaultManager.OPEN_PROBE_KEY) }
+    }
+
+    @Test
+    fun `the key that open tests is none of the keys of a secret, and is never written`() {
+        val key = VaultManager.OPEN_PROBE_KEY
+
+        for (prefix in listOf("pwd_", "key_", "keypass_", "cert_")) {
+            assertFalse(key.startsWith(prefix), "$key looks like a secret: $prefix")
+        }
+        newManager().open()
+        verify(exactly = 0) { prefs.edit() }
+    }
+
+    @Test
+    fun `open with the window expired raises VaultAuthExpiredException and prefs are never created`() {
+        val expired = expiredWindow()
+        probeFailure = expired
+
+        val thrown = assertThrows(VaultAuthExpiredException::class.java) { newManager().open() }
+
+        assertSame(expired, thrown.cause)
+        assertEquals(listOf("ensureMasterKey", "probe"), calls)
+    }
+
+    @Test
+    fun `open is tried again after the window was renewed, the failure did not poison it`() {
+        val manager = newManager()
+        probeFailure = expiredWindow()
+        assertThrows(VaultAuthExpiredException::class.java) { manager.open() }
+
+        probeFailure = null
+        manager.open()
+
+        assertEquals(listOf("ensureMasterKey", "probe", "ensureMasterKey", "probe", "open"), calls)
+    }
+
+    @Test
+    fun `open on a vault that is open already asks the Keystore for nothing, whatever the window`() {
+        val manager = newManager()
+        manager.open()
+
+        probeFailure = expiredWindow()
+        manager.open()
+
+        assertEquals(listOf("ensureMasterKey", "probe", "open"), calls)
+    }
+
+    @Test
+    fun `open lets a permanently invalidated key through, it is no expired window`() {
+        val invalidated = KeyPermanentlyInvalidatedException("key invalidated")
+        probeFailure = invalidated
+
+        val thrown = assertThrows(KeyPermanentlyInvalidatedException::class.java) { newManager().open() }
+
+        assertSame(invalidated, thrown)
+    }
+
+    // ── hasPassword : l'existence d'un mot de passe, sans le déchiffrer ─────────
+
+    @Test
+    fun `hasPassword tests the key of the password and decrypts no value`() {
+        every { prefs.contains("pwd_cred-1") } returns true
+
+        assertTrue(newManager().hasPassword("cred-1"))
+
+        // `all` and `getString` would decrypt the values of the vault into Strings: `contains` only
+        // encrypts the name of the entry.
+        verify(exactly = 1) { prefs.contains("pwd_cred-1") }
+        verify(exactly = 0) { prefs.all }
+        verify(exactly = 0) { prefs.getString(any(), any()) }
+        verify(exactly = 0) { prefs.edit() }
+    }
+
+    @Test
+    fun `hasPassword is false when no password is stored under the id`() {
+        every { prefs.contains("pwd_cred-1") } returns false
+
+        assertFalse(newManager().hasPassword("cred-1"))
+    }
+
+    @Test
+    fun `hasPassword looks at the password entry only, never at a key, a passphrase or a certificate`() {
+        every { prefs.contains(any()) } returns false
+        every { prefs.contains("key_cred-1") } returns true
+        every { prefs.contains("keypass_cred-1") } returns true
+        every { prefs.contains("cert_cred-1") } returns true
+
+        assertFalse(newManager().hasPassword("cred-1"))
+    }
+
+    @Test
+    fun `hasPassword with the window expired raises VaultAuthExpiredException and prefs are never created`() {
+        val expired = expiredWindow()
+        probeFailure = expired
+
+        val thrown = assertThrows(VaultAuthExpiredException::class.java) { newManager().hasPassword("cred-1") }
+
+        assertSame(expired, thrown.cause)
+        assertEquals(listOf("ensureMasterKey", "probe"), calls)
     }
 
     // ── Course entre la sonde et la création des préférences ────────────────────
@@ -631,5 +796,152 @@ class VaultManagerProbeTest {
         assertThrows(GeneralSecurityException::class.java) {
             dryEncryptAesGcm(SecretKeySpec(ByteArray(5), "AES"))
         }
+    }
+
+    // ── Fournisseur du chiffrement à blanc ──────────────────────────────────────
+
+    /** Fournisseur factice dont le chiffreur AES-GCM lève [FakeKeystoreCipherSpi.failure] à `init`. */
+    @Suppress("DEPRECATION") // the Android stub only has the (String, double, String) constructor
+    private class FakeKeystoreProvider : Provider(ANDROID_KEYSTORE_CIPHER_PROVIDER, 1.0, "test") {
+        init {
+            putService(
+                Service(this, "Cipher", "AES/GCM/NoPadding", FakeKeystoreCipherSpi::class.java.name, null, null),
+            )
+        }
+    }
+
+    @Test
+    fun `the dry encryption cipher is requested from the provider named AndroidKeyStoreBCWorkaround`() {
+        val asked = mutableListOf<String>()
+        val provider = FakeKeystoreProvider()
+
+        val cipher = keystoreAesGcmCipher { name ->
+            asked += name
+            provider
+        }
+
+        assertEquals(listOf("AndroidKeyStoreBCWorkaround"), asked)
+        assertEquals("AndroidKeyStoreBCWorkaround", ANDROID_KEYSTORE_CIPHER_PROVIDER)
+        assertSame(provider, cipher.provider)
+    }
+
+    @Test
+    fun `with the Keystore provider present its real exception reaches the caller`() {
+        val invalidated = KeyPermanentlyInvalidatedException("invalidated")
+        FakeKeystoreCipherSpi.failure = invalidated
+        try {
+            val cipher = keystoreAesGcmCipher { FakeKeystoreProvider() }
+
+            val thrown = assertThrows(KeyPermanentlyInvalidatedException::class.java) {
+                runDryEncryption(cipher, validKey)
+            }
+
+            assertSame(invalidated, thrown)
+        } finally {
+            FakeKeystoreCipherSpi.failure = null
+        }
+    }
+
+    @Test
+    fun `a missing Keystore provider falls back to the default selection`() {
+        val cipher = keystoreAesGcmCipher { null }
+
+        assertEquals("AES/GCM/NoPadding", cipher.algorithm)
+    }
+
+    @Test
+    fun `a Keystore provider without AES GCM falls back to the default selection`() {
+        @Suppress("DEPRECATION")
+        val empty = object : Provider("AndroidKeyStoreBCWorkaround", 1.0, "empty") {}
+
+        val cipher = keystoreAesGcmCipher { empty }
+
+        assertEquals("AES/GCM/NoPadding", cipher.algorithm)
+        assertTrue(cipher.provider !== empty)
+    }
+
+    @Test
+    fun `after the fallback a NullPointerException of the dry encryption is still translated`() {
+        val npe = NullPointerException("keyparameter")
+        val probe = newProbe(dryEncrypt = { throw npe })
+
+        assertThrows(UserNotAuthenticatedException::class.java) { probe.probe() }
+
+        assertEquals(listOf<Throwable>(npe), authRequiredCauses)
+    }
+
+    @Test
+    fun `a KeyPermanentlyInvalidatedException from the Keystore is classified as invalidated and not retried`() {
+        val invalidated = KeyPermanentlyInvalidatedException("invalidated")
+        val probe = newProbe(dryEncrypt = { throw invalidated })
+
+        val thrown = assertThrows(KeyPermanentlyInvalidatedException::class.java) { probe.probe() }
+
+        assertSame(invalidated, thrown)
+        assertEquals(0, pauses)
+    }
+
+    @Test
+    fun `a UserNotAuthenticatedException from the Keystore is classified as authentication required and not retried`() {
+        val expired = expiredWindow()
+        val probe = newProbe(dryEncrypt = { throw expired })
+
+        val thrown = assertThrows(UserNotAuthenticatedException::class.java) { probe.probe() }
+
+        assertSame(expired, thrown)
+        assertEquals(0, pauses)
+        assertTrue(authRequiredCauses.isEmpty())
+    }
+}
+
+/** Chiffreur factice : `init` lève [failure] s'il est posé, sinon réussit. Public pour l'instanciation par la JCA. */
+class FakeKeystoreCipherSpi : CipherSpi() {
+    override fun engineSetMode(mode: String?) = Unit
+
+    override fun engineSetPadding(padding: String?) = Unit
+
+    override fun engineGetBlockSize(): Int = 16
+
+    override fun engineGetOutputSize(inputLen: Int): Int = inputLen + 16
+
+    override fun engineGetIV(): ByteArray? = null
+
+    override fun engineGetParameters(): AlgorithmParameters? = null
+
+    override fun engineInit(opmode: Int, key: Key?, random: SecureRandom?) {
+        failure?.let { throw it }
+    }
+
+    override fun engineInit(opmode: Int, key: Key?, params: AlgorithmParameterSpec?, random: SecureRandom?) {
+        failure?.let { throw it }
+    }
+
+    override fun engineInit(opmode: Int, key: Key?, params: AlgorithmParameters?, random: SecureRandom?) {
+        failure?.let { throw it }
+    }
+
+    override fun engineUpdate(input: ByteArray?, inputOffset: Int, inputLen: Int): ByteArray = ByteArray(0)
+
+    override fun engineUpdate(
+        input: ByteArray?,
+        inputOffset: Int,
+        inputLen: Int,
+        output: ByteArray?,
+        outputOffset: Int,
+    ): Int = 0
+
+    override fun engineDoFinal(input: ByteArray?, inputOffset: Int, inputLen: Int): ByteArray = ByteArray(0)
+
+    override fun engineDoFinal(
+        input: ByteArray?,
+        inputOffset: Int,
+        inputLen: Int,
+        output: ByteArray?,
+        outputOffset: Int,
+    ): Int = 0
+
+    companion object {
+        @Volatile
+        var failure: Exception? = null
     }
 }

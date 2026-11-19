@@ -47,6 +47,8 @@ import fr.techtical.nextsh.domain.model.CustomTerminalTheme
 import fr.techtical.nextsh.ui.components.ColorPickerDialog
 import fr.techtical.nextsh.ui.components.NextShTextField
 import fr.techtical.nextsh.ui.components.opaque
+import fr.techtical.nextsh.ui.snippets.backupFieldProblemRes
+import fr.techtical.nextsh.ui.snippets.themeNameFieldProblem
 import fr.techtical.nextsh.ui.theme.Border1
 import fr.techtical.nextsh.ui.theme.GoldLight
 import fr.techtical.nextsh.ui.theme.JetBrainsMonoFamily
@@ -228,7 +230,10 @@ internal fun CustomThemeEditorDialog(
     // Non-null pendant que le picker HSV est ouvert pour un slot donné.
     var pickerTarget by remember(initial.id) { mutableStateOf<ColorTarget?>(null) }
 
-    val allValid = name.isNotBlank()
+    // Same rules as the restore of a backup: a name it would refuse is refused here, with the reason.
+    val nameProblem = themeNameFieldProblem(name)
+    val nameError = nameProblem?.takeIf { name.isNotEmpty() }?.let { stringResource(backupFieldProblemRes(it)) }
+    val allValid = nameProblem == null
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -262,8 +267,9 @@ internal fun CustomThemeEditorDialog(
                     value = name,
                     onValueChange = { name = it },
                     label = stringResource(R.string.label_theme_name),
-                    isError = name.isBlank(),
+                    isError = nameProblem != null,
                     placeholder = stringResource(R.string.placeholder_theme_name),
+                    supportingText = nameError,
                 )
                 ColorSlot(stringResource(R.string.label_theme_background), background) { pickerTarget = ColorTarget.Background }
                 ColorSlot(stringResource(R.string.label_theme_foreground), foreground) { pickerTarget = ColorTarget.Foreground }

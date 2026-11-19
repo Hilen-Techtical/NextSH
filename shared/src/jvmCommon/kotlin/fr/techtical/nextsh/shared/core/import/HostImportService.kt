@@ -11,6 +11,7 @@ import fr.techtical.nextsh.shared.domain.repository.HostRepository
 import fr.techtical.nextsh.shared.domain.repository.SshKeyRepository
 import fr.techtical.nextsh.shared.domain.vault.VaultManager
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import fr.techtical.nextsh.shared.util.randomUuid
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -52,8 +53,8 @@ data class ImportResult(
  * get their own copy as before.
  *
  * SECURITY: passwords / passphrases are wiped after they are stored (or on any
- * per-entry failure). Nothing secret is logged: error strings reference only the
- * host label / hostname.
+ * per-entry failure). Nothing secret is logged: the UI-facing error strings reference
+ * only the host label / hostname, the log lines carry counts and exception classes only.
  */
 class HostImportService {
 
@@ -81,7 +82,7 @@ class HostImportService {
         // failed or rolled-back store is retried by the next host referencing the key.
         val storedKeys = HashMap<String, StoredKey>()
 
-        for (entry in entries) {
+        for ((index, entry) in entries.withIndex()) {
             try {
                 importOne(entry, hostRepository, vaultManager, sshKeyRepository, storedKeys)
                 imported++
@@ -93,10 +94,11 @@ class HostImportService {
                 throw e
             } catch (e: Exception) {
                 skipped++
-                // Reference only non-sensitive identifiers in the error message.
+                // UI-facing error: the user's own label helps them find the entry. Never a secret.
                 val ref = entry.label.ifBlank { entry.hostname }
                 errors += "Failed to import \"$ref\": ${e.message ?: e::class.simpleName}"
-                Logger.w(TAG, "Skipping host \"$ref\", import failed (${e::class.simpleName})")
+                // Log line: position and exception classes only, no label, hostname or message.
+                Logger.w(TAG, "Skipping host entry ${index + 1} of ${entries.size}, import failed (${errorClass(e)})")
             } finally {
                 // Defence in depth: ensure secrets are wiped even if importOne threw
                 // before reaching its own wipe.
@@ -267,7 +269,7 @@ class HostImportService {
         try {
             block()
         } catch (e: Throwable) {
-            Logger.w(TAG, "Import rollback step \"$step\" failed (${e::class.simpleName})")
+            Logger.w(TAG, "Import rollback step \"$step\" failed (${errorClass(e)})")
         }
     }
 

@@ -64,13 +64,13 @@ class Fido2ProviderDispatcher(
         }
 
         val provider = WindowsWebAuthnProvider(
-            onTouchRequired = { label ->
+            onTouchRequired = { _ ->
                 // Sur Windows WebAuthn, le dialog Hello est affiché par Windows.
                 // On émet quand même un état "waiting" minimal dans notre UI pour
                 // que l'utilisateur voie un feedback côté Compose.
                 // Note : on n'appelle PAS fido2UiState.start() ici car ça afficherait
                 // le YubiKeyTouchDialog Compose par-dessus le dialog Hello natif.
-                Logger.d(TAG, "WindowsWebAuthn: touch required for $label (native Windows dialog active)")
+                Logger.d(TAG, "WindowsWebAuthn: touch required (native Windows dialog active)")
             },
             onTouchDone = {
                 Logger.d(TAG, "WindowsWebAuthn: touch done")

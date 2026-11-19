@@ -3,6 +3,7 @@
 
 package fr.techtical.nextsh.shared.domain.model
 
+import fr.techtical.nextsh.shared.domain.tunnel.TunnelBrowserPath
 import fr.techtical.nextsh.shared.util.randomUuid
 import kotlinx.datetime.Clock
 import kotlinx.serialization.Serializable
@@ -37,7 +38,9 @@ enum class AuthType {
 @Serializable
 enum class Fido2Mode {
     HARDWARE_KEY,  // USB/NFC physical security key (CTAP2)
-    PASSKEY,       // Credential Manager passkey → unlock SSH key
+    // Android only: Desktop never reads fido2Mode when it connects. Legacy mode, a plain login with
+    // the chosen SSH key and no passkey check. Android 1.1.0 no longer offers it for new hosts.
+    PASSKEY,
 }
 
 // ── SSH Key ───────────────────────────────────────────────────────────────────
@@ -74,6 +77,14 @@ data class TunnelConfig(
     val openBrowserOnConnect: Boolean = false,
     val keepAliveAfterBrowserClose: Boolean = true,
     val isFavorite: Boolean = false,
+    /**
+     * Path, query and fragment the in-app browser opens on a LOCAL_FORWARD
+     * tunnel (`http://127.0.0.1:<localPort><browserPath>`), "/" = site root.
+     * The default is what old peers and old backups decode to. Normalize,
+     * validate and build the URL through `TunnelBrowserPath` only.
+     * It may carry a secret in its query string: never log it or the built URL.
+     */
+    val browserPath: String = TunnelBrowserPath.DEFAULT,
 )
 
 @Serializable

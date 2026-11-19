@@ -3,6 +3,13 @@
 
 package fr.techtical.nextsh.desktop.core.ssh
 
+import fr.techtical.nextsh.desktop.generated.resources.Res
+import fr.techtical.nextsh.desktop.generated.resources.tunnels_error_host_not_found
+import fr.techtical.nextsh.desktop.generated.resources.tunnels_error_listener_stopped
+import fr.techtical.nextsh.desktop.generated.resources.tunnels_error_no_answer
+import fr.techtical.nextsh.desktop.generated.resources.tunnels_error_session_closed
+import fr.techtical.nextsh.desktop.generated.resources.tunnels_error_socks_stopped
+import fr.techtical.nextsh.desktop.generated.resources.tunnels_error_start_failed
 import fr.techtical.nextsh.shared.domain.model.AuthType
 import fr.techtical.nextsh.shared.domain.model.Host
 import fr.techtical.nextsh.shared.domain.model.SshErrorCode
@@ -13,7 +20,10 @@ import fr.techtical.nextsh.shared.domain.model.TunnelStatus
 import fr.techtical.nextsh.shared.domain.model.TunnelType
 import fr.techtical.nextsh.shared.domain.ssh.SshTunnelManager
 import fr.techtical.nextsh.shared.domain.vault.VaultManager
+import fr.techtical.nextsh.shared.util.LogId
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,12 +33,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import net.schmizz.keepalive.KeepAliveProvider
 import net.schmizz.sshj.DefaultConfig
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.common.DisconnectReason
@@ -37,7 +47,9 @@ import net.schmizz.sshj.connection.channel.direct.Parameters
 import net.schmizz.sshj.connection.channel.forwarded.RemotePortForwarder
 import net.schmizz.sshj.connection.channel.forwarded.SocketForwardingConnectListener
 import net.schmizz.sshj.transport.DisconnectListener
+import org.jetbrains.compose.resources.getString
 import java.io.IOException
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.util.Arrays
@@ -76,15 +88,36 @@ fun interface SshClientFactory {
      * lambda passent `_` pour ignorer le tracker.
      */
     suspend fun open(host: Host, onCreated: (SSHClient) -> Unit): SshResult<SSHClient>
+
+    /**
+     * Did the last [open] for [host] fail on a network-level error (no route, network unreachable),
+     * as opposed to a timeout, a refusal or an authentication problem ? Read right after an `Error`
+     * by the manager when the caller asked for the network reason (the reconnect loop). `false` by
+     * default: an implementation that does not tell keeps its own message.
+     */
+    fun lastFailureWasNetworkLevel(host: Host): Boolean = false
 }
 
 /**
  * Levée par le callback `onCreated` du manager quand un Stop est arrivé avant
  * que le client ne lui soit remis : la fabrique doit renoncer à `connect()`.
- * C'est une `IOException` pour que le `catch (IOException)` de
- * [VaultSshClientFactory.open] la traite comme un échec de connexion.
+ * C'est une `IOException` pour que le `catch` de [VaultSshClientFactory.open]
+ * la traite comme un échec de connexion (voir [tunnelOpenError]).
  */
 private class StopRequestedException : IOException("stopped")
+
+/**
+ * Translated reasons a tunnel can be lost for, shown on the card while it reconnects. Read once at
+ * the top of [DesktopTunnelManager.startTunnel], before anything is bound : the callbacks that report
+ * a loss (SSHJ reader thread, watchdog, accept loops) cannot call the suspend `getString`, and a
+ * failing read at that moment would leave a tunnel that is down but still shown ACTIVE.
+ */
+private class TunnelLossTexts(
+    val listenerStopped: String,
+    val socksStopped: String,
+    val sessionClosed: String,
+    val noAnswer: String,
+)
 
 /**
  * État d'un tunnel actif en mémoire : garde la référence SSHJ pour pouvoir
@@ -210,6 +243,36 @@ class DesktopTunnelManager(
     internal var beforeConfirmHook: (() -> Unit)? = null
 
     /**
+     * Test seam, the real `os.name` in production. Decides whether a local port below 1024 is
+     * reserved to administrators ([isReservedLocalPort]) : the tests must not depend on the system
+     * they run on.
+     */
+    @Volatile
+    internal var osName: String = System.getProperty("os.name", "")
+
+    /**
+     * Test seam, opens then closes a server socket in production. The check of the local port that
+     * runs before the SSH connection opens ([localPortFailure]) : the tests answer for the system.
+     */
+    @Volatile
+    internal var portProbe: (Int) -> Unit = { ServerSocket(it).close() }
+
+    /**
+     * Test seam, binds the loopback address in production. The listening socket of a SOCKS5 tunnel
+     * ([DesktopSocks5Server]) : the tests hand out a socket whose `accept()` fails on demand.
+     */
+    @Volatile
+    internal var socks5ServerSocket: (Int) -> ServerSocket = { ServerSocket(it, 50, InetAddress.getByName("127.0.0.1")) }
+
+    /**
+     * Test seam, a short TCP connection to the loopback address in production. Tells a port below
+     * 1024 that a service really holds from one the system forbids ([isReservedLocalPort]) : the
+     * tests must not depend on what runs on the machine.
+     */
+    @Volatile
+    internal var portListens: (Int) -> Boolean = ::isLocalPortListening
+
+    /**
      * Démarre un tunnel. Utilise [hostLookup] pour retrouver l'hôte associé :
      * le caller (`DesktopTunnelService`) injecte le `HostRepository`. Ouvre un
      * `SSHClient` dédié via [SshClientFactory] puis crée le forwarder SSHJ
@@ -217,11 +280,39 @@ class DesktopTunnelManager(
      *
      * Transitions d'état émises :
      *  - STARTING → ACTIVE   sur succès
-     *  - STARTING → ERROR(m) sur échec (auth, port occupé, réseau…)
+     *  - STARTING → ERROR(m) sur échec (auth, port occupé, réseau…) : `m` est un texte traduit qui
+     *    dit la catégorie de l'échec (voir [TunnelSetupFailure] pour la mise en place du forwarder),
+     *    jamais le message de l'exception SSHJ ou JDK
+     *  - STARTING → ERROR(m) sur exception inattendue (recherche de l'hôte,
+     *    test du port, fabrique de client…) : `m` est le texte traduit « le
+     *    tunnel n'a pas pu démarrer », jamais le message de l'exception, et
+     *    l'appelant reçoit un `Error` au lieu d'une exception (règle projet : les
+     *    erreurs SSH sont des `SshResult`)
+     *  - STARTING → ERROR(m) sur `Error` JVM (`NoClassDefFoundError`,
+     *    `UnsatisfiedLinkError` d'un runtime jlink incomplet, `OutOfMemoryError`…) :
+     *    même texte `m`, mais l'`Error` est ensuite relancée telle quelle, on ne
+     *    l'avale pas ; seule la carte cesse d'afficher « Démarrage… »
+     *  - RECONNECTING → STARTING : le motif de la reconnexion est gardé pendant la tentative
+     *    (la réservation ne repart d'un état neuf que depuis un autre statut)
+     *  - STARTING → STOPPED  sur annulation de la coroutine appelante, qui est
+     *    ensuite relancée : sans cette écriture le tunnel resterait affiché
+     *    « Démarrage… » jusqu'à ce que l'utilisateur clique dessus
      *  - arrêt manuel pendant le démarrage : aucune écriture ici, l'état
      *    ARRÊTÉ est celui de [stopTunnel], et le démarrage renvoie `Success`
      *    (un arrêt voulu n'est pas une erreur) après avoir libéré tout ce
      *    qu'il avait ouvert.
+     *
+     * Les écritures sur exception, sur `Error` et sur annulation partent de
+     * STARTING et de lui seul (compare-and-set, voir [leaveStarting]) : un état
+     * déjà ACTIVE, STOPPED ou RECONNECTING, écrit entre-temps par un autre
+     * acteur, n'est jamais écrasé. Une exception inattendue qui trouve l'état
+     * ainsi changé, ou un arrêt manuel posé, renvoie `Success` comme les autres
+     * sorties d'arrêt : l'état en place dit déjà ce qu'il faut.
+     *
+     * [networkLostReason], donné par la boucle de reconnexion seulement : si l'ouverture du client
+     * échoue sur une erreur de niveau réseau (voir [SshClientFactory.lastFailureWasNetworkLevel]),
+     * l'ERROR écrit porte ce texte au lieu du texte de l'échec. Un démarrage manuel ne le donne pas
+     * et garde son message. Un délai d'attente n'est jamais une perte de réseau.
      *
      * Un seul démarrage en vol par tunnel : l'id est réservé (voir
      * [startingIds]) jusqu'au retour de cette fonction, quelle que soit l'issue
@@ -239,6 +330,7 @@ class DesktopTunnelManager(
      */
     suspend fun startTunnel(
         config: TunnelConfig,
+        networkLostReason: String? = null,
         hostLookup: suspend (hostId: String) -> Host?,
     ): SshResult<Unit> {
         // Deux Start concurrents ne peuvent pas passer tous les deux : `add`
@@ -253,6 +345,26 @@ class DesktopTunnelManager(
         // l'ordre inverse (test de `active`, puis réservation), un démarrage
         // qui finit entre les deux nous laisserait démarrer à côté d'un tunnel
         // vivant.
+        //
+        // Localized, and without the host id: the message ends up on the tunnel card and in the error dialog,
+        // where a UUID tells the user nothing. Resolved BEFORE the reservation and any state change: a resource
+        // failure here throws with nothing touched, instead of leaving the tunnel stuck in STARTING (and its
+        // id reserved, since the `try` that releases it only begins after the reservation).
+        //
+        // [startFailedMessage] is the one the `catch` below writes for an unexpected exception : it has to
+        // exist before the failure it reports, and reading it there could fail the same way as the exception
+        // it stands for. It is also the fallback of the forwarder setup (see [openAndStart]).
+        val hostNotFoundMessage = getString(Res.string.tunnels_error_host_not_found)
+        val startFailedMessage = getString(Res.string.tunnels_error_start_failed)
+        // The reasons a tunnel can be lost for, read here for the same reason : the callbacks that report
+        // a loss cannot read a resource, and a failing read then would leave a dead tunnel shown ACTIVE.
+        val lossTexts = TunnelLossTexts(
+            listenerStopped = getString(Res.string.tunnels_error_listener_stopped),
+            socksStopped = getString(Res.string.tunnels_error_socks_stopped),
+            sessionClosed = getString(Res.string.tunnels_error_session_closed),
+            noAnswer = getString(Res.string.tunnels_error_no_answer),
+        )
+
         val reserved = mutex.withLock {
             if (!startingIds.add(config.id)) {
                 false
@@ -260,7 +372,15 @@ class DesktopTunnelManager(
                 startingIds.remove(config.id)
                 false
             } else {
-                _tunnelStates.update { it + (config.id to TunnelState(config, TunnelStatus.STARTING)) }
+                _tunnelStates.update { states ->
+                    // Only a STARTING that follows RECONNECTING (an attempt of the reconnect loop)
+                    // carries the reason of the loss : the card must not blink during the attempt.
+                    // A start from STOPPED, ERROR or nothing starts without text.
+                    val carried = states[config.id]
+                        ?.takeIf { it.status == TunnelStatus.RECONNECTING }
+                        ?.errorMessage
+                    states + (config.id to TunnelState(config, TunnelStatus.STARTING, errorMessage = carried))
+                }
                 manuallyStopped.remove(config.id)
                 true
             }
@@ -270,16 +390,81 @@ class DesktopTunnelManager(
         // Aucun point de suspension entre la réservation et ce `try` : la
         // réservation est libérée sur toute sortie, annulation comprise.
         try {
-            return startReserved(config, hostLookup)
+            return startReserved(config, hostLookup, hostNotFoundMessage, startFailedMessage, lossTexts, networkLostReason)
+        } catch (e: CancellationException) {
+            // Whatever cancelled us (the reconnect job a Stop cancels, a scope shutting down), the
+            // STARTING written at the reservation would otherwise outlive the start for good : nothing
+            // else writes a status for it. From STARTING only : a Stop may have written STOPPED already
+            // or be about to (the service cancels the reconnect job BEFORE it calls [stopTunnel], so the
+            // write can be a duplicate, which is harmless), a network drop RECONNECTING, and a tunnel
+            // that came up ACTIVE must stay so.
+            leaveStarting(config, TunnelStatus.STOPPED, errorMessage = null, unlessManuallyStopped = false)
+            throw e
+        } catch (e: Exception) {
+            // Something nobody planned for (the host lookup, the port probe, the client factory, a
+            // resource read...) : the start is over, and the caller gets an `Error` like for any other
+            // failure instead of an exception. Class names only in the log, never the message (it can
+            // quote a path or a host name). Same rule as [setError] for a Stop that landed meanwhile, and
+            // same answer as [failStart] when nothing was written : the state in place already says what
+            // there is to say (STOPPED by the Stop, ACTIVE or RECONNECTING by someone else).
+            Logger.e(TAG, "Démarrage tunnel ${LogId.of(config.id)} : exception inattendue (${errorClass(e)})")
+            return if (leaveStarting(config, TunnelStatus.ERROR, startFailedMessage, unlessManuallyStopped = true)) {
+                SshResult.Error(SshErrorCode.UNKNOWN, startFailedMessage)
+            } else {
+                SshResult.Success(Unit)
+            }
+        } catch (t: Throwable) {
+            // An Error (NoClassDefFoundError or UnsatisfiedLinkError from a jlink runtime that lacks a
+            // module, an OutOfMemoryError...) is not ours to swallow : it goes up as it came. But the
+            // card must not stay on "Démarrage…" either, so the state leaves STARTING first, under the
+            // same rules as for an Exception. Best effort : a failure of the log or of the write
+            // (an OOM tends to come in twos) must not replace the Throwable that is being rethrown.
+            runCatching {
+                Logger.e(TAG, "Démarrage tunnel ${LogId.of(config.id)} : erreur fatale (${errorClass(t)})")
+                leaveStarting(config, TunnelStatus.ERROR, startFailedMessage, unlessManuallyStopped = true)
+            }
+            throw t
         } finally {
             startingIds.remove(config.id)
         }
+    }
+
+    /**
+     * Leaves STARTING for [status] (STOPPED on a cancelled start, ERROR on an unexpected exception) and
+     * says whether it wrote. The state of [config] must be STARTING at the instant of the write : test and
+     * write are one compare-and-set (`update` re-runs the block whenever another writer changed the state
+     * in between), so a status written meanwhile is never overwritten. With [unlessManuallyStopped], a Stop
+     * that landed counts as well, and is tested the same way as in [setError] : [stopTunnel] sets the flag
+     * BEFORE it writes STOPPED, so an ERROR can never end up over a STOPPED the user asked for.
+     *
+     * Not [setError] : that one does not look at the current status, which suits the start paths that
+     * know what they are replacing, not an exception that can come from anywhere in the start.
+     */
+    private fun leaveStarting(
+        config: TunnelConfig,
+        status: TunnelStatus,
+        errorMessage: String?,
+        unlessManuallyStopped: Boolean,
+    ): Boolean {
+        var written = false
+        _tunnelStates.update { states ->
+            // `update` may re-run this block : the last run is the one that lands.
+            written = states[config.id]?.status == TunnelStatus.STARTING &&
+                !(unlessManuallyStopped && manuallyStopped.contains(config.id))
+            if (!written) states
+            else states + (config.id to TunnelState(config, status, errorMessage = errorMessage))
+        }
+        return written
     }
 
     /** Corps de [startTunnel], exécuté une fois l'id réservé dans [startingIds]. */
     private suspend fun startReserved(
         config: TunnelConfig,
         hostLookup: suspend (hostId: String) -> Host?,
+        hostNotFoundMessage: String,
+        startFailedMessage: String,
+        lossTexts: TunnelLossTexts,
+        networkLostReason: String?,
     ): SshResult<Unit> {
         val host = hostLookup(config.hostId)
 
@@ -292,15 +477,19 @@ class DesktopTunnelManager(
         }
 
         if (host == null) {
-            return failStart(config, SshResult.Error(SshErrorCode.UNKNOWN, "Hôte ${config.hostId} introuvable"))
+            return failStart(config, SshResult.Error(SshErrorCode.UNKNOWN, hostNotFoundMessage))
         }
 
         // LOCAL_FORWARD / DYNAMIC_SOCKS5 : check port local avant même d'ouvrir la
         // connexion SSH : une erreur PORT_IN_USE ne doit pas consommer d'auth.
         if (config.type == TunnelType.LOCAL_FORWARD || config.type == TunnelType.DYNAMIC_SOCKS5) {
-            if (isPortInUse(config.localPort)) {
-                val msg = "Port ${config.localPort} déjà utilisé localement"
-                return failStart(config, SshResult.Error(SshErrorCode.PORT_IN_USE, msg))
+            val portProblem = localPortFailure(config.localPort, osName, portProbe, portListens)
+            if (portProblem != null) {
+                // Port taken, or reserved to administrators by the system (Linux and macOS, below
+                // 1024). The text is read only on this branch. A Stop landing during the read is
+                // handled by [failStart] (its compare-and-set), a resource failure by the `catch`
+                // of [startTunnel].
+                return failStart(config, portProblem.toStartError(config, startFailedMessage))
             }
         }
 
@@ -318,7 +507,7 @@ class DesktopTunnelManager(
         // entry under it is this start's.
         var returned = false
         try {
-            val result = openAndStart(config, host)
+            val result = openAndStart(config, host, startFailedMessage, lossTexts, networkLostReason)
             returned = true
             return result
         } finally {
@@ -342,8 +531,20 @@ class DesktopTunnelManager(
      * `disconnect()` the client to abort it at once. That disconnect is harmless
      * on a client that is already registered or being torn down (SSHJ ignores a
      * second one).
+     *
+     * A forwarder setup failure is sorted by [classifyTunnelSetupFailure] and
+     * the user reads the translated text of its category, never the message of
+     * the exception (SSHJ and the JDK word it in English and may quote a host
+     * or a request). [startFailedMessage] is the text of the category with
+     * nothing more precise to say ([TunnelSetupFailure.GENERIC]).
      */
-    private suspend fun openAndStart(config: TunnelConfig, host: Host): SshResult<Unit> {
+    private suspend fun openAndStart(
+        config: TunnelConfig,
+        host: Host,
+        startFailedMessage: String,
+        lossTexts: TunnelLossTexts,
+        networkLostReason: String?,
+    ): SshResult<Unit> {
         // The factory hands us the SSHClient BEFORE connect() blocks via
         // [onCreated]: we stash it so [stopTunnel] can call disconnect() on
         // it to abort an in-flight handshake. If the user clicked Stop while
@@ -393,29 +594,64 @@ class DesktopTunnelManager(
         }
 
         return when (openResult) {
-            is SshResult.Error -> failStart(config, openResult)
+            is SshResult.Error -> {
+                // The factory logs at debug level only (a Stop makes it fail on purpose, and what it
+                // sees is the exception of the closed socket) : this is where a failure that nobody
+                // asked for is told, with the code of the error and never its text.
+                if (!manuallyStopped.contains(config.id)) {
+                    Logger.w(TAG, "Tunnel ${LogId.of(config.id)} : ouverture du client refusée (${openResult.code})")
+                }
+                // Asked for by the reconnect loop only: a network-level failure (not a timeout) of
+                // the open says the network is down, not "connection impossible".
+                val reported = if (networkLostReason != null && clientFactory.lastFailureWasNetworkLevel(host)) {
+                    SshResult.Error(openResult.code, networkLostReason)
+                } else {
+                    openResult
+                }
+                failStart(config, reported)
+            }
             is SshResult.Success -> {
                 val client = openResult.data
                 try {
                     when (config.type) {
-                        TunnelType.LOCAL_FORWARD -> startLocalForwardInternal(config, client)
-                        TunnelType.REMOTE_FORWARD -> startRemoteForwardInternal(config, client)
-                        TunnelType.DYNAMIC_SOCKS5 -> startSocks5Internal(config, client)
+                        TunnelType.LOCAL_FORWARD -> startLocalForwardInternal(config, client, lossTexts)
+                        TunnelType.REMOTE_FORWARD -> startRemoteForwardInternal(config, client, lossTexts)
+                        TunnelType.DYNAMIC_SOCKS5 -> startSocks5Internal(config, client, lossTexts)
                     }
+                } catch (e: CancellationException) {
+                    // The setup functions are `suspend` : a cancellation surfaces here and must not fall
+                    // into the `catch (Exception)` below, which would write an ERROR. The client is closed
+                    // by the `finally` of [startReserved], which disconnects every start that did not
+                    // return ; [startTunnel] writes the state.
+                    throw e
                 } catch (e: Exception) {
+                    // Sorted BEFORE the disconnect : the refusal of a remote forward is only
+                    // recognised on a client that is still connected.
+                    val failure = classifyTunnelSetupFailure(
+                        e,
+                        config.type,
+                        localPortReserved = { isReservedLocalPort(config.localPort, osName, portListens) },
+                    ) {
+                        try { client.isConnected } catch (_: Exception) { false }
+                    }
                     // A Stop during a remote bind makes it fail on purpose (it
                     // disconnects the client) : not worth an error and a stack trace.
                     if (manuallyStopped.contains(config.id)) {
-                        Logger.d(TAG, "Tunnel ${config.label} : mise en place interrompue par un arrêt")
+                        Logger.d(TAG, "Tunnel ${LogId.of(config.id)} : mise en place interrompue par un arrêt")
                     } else {
-                        Logger.e(TAG, "Échec démarrage tunnel ${config.label}", e)
+                        // The category (an enum: its name) and the class chain of the exception, never its message.
+                        Logger.e(TAG, "Échec démarrage tunnel ${LogId.of(config.id)} ($failure)", e)
                     }
                     try { client.disconnect() } catch (_: Exception) {}
                     // A Stop that landed while the forwarder was being set up (it
                     // may even be what made the setup fail : it disconnects the
                     // client) turns this failure into the quiet Success of the
                     // other stop paths, see [failStart].
-                    failStart(config, SshResult.Error(SshErrorCode.UNKNOWN, e.message ?: "Erreur inconnue"))
+                    //
+                    // The text is a string resource, read here without any `runCatching` or
+                    // `catch (Exception)` around it : a cancellation must go up to [startTunnel],
+                    // which writes STOPPED. The client is already closed above.
+                    failStart(config, failure.toStartError(config, startFailedMessage))
                 }
             }
         }
@@ -454,7 +690,7 @@ class DesktopTunnelManager(
         // completes, sees manuallyStopped, and bails.
         startingClients.remove(tunnelId)?.let { startingClient ->
             runCatching { startingClient.disconnect() }
-            Logger.d(TAG, "Tunnel $tunnelId : démarrage interrompu (disconnect forcé)")
+            Logger.d(TAG, "Tunnel ${LogId.of(tunnelId)} : démarrage interrompu (disconnect forcé)")
         }
         _latenciesByTunnel.update { it - tunnelId }
 
@@ -478,17 +714,29 @@ class DesktopTunnelManager(
             // a dead route). Closing the socket first also neutralises SSHJ's
             // own `LocalPortForwarder.close()`, which only interrupts while the
             // socket is still open.
-            tunnel.job.cancel()
-            closeTunnelResources(tunnel)
+            try {
+                tunnel.job.cancel()
+            } finally {
+                // The entry is already out of `active` : if nothing closed it here, nobody would
+                // ever, and the next Stop would answer Success over a client that is still connected.
+                closeTunnelResources(tunnel)
+            }
             _tunnelStates.update { it + (tunnelId to TunnelState(tunnel.config, TunnelStatus.STOPPED)) }
             // On retire au bout de quelques ms pour que l'UI observe STOPPED si besoin.
             // En pratique retirer tout de suite marche aussi ; on laisse l'entry STOPPED
             // pour permettre au service de gérer les RECONNECTING.
-            Logger.d(TAG, "Tunnel ${tunnel.config.label} arrêté")
+            Logger.d(TAG, "Tunnel ${LogId.of(tunnelId)} arrêté")
             SshResult.Success(Unit)
         } catch (e: Exception) {
-            Logger.e(TAG, "Erreur arrêt tunnel $tunnelId", e)
-            SshResult.Error(SshErrorCode.UNKNOWN, e.message ?: "Erreur inconnue")
+            // The class chain of the exception, never its message (a path, a host...).
+            Logger.e(TAG, "Erreur arrêt tunnel ${LogId.of(tunnelId)}", e)
+            // Whatever failed, the entry is out of `active` and its resources were closed above
+            // ([closeTunnelResources] never throws) : the tunnel IS stopped, which is what the user
+            // asked for. So the answer is Success and the card says STOPPED. An Error would invite a
+            // retry that makes no sense (a click on a STOPPED card STARTS the tunnel), and the service
+            // does not read an Error as a stop (see `DesktopTunnelService.stopDeletedFromReconnect`).
+            _tunnelStates.update { it + (tunnelId to TunnelState(tunnel.config, TunnelStatus.STOPPED)) }
+            SshResult.Success(Unit)
         }
     }
 
@@ -508,7 +756,7 @@ class DesktopTunnelManager(
             tunnel.job.cancel()
             closeTunnelResources(tunnel)
         } catch (e: Exception) {
-            Logger.w(TAG, "releaseForReconnect($tunnelId): erreur fermeture : ${e.message}")
+            Logger.w(TAG, "releaseForReconnect(${LogId.of(tunnelId)}): erreur fermeture (${errorClass(e)})")
         }
         // Drop the latency entry: the SSHClient is gone, the next reconnect
         // will produce fresh measurements. Without this, callers that bypass
@@ -517,13 +765,19 @@ class DesktopTunnelManager(
         _latenciesByTunnel.update { it - tunnelId }
     }
 
-    /** Arrête tous les tunnels en cours. Utilisé au `onAppExit`. */
-    suspend fun stopAll() {
+    /**
+     * Arrête tous les tunnels en cours. Utilisé au `onAppExit`.
+     *
+     * [clearManualStops] false (vault wipe): the manual stop flags stay. A start still in flight (STARTING,
+     * handshake) checks its flag when it comes back and bails; clearing the flags here would let it go on
+     * and turn ACTIVE after the wipe. A later real start of the same id removes its flag itself.
+     */
+    suspend fun stopAll(clearManualStops: Boolean = true) {
         val ids = active.keys.toList()
         ids.forEach { stopTunnel(it) }
         _tunnelStates.update { emptyMap() }
         _latenciesByTunnel.update { emptyMap() }
-        manuallyStopped.clear()
+        if (clearManualStops) manuallyStopped.clear()
     }
 
     /**
@@ -544,11 +798,16 @@ class DesktopTunnelManager(
      * une boucle compare-and-set) : un statut écrit entre-temps par un autre
      * acteur n'est jamais écrasé. Renvoie le statut vu à cet instant, `null` si
      * le tunnel est inconnu ; l'appelant le compare à ce qu'il attendait.
+     *
+     * Avec [keepErrorMessage], l'état écrit garde le texte de l'état courant et
+     * [errorMessage] est ignoré : la boucle de reconnexion y repasse à chaque tour
+     * sans effacer le motif affiché sur la carte.
      */
     fun updateStatusIf(
         tunnelId: String,
         status: TunnelStatus,
         errorMessage: String? = null,
+        keepErrorMessage: Boolean = false,
         condition: (current: TunnelStatus) -> Boolean,
     ): TunnelStatus? {
         var seen: TunnelStatus? = null
@@ -556,7 +815,12 @@ class DesktopTunnelManager(
             val existing = states[tunnelId]
             seen = existing?.status
             if (existing == null || !condition(existing.status)) states
-            else states + (tunnelId to existing.copy(status = status, errorMessage = errorMessage))
+            else states + (
+                tunnelId to existing.copy(
+                    status = status,
+                    errorMessage = if (keepErrorMessage) existing.errorMessage else errorMessage,
+                )
+            )
         }
         return seen
     }
@@ -602,10 +866,13 @@ class DesktopTunnelManager(
     private suspend fun startLocalForwardInternal(
         config: TunnelConfig,
         client: SSHClient,
+        lossTexts: TunnelLossTexts,
     ): SshResult<Unit> = withContext(Dispatchers.IO) {
+        // The text of a dead listen loop comes from [lossTexts], read before anything is bound : at
+        // the moment the loop dies, a failing read would leave an ACTIVE tunnel that no longer listens.
         val serverSocket = ServerSocket()
         try {
-            bindAndRegisterLocalForward(config, client, serverSocket)
+            bindAndRegisterLocalForward(config, client, serverSocket, lossTexts)
         } catch (t: Throwable) {
             // `startTunnel` only disconnects the client when this throws : the
             // bound socket would keep the local port until the app restarts.
@@ -626,6 +893,7 @@ class DesktopTunnelManager(
         config: TunnelConfig,
         client: SSHClient,
         serverSocket: ServerSocket,
+        lossTexts: TunnelLossTexts,
     ): SshResult<Unit> {
         val params = Parameters(
             "127.0.0.1",
@@ -639,6 +907,9 @@ class DesktopTunnelManager(
         val forwarder = client.newLocalPortForwarder(params, serverSocket)
 
         val job = scope.launch(Dispatchers.IO) {
+            val listenJob = coroutineContext.job
+            // Touched only by the listen thread, which calls onClientFailed one failure at a time.
+            var failures = 0
             try {
                 // SSHJ's `LocalPortForwarder.listen()` loops while its thread is
                 // not interrupted and swallows the SocketException that
@@ -649,25 +920,64 @@ class DesktopTunnelManager(
                 // calls it, BEFORE closing the socket) into a Thread.interrupt(),
                 // which is the only thing that ends the loop. It clears only the
                 // interrupt it raised itself ; the `finally` below clears any
-                // other one.
-                runInterruptible { forwarder.listen() }
-                // Reached only if `listen()` returned while this job was still
-                // active. On stop / release / lost the job is cancelled, so
-                // `runInterruptible` throws a CancellationException instead
-                // (not an IOException : nothing to report, no reconnect).
-                Logger.d(TAG, "Tunnel ${config.id} listen loop exited cleanly")
-            } catch (e: IOException) {
-                // A deliberate stop / release can surface here too (a channel
-                // open torn down by the disconnect) : only an unexpected error
-                // is a lost tunnel, and only that is worth a warning. Matched on
-                // this loop's own client : a replaced entry (see [registerActive])
-                // dies the same way, and must not take down its successor.
-                if (!manuallyStopped.contains(config.id) && active[config.id]?.client === client) {
-                    Logger.w(TAG, "Tunnel ${config.id} listen loop died: ${e.message}")
+                // other one. The accept loop runs INSIDE it : it reads that
+                // interrupt, and the state of the job as a second signal.
+                // A client connection whose channel the server refuses, or does not
+                // answer in time while the SSH connection lives, does not end the loop
+                // (see `runLocalForwardListener`) : the log carries the class of the
+                // exception, which tells the two apart, never its message (host, port
+                // and server text).
+                val failure = runInterruptible {
+                    runLocalForwardListener(
+                        listen = forwarder::listen,
+                        serverSocket = serverSocket,
+                        clientConnected = { try { client.isConnected } catch (_: Exception) { false } },
+                        stopRequested = { !listenJob.isActive },
+                        onClientFailed = { failed ->
+                            failures++
+                            if (failures == 1) {
+                                Logger.w(
+                                    TAG,
+                                    "Tunnel ${LogId.of(config.id)} : ouverture du canal d'une connexion cliente " +
+                                        "en échec, écoute maintenue (${errorClass(failed)})",
+                                )
+                            } else {
+                                // A client that retries can fail by the hundred : only the first
+                                // one is a warning, the next ones are debug lines with the count.
+                                Logger.d(
+                                    TAG,
+                                    "Tunnel ${LogId.of(config.id)} : ouverture du canal d'une connexion cliente " +
+                                        "en échec ($failures depuis le démarrage, ${errorClass(failed)})",
+                                )
+                            }
+                        },
+                    )
+                }
+                if (failure == null) {
+                    // Reached only if the loop ended without a failure while this job
+                    // was still active (`listen()` returned, or the socket was closed).
+                    // On stop / release / lost the job is cancelled, so
+                    // `runInterruptible` throws a CancellationException instead
+                    // (nothing to report, no reconnect).
+                    Logger.d(TAG, "Tunnel ${LogId.of(config.id)} listen loop exited cleanly")
+                } else if (!manuallyStopped.contains(config.id) && active[config.id]?.client === client) {
+                    // A deliberate stop / release can surface here too (a channel
+                    // open torn down by the disconnect) : only an unexpected error
+                    // is a lost tunnel, and only that is worth a warning (logged by
+                    // `onTunnelLost`, from `logReason`). Matched on this loop's own
+                    // client : a replaced entry (see [registerActive]) dies the same
+                    // way, and must not take down its successor.
                     // Unexpected IO error (e.g. the SSH channel carrying this forward
                     // was torn down). Mark lost so the service reconnects: the
                     // DisconnectListener will fire too; `onTunnelLost` is idempotent.
-                    onTunnelLost(config, "Tunnel local interrompu : ${e.message ?: "erreur IO"}", client)
+                    // The state carries a fixed translated text, never the message of
+                    // the exception (SSHJ English text that can name a host or a port).
+                    onTunnelLost(
+                        config,
+                        reason = lossTexts.listenerStopped,
+                        logReason = "listen loop died (${errorClass(failure)})",
+                        source = client,
+                    )
                 }
             } finally {
                 // Never hand a pool worker back with the interrupt flag set : a
@@ -678,8 +988,8 @@ class DesktopTunnelManager(
 
         var livenessJob: Job? = null
         val up = try {
-            attachDisconnectListener(client, config)
-            livenessJob = startLivenessWatchdog(client, config)
+            attachDisconnectListener(client, config, lossTexts)
+            livenessJob = startLivenessWatchdog(client, config, lossTexts)
             registerAndConfirm(
                 ActiveTunnel(
                     config = config,
@@ -703,7 +1013,7 @@ class DesktopTunnelManager(
         // out meanwhile) : whoever took the entry out closed it, socket
         // included, so there is nothing to announce.
         if (up) {
-            Logger.d(TAG, "Tunnel LOCAL démarré : ${config.label} localhost:${config.localPort} → ${config.remoteHost}:${config.remotePort}")
+            Logger.d(TAG, "Tunnel LOCAL démarré : ${LogId.of(config.id)}")
         }
         return SshResult.Success(Unit)
     }
@@ -711,6 +1021,7 @@ class DesktopTunnelManager(
     private suspend fun startRemoteForwardInternal(
         config: TunnelConfig,
         client: SSHClient,
+        lossTexts: TunnelLossTexts,
     ): SshResult<Unit> = withContext(Dispatchers.IO) {
         val remotePortForwarder = client.remotePortForwarder
         val forward = RemotePortForwarder.Forward(config.remotePort)
@@ -723,8 +1034,8 @@ class DesktopTunnelManager(
         // uniquement par le [DisconnectListener] SSHJ du transport.
         val job = scope.launch(Dispatchers.IO) { /* tunnel actif tant que SSHClient ouvert */ }
 
-        attachDisconnectListener(client, config)
-        val livenessJob = startLivenessWatchdog(client, config)
+        attachDisconnectListener(client, config, lossTexts)
+        val livenessJob = startLivenessWatchdog(client, config, lossTexts)
         val up = registerAndConfirm(
             ActiveTunnel(
                 config = config,
@@ -738,7 +1049,7 @@ class DesktopTunnelManager(
         // ACTIVE was not written (a Stop got in first, or the entry was taken
         // out meanwhile) : whoever took the entry out cancelled the forward.
         if (up) {
-            Logger.d(TAG, "Tunnel REMOTE démarré : ${config.label} remote:${config.remotePort} → localhost:${config.localPort}")
+            Logger.d(TAG, "Tunnel REMOTE démarré : ${LogId.of(config.id)}")
         }
         SshResult.Success(Unit)
     }
@@ -748,43 +1059,50 @@ class DesktopTunnelManager(
      * trigger: fires when SSHJ's own reader thread detects the transport is
      * dead (e.g. server sent DISCONNECT, or the socket read timeout fires).
      * The primary failure detection is the liveness watchdog started by
-     * [startLivenessWatchdog]: SSHJ's built-in keep-alive swallows failures
-     * silently, so we can't rely on it alone.
+     * [startLivenessWatchdog]: SSHJ's built-in keep-alive is not used on Desktop,
+     * and a half-open link only shows up when a probe goes unanswered.
      */
-    private fun attachDisconnectListener(client: SSHClient, config: TunnelConfig) {
+    private fun attachDisconnectListener(client: SSHClient, config: TunnelConfig, lossTexts: TunnelLossTexts) {
         try {
-            client.transport.disconnectListener = DisconnectListener { reason: DisconnectReason, msg: String ->
+            // `msg` is nullable : SSHJ passes `SSHException.getMessage()`, which can be null.
+            client.transport.disconnectListener = DisconnectListener { reason: DisconnectReason, _: String? ->
                 if (!manuallyStopped.contains(config.id)) {
-                    onTunnelLost(config, "Session SSH fermée : ${reason.name}${if (msg.isNotBlank()) " ($msg)" else ""}", client)
+                    // The text sent by the server (or the English message of an SSHJ or JDK exception)
+                    // reaches neither the tunnel state nor the log : the state carries a fixed
+                    // translated text, the log the protocol reason code only.
+                    onTunnelLost(
+                        config,
+                        reason = lossTexts.sessionClosed,
+                        logReason = "SSH session closed (${reason.name})",
+                        source = client,
+                    )
                 }
             }
         } catch (e: Exception) {
-            Logger.w(TAG, "Impossible d'installer le DisconnectListener sur ${config.id} : ${e.message}")
+            Logger.w(TAG, "Impossible d'installer le DisconnectListener sur ${LogId.of(config.id)} (${errorClass(e)})")
         }
     }
 
     /**
      * Explicit application-level liveness watchdog.
      *
-     * Rationale: SSHJ's built-in `KeepAlive` / `Heartbeater` threads CATCH AND
-     * SWALLOW their own transport exceptions: a failing heartbeat send is
-     * merely logged, it never triggers the `DisconnectListener`. Combined with
-     * the fact that a TCP half-open socket (Wi-Fi dropped) accepts writes into
-     * the kernel buffer without error, SSHJ can remain oblivious to an outage
-     * for hours until the OS-level TCP keep-alive decides to tear the socket
-     * down (Linux default: ~2 hours).
+     * Rationale: SSHJ's built-in keep-alive is not used on Desktop (its
+     * interval is never set). A TCP half-open socket (Wi-Fi dropped) accepts
+     * writes into the kernel buffer without error, so SSHJ can remain oblivious
+     * to an outage for hours until the OS-level TCP keep-alive decides to tear
+     * the socket down (Linux default: ~2 hours).
      *
      * This watchdog periodically sends a `keepalive@openssh.com` global
      * request with `wantReply = true` AND explicitly awaits the reply with a
      * short timeout. Missing reply → we trip [onTunnelLost] ourselves, which
      * transitions the tunnel to RECONNECTING and lets the service schedule a
-     * reconnect. Deterministic detection within `keepAliveSeconds + timeout`.
+     * reconnect. Fixed 15 s cadence, reply expected within 10 s.
      *
      * Runs on [scope] so it dies cleanly with the manager's lifecycle; the
      * job reference is stored in [ActiveTunnel.livenessJob] so `stopTunnel`
      * and `onTunnelLost` can cancel it.
      */
-    private fun startLivenessWatchdog(client: SSHClient, config: TunnelConfig): Job {
+    private fun startLivenessWatchdog(client: SSHClient, config: TunnelConfig, lossTexts: TunnelLossTexts): Job {
         // Cadence aligned with `DesktopSshTerminalSession`'s session watchdog :
         // first probe after 3 s so the user gets feedback quickly, then 15 s
         // between probes. With the 10 s reply timeout, a real route drop is
@@ -828,19 +1146,24 @@ class DesktopTunnelManager(
                             elapsedNanos / 1_000_000L
                         } else {
                             // True timeout: link is dead.
-                            Logger.w(TAG, "Tunnel ${config.label} : keepalive timeout (ConnectionException après ${elapsedNanos / 1_000_000L}ms)")
+                            Logger.w(TAG, "Tunnel ${LogId.of(config.id)} : keepalive timeout (ConnectionException après ${elapsedNanos / 1_000_000L}ms)")
                             null
                         }
                     }
                 } catch (e: Exception) {
-                    Logger.w(TAG, "Tunnel ${config.label} : keepalive probe échoué (${e.message})")
+                    Logger.w(TAG, "Tunnel ${LogId.of(config.id)} : keepalive probe échoué (${errorClass(e)})")
                     null
                 }
 
                 if (rtt != null) {
                     _latenciesByTunnel.update { it + (config.id to rtt) }
                 } else {
-                    onTunnelLost(config, "Liaison SSH perdue (keepalive sans réponse)", client)
+                    onTunnelLost(
+                        config,
+                        reason = lossTexts.noAnswer,
+                        logReason = "keepalive without reply",
+                        source = client,
+                    )
                     return@launch
                 }
 
@@ -857,17 +1180,21 @@ class DesktopTunnelManager(
      * resources so a subsequent `attemptReconnect` starts from a clean slate.
      * Idempotent: callers may invoke it multiple times without adverse effect.
      *
+     * [reason] is shown to the user through the tunnel state: a fixed translated text, never text
+     * from the server, SSHJ or the JDK. [logReason] is its log counterpart: fixed text, a protocol
+     * code or an exception class chain, never a message.
+     *
      * [source] is the client that reported the loss. Disconnecting a client
      * fires its `DisconnectListener` (SSHJ `TransportImpl.disconnect`), so a
      * client torn down by [registerActive] or [releaseForReconnect] reports
      * late, possibly after a new entry took the same id : such a callback is
      * ignored instead of dropping the tunnel now registered.
      */
-    private fun onTunnelLost(config: TunnelConfig, reason: String, source: SSHClient) {
+    private fun onTunnelLost(config: TunnelConfig, reason: String, logReason: String, source: SSHClient) {
         val tunnel = active[config.id]
         if (tunnel == null || tunnel.client !== source) return
         if (!active.remove(config.id, tunnel)) return
-        Logger.w(TAG, "Tunnel ${config.label} perdu : $reason : état RECONNECTING")
+        Logger.w(TAG, "Tunnel ${LogId.of(config.id)} perdu : $logReason : état RECONNECTING")
         _latenciesByTunnel.update { it - config.id }
 
         runCatching { tunnel.livenessJob?.cancel() }
@@ -878,37 +1205,74 @@ class DesktopTunnelManager(
         runCatching { tunnel.job.cancel() }
         runCatching { tunnel.serverSocket?.close() }
         runCatching { tunnel.socks5Server?.stop() }
-        runCatching { tunnel.client.disconnect() }
 
-        _tunnelStates.update {
-            it + (config.id to TunnelState(config, TunnelStatus.RECONNECTING, reason))
+        // RECONNECTING is written AFTER the listeners are closed and BEFORE the disconnect, which can
+        // block on the SSHJ write lock for as long as a dead route takes: a Stop (or a Stop then a
+        // Start) landing during it must not be overwritten by a stale RECONNECTING written afterwards.
+        // Not written at all once a Stop was requested (same rule as [setError]): the Stop owns the
+        // state. Test and write are one compare-and-set.
+        _tunnelStates.update { states ->
+            if (manuallyStopped.contains(config.id)) states
+            else states + (config.id to TunnelState(config, TunnelStatus.RECONNECTING, reason))
         }
+        runCatching { tunnel.client.disconnect() }
     }
 
     private suspend fun startSocks5Internal(
         config: TunnelConfig,
         client: SSHClient,
+        lossTexts: TunnelLossTexts,
     ): SshResult<Unit> = withContext(Dispatchers.IO) {
-        val server = DesktopSocks5Server(client, config.localPort)
+        val server = DesktopSocks5Server(client, config.localPort, socks5ServerSocket)
+        // Binds the port and accepts nothing yet.
         server.start()
 
-        val job = scope.launch(Dispatchers.IO) { /* SOCKS5 server gère ses propres threads */ }
+        // The server runs its own threads : this job carries nothing. The end of its accept loop is
+        // reported by `startAccepting` below.
+        val job = scope.launch(Dispatchers.IO) { }
 
-        attachDisconnectListener(client, config)
-        val livenessJob = startLivenessWatchdog(client, config)
-        val up = registerAndConfirm(
-            ActiveTunnel(
-                config = config,
-                client = client,
-                job = job,
-                socks5Server = server,
-                livenessJob = livenessJob,
-            ),
-        )
+        var livenessJob: Job? = null
+        val up = try {
+            attachDisconnectListener(client, config, lossTexts)
+            livenessJob = startLivenessWatchdog(client, config, lossTexts)
+            registerAndConfirm(
+                ActiveTunnel(
+                    config = config,
+                    client = client,
+                    job = job,
+                    socks5Server = server,
+                    livenessJob = livenessJob,
+                ),
+            )
+        } catch (t: Throwable) {
+            // `startTunnel` only disconnects the client when this throws : the bound port would stay
+            // held until the app restarts. Skipped once the entry is registered (it then owns the server).
+            if (active[config.id]?.socks5Server !== server) {
+                runCatching { server.stop() }
+            }
+            job.cancel()
+            livenessJob?.cancel()
+            throw t
+        }
         // ACTIVE was not written (a Stop got in first, or the entry was taken
-        // out meanwhile) : whoever took the entry out stopped the server.
+        // out meanwhile) : whoever took the entry out stopped the server, and no
+        // accept loop was ever started.
         if (up) {
-            Logger.d(TAG, "Tunnel SOCKS5 démarré : ${config.label} socks5://localhost:${config.localPort}")
+            // The loop starts AFTER the registration, so that a failure can never come before
+            // [onTunnelLost] is able to find the entry. A client that connects between the bind and
+            // this call waits a few milliseconds in the queue of the socket.
+            server.startAccepting { failure ->
+                // No unexpected end is survived (see [DesktopSocks5Server]) : the tunnel is lost, the
+                // service reconnects it and the reconnection binds the port again. A stop or a release
+                // takes the entry out BEFORE it closes the server, so it never gets here.
+                onTunnelLost(
+                    config,
+                    reason = lossTexts.socksStopped,
+                    logReason = "SOCKS5 accept loop died (${errorClass(failure)})",
+                    source = client,
+                )
+            }
+            Logger.d(TAG, "Tunnel SOCKS5 démarré : ${LogId.of(config.id)}")
         }
         SshResult.Success(Unit)
     }
@@ -959,7 +1323,7 @@ class DesktopTunnelManager(
             if (active.remove(id, tunnel)) {
                 tunnel.job.cancel()
                 closeTunnelResources(tunnel)
-                Logger.d(TAG, "Tunnel $id : arrêt reçu pendant le démarrage, ressources fermées")
+                Logger.d(TAG, "Tunnel ${LogId.of(id)} : arrêt reçu pendant le démarrage, ressources fermées")
             }
             return false
         }
@@ -1014,7 +1378,7 @@ class DesktopTunnelManager(
         val previous = active.put(tunnel.config.id, tunnel) ?: return
         Logger.w(
             TAG,
-            "Tunnel ${tunnel.config.label} (${tunnel.config.id}) : entrée active déjà présente, " +
+            "Tunnel ${LogId.of(tunnel.config.id)} : entrée active déjà présente, " +
                 "l'ancienne est fermée avant d'être remplacée",
         )
         // Cancel first, for the same reason as in stopTunnel.
@@ -1022,9 +1386,14 @@ class DesktopTunnelManager(
         closeTunnelResources(previous)
     }
 
+    /**
+     * Closes what a tunnel holds : the watchdog, the forwarder (socket, remote forward, SOCKS5 server),
+     * then the SSH client, which is closed whatever happens before. Never throws an `Exception` : a
+     * caller that removed the entry from [active] relies on this to know the tunnel is down.
+     */
     private fun closeTunnelResources(tunnel: ActiveTunnel) {
-        tunnel.livenessJob?.cancel()
         try {
+            tunnel.livenessJob?.cancel()
             when (tunnel.config.type) {
                 TunnelType.LOCAL_FORWARD -> tunnel.serverSocket?.close()
                 TunnelType.REMOTE_FORWARD -> {
@@ -1037,16 +1406,10 @@ class DesktopTunnelManager(
                 TunnelType.DYNAMIC_SOCKS5 -> tunnel.socks5Server?.stop()
             }
         } catch (e: Exception) {
-            Logger.w(TAG, "Erreur fermeture forwarder ${tunnel.config.id}: ${e.message}")
+            Logger.w(TAG, "Erreur fermeture forwarder ${LogId.of(tunnel.config.id)} (${errorClass(e)})")
         } finally {
             try { tunnel.client.disconnect() } catch (_: Exception) {}
         }
-    }
-
-    private fun isPortInUse(port: Int): Boolean = try {
-        ServerSocket(port).use { false }
-    } catch (e: IOException) {
-        true
     }
 }
 
@@ -1073,23 +1436,22 @@ class VaultSshClientFactory(
     private val connectTimeoutMsProvider: () -> Int = { 10_000 },
 ) : SshClientFactory {
 
+    /** Ids of the hosts whose last [open] failed on a network-level error (see [isNetworkLevelFailure]). */
+    private val networkFailures: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    override fun lastFailureWasNetworkLevel(host: Host): Boolean = host.id in networkFailures
+
     override suspend fun open(host: Host, onCreated: (SSHClient) -> Unit): SshResult<SSHClient> = withContext(Dispatchers.IO) {
-        // Use KEEP_ALIVE (SSH_MSG_IGNORE without wantReply) here: NOT
-        // HEARTBEAT.
+        networkFailures.remove(host.id)
+        // No SSHJ keep-alive here: its interval is never set, so its thread never
+        // starts. Liveness is ensured by [startLivenessWatchdog], which sends its
+        // own `keepalive@openssh.com` probe (wantReply=true) every 15 s, measures
+        // the RTT and trips [onTunnelLost] on timeout.
         //
-        // HEARTBEAT also fires `keepalive@openssh.com` global requests with
-        // wantReply=true on a private SSHJ thread, which contends with our
-        // own [startLivenessWatchdog] for slots in the `Connection` global-
-        // request promise queue. On a tunnel where no shell channel is
-        // actively pumping bytes, this race silently swallows our watchdog's
-        // promise: `promise.retrieve(...)` never completes, latency is never
-        // emitted, and the tunnel stays "alive but unmeasured" indefinitely.
-        //
-        // The watchdog itself is the proactive liveness signal here: it
-        // sends its own wantReply=true probe every 15 s, measures the RTT,
-        // and trips [onTunnelLost] on timeout. That's strictly stronger
-        // than HEARTBEAT's "log and move on" failure handling.
-        val config = DefaultConfig().apply { keepAliveProvider = KeepAliveProvider.KEEP_ALIVE }
+        // WARNING: SSHJ 0.38 `DefaultConfig()` picks HEARTBEAT. If an interval is
+        // ever set before `connect`, choose KEEP_ALIVE explicitly: HEARTBEAT would
+        // send an SSH_MSG_IGNORE during the key exchange, which strict KEX refuses.
+        val config = DefaultConfig()
         val client = SSHClient(config).apply {
             addHostKeyVerifier(hostKeyVerifier)
             connectTimeout = connectTimeoutMsProvider()
@@ -1104,79 +1466,88 @@ class VaultSshClientFactory(
             // the callback may throw an IOException to give up before
             // `connect()` (a Stop that landed before the client existed, where
             // `disconnect()` would be a no-op on an unconnected client). The
-            // `catch (IOException)` below then closes the client and returns
-            // an Error, and no socket is ever opened.
+            // `catch` below then closes the client and returns an Error, and
+            // no socket is ever opened.
             onCreated(client)
             client.connect(host.hostname, host.port)
-            // Enable SSH keep-alive so a dropped route (Wi-Fi off, VPN tunnel
-            // broken, peer gone silent) is detected PROACTIVELY. Default is 0
-            // (disabled). Clamp: [5, 300], too-short values spam the server.
-            client.connection.keepAlive.keepAliveInterval =
-                host.keepAliveSeconds.coerceIn(5, 300)
+            // What each type needs from the vault is read first, then [tunnelCredentialProblem] says
+            // whether it is enough : one place decides, the branches below only authenticate.
+            val password = if (host.authType == AuthType.PASSWORD) vaultManager.getPassword(host.credentialId) else null
+            val pem = if (host.authType == AuthType.SSH_KEY || host.authType == AuthType.CERTIFICATE) {
+                vaultManager.getPrivateKey(host.credentialId)
+            } else {
+                null
+            }
+            val cert = if (host.authType == AuthType.CERTIFICATE) vaultManager.getCertificate(host.credentialId) else null
+            val problem = tunnelCredentialProblem(
+                authType = host.authType,
+                hasPassword = password != null,
+                hasPrivateKey = pem != null,
+                hasCertificate = cert != null,
+            )
+            if (problem != null) {
+                return@withContext failAndClose(client, problem.toAuthError(host.label))
+            }
             when (host.authType) {
                 AuthType.PASSWORD -> {
-                    val password = vaultManager.getPassword(host.credentialId)
-                        ?: return@withContext failAndClose(
-                            client,
-                            SshErrorCode.AUTH_FAILED,
-                            "Mot de passe absent du vault pour ${host.label}",
-                        )
-                    try { client.authPassword(host.username, password) }
-                    finally { Arrays.fill(password, '\u0000') }
+                    val secret = checkNotNull(password) { "tunnelCredentialProblem lets a missing password through" }
+                    try { client.authPassword(host.username, secret) }
+                    finally { Arrays.fill(secret, '\u0000') }
                 }
                 AuthType.SSH_KEY -> {
-                    val pem = vaultManager.getPrivateKey(host.credentialId)
-                        ?: return@withContext failAndClose(
-                            client,
-                            SshErrorCode.AUTH_FAILED,
-                            "Clé SSH absente du vault pour ${host.label}",
-                        )
+                    val key = checkNotNull(pem) { "tunnelCredentialProblem lets a missing key through" }
                     val passphrase = vaultManager.getKeyPassphrase(host.credentialId)
                     try {
-                        val provider = DesktopSshKeyLoader.loadKeyProviderFromString(pem, passphrase)
+                        // Loading is its own step : a key that cannot be read is an identity problem
+                        // ([TunnelKeyUnreadableException]), not an error of the authentication below.
+                        val provider = loadTunnelKeyProvider(key, certificate = null, passphrase = passphrase)
                         client.authPublickey(host.username, provider)
                     } finally { passphrase?.let { Arrays.fill(it, '\u0000') } }
                 }
                 AuthType.CERTIFICATE -> {
-                    val pem = vaultManager.getPrivateKey(host.credentialId)
-                    val cert = vaultManager.getCertificate(host.credentialId)
-                    if (pem == null || cert == null) {
-                        return@withContext failAndClose(
-                            client,
-                            SshErrorCode.AUTH_FAILED,
-                            "Clé ou certificat absent du vault pour ${host.label}",
-                        )
-                    }
+                    val key = checkNotNull(pem) { "tunnelCredentialProblem lets a missing key through" }
+                    val certificate = checkNotNull(cert) { "tunnelCredentialProblem lets a missing certificate through" }
                     val passphrase = vaultManager.getKeyPassphrase(host.credentialId)
                     try {
-                        val provider = DesktopSshKeyLoader.loadKeyProviderWithCertificate(pem, cert, passphrase)
+                        // A truncated certificate raises a BufferException (an IOException) here.
+                        val provider = loadTunnelKeyProvider(key, certificate = certificate, passphrase = passphrase)
                         client.authPublickey(host.username, provider)
                     } finally { passphrase?.let { Arrays.fill(it, '\u0000') } }
                 }
-                AuthType.FIDO2, AuthType.BIOMETRIC_KEY -> {
-                    return@withContext failAndClose(
-                        client,
-                        SshErrorCode.AUTH_FAILED,
-                        "Auth FIDO2 / biométrique non disponible côté Desktop (Wave 5.x)",
-                    )
-                }
+                // Refused above by [tunnelCredentialProblem]. Closed all the same : a client that
+                // authenticated nothing must never be handed back as a success (the `catch` below
+                // turns this into an Error).
+                AuthType.FIDO2, AuthType.BIOMETRIC_KEY ->
+                    error("tunnelCredentialProblem lets an authentication without tunnel support through")
             }
             SshResult.Success(client)
-        } catch (e: net.schmizz.sshj.userauth.UserAuthException) {
+        } catch (e: CancellationException) {
+            // `getString` and the other suspend calls of this block can be cancelled : the client is
+            // closed, nobody else holds it, and the cancellation goes up to [DesktopTunnelManager.startTunnel],
+            // which writes STOPPED. Without this branch the `catch (Exception)` below would turn it into
+            // an Error.
             try { client.disconnect() } catch (_: Exception) {}
-            SshResult.Error(SshErrorCode.AUTH_FAILED, authRefusedMessage(e.message ?: e::class.simpleName))
-        } catch (e: IOException) {
-            try { client.disconnect() } catch (_: Exception) {}
-            connectErrorResult(e, connectTimeoutMsProvider())
+            throw e
         } catch (e: Exception) {
+            // One clause, and [tunnelOpenError] decides : the order of several `catch` could not be
+            // trusted to keep a UserAuthException (an IOException) away from the connection text.
+            //
+            // Debug level : a Stop makes the open fail on purpose (the socket is closed under it), and
+            // what the factory sees then is the exception of that socket. [DesktopTunnelManager] tells
+            // a failure nobody asked for, with the code of the error, at warning level.
+            // A Stop that landed before `connect()` (StopRequestedException) is not worth a line.
+            if (e !is StopRequestedException) {
+                Logger.d(TAG, "Ouverture du client de tunnel : échec (${errorClass(e)})")
+            }
+            if (e.isNetworkLevelFailure()) networkFailures.add(host.id)
             try { client.disconnect() } catch (_: Exception) {}
-            SshResult.Error(SshErrorCode.UNKNOWN, unknownSshErrorMessage(e))
+            tunnelOpenError(e, connectTimeoutMsProvider())
         }
     }
 
-    private fun failAndClose(client: SSHClient, code: SshErrorCode, message: String): SshResult<SSHClient> {
+    private fun failAndClose(client: SSHClient, error: SshResult.Error): SshResult<SSHClient> {
         try { client.disconnect() } catch (_: Exception) {}
-        return SshResult.Error(code, message)
+        return error
     }
 }
 

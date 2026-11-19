@@ -37,26 +37,66 @@ class DesktopTunnelRepository(db: NextShDatabase) : TunnelRepository {
     }
 
     override suspend fun save(config: TunnelConfig) = withContext(Dispatchers.IO) {
+        q.transaction { saveInTransaction(config) }
+    }
+
+    /**
+     * Body of [save], without a transaction of its own so that a caller can write several rows atomically
+     * (backup restore). Not a suspend function on purpose: a SQLDelight transaction is bound to its thread.
+     *
+     * A new id is a plain INSERT with a fresh clock. An id that already exists, live or tombstoned, is
+     * rewritten in place (createdAt kept), revived (deleted = 0), with the existing clock ticked so this
+     * version also wins on the peers. The host must exist (foreign key), otherwise the write throws.
+     *
+     * A LIVE row whose content already equals [config] is left untouched (no clock tick, no updatedAt bump):
+     * restoring the same backup twice must not look like a new edit to the peers.
+     */
+    internal fun saveInTransaction(config: TunnelConfig) {
         val now = System.currentTimeMillis()
-        val newClock = VectorClockCodec.decode("{}").tick(DeviceIdentity.deviceId(), now)
-        q.insert(
-            id = config.id,
-            label = config.label,
-            hostId = config.hostId,
-            type = config.type.name,
-            localPort = config.localPort.toLong(),
-            remoteHost = config.remoteHost,
-            remotePort = config.remotePort.toLong(),
-            autoStart = if (config.autoStart) 1L else 0L,
-            openBrowserOnConnect = if (config.openBrowserOnConnect) 1L else 0L,
-            keepAliveAfterBrowserClose = if (config.keepAliveAfterBrowserClose) 1L else 0L,
-            isFavorite = if (config.isFavorite) 1L else 0L,
-            createdAt = now,
-            vectorClock = VectorClockCodec.encode(newClock),
-            deleted = 0L,
-            deletedAt = null,
-            updatedAt = now,
-        )
+        val existing = q.selectByIdIncludingDeleted(config.id).executeAsOneOrNull()
+        if (existing != null && existing.deleted == 0L && toDomain(existing) == config) return
+        if (existing == null) {
+            val newClock = VectorClockCodec.decode("{}").tick(DeviceIdentity.deviceId(), now)
+            q.insert(
+                id = config.id,
+                label = config.label,
+                hostId = config.hostId,
+                type = config.type.name,
+                localPort = config.localPort.toLong(),
+                remoteHost = config.remoteHost,
+                remotePort = config.remotePort.toLong(),
+                autoStart = if (config.autoStart) 1L else 0L,
+                openBrowserOnConnect = if (config.openBrowserOnConnect) 1L else 0L,
+                keepAliveAfterBrowserClose = if (config.keepAliveAfterBrowserClose) 1L else 0L,
+                isFavorite = if (config.isFavorite) 1L else 0L,
+                createdAt = now,
+                vectorClock = VectorClockCodec.encode(newClock),
+                deleted = 0L,
+                deletedAt = null,
+                updatedAt = now,
+                browserPath = config.browserPath,
+            )
+        } else {
+            val newClock = VectorClockCodec.decode(existing.vectorClock).tick(DeviceIdentity.deviceId(), now)
+            q.updateFromSync(
+                label = config.label,
+                hostId = config.hostId,
+                type = config.type.name,
+                localPort = config.localPort.toLong(),
+                remoteHost = config.remoteHost,
+                remotePort = config.remotePort.toLong(),
+                autoStart = if (config.autoStart) 1L else 0L,
+                openBrowserOnConnect = if (config.openBrowserOnConnect) 1L else 0L,
+                keepAliveAfterBrowserClose = if (config.keepAliveAfterBrowserClose) 1L else 0L,
+                isFavorite = if (config.isFavorite) 1L else 0L,
+                vectorClock = VectorClockCodec.encode(newClock),
+                deleted = 0L,
+                deletedAt = null,
+                updatedAt = now,
+                browserPath = config.browserPath,
+                id = config.id,
+            )
+        }
     }
 
     override suspend fun update(config: TunnelConfig) = withContext(Dispatchers.IO) {
@@ -77,6 +117,7 @@ class DesktopTunnelRepository(db: NextShDatabase) : TunnelRepository {
             isFavorite = if (config.isFavorite) 1L else 0L,
             vectorClock = VectorClockCodec.encode(newClock),
             updatedAt = now,
+            browserPath = config.browserPath,
             id = config.id,
         )
     }
@@ -155,6 +196,7 @@ class DesktopTunnelRepository(db: NextShDatabase) : TunnelRepository {
                     deleted = if (entry.deleted) 1L else 0L,
                     deletedAt = entry.deletedAt,
                     updatedAt = entry.updatedAt,
+                    browserPath = payload.browserPath,
                     id = payload.id,
                 )
             } else {
@@ -175,6 +217,7 @@ class DesktopTunnelRepository(db: NextShDatabase) : TunnelRepository {
                     deleted = if (entry.deleted) 1L else 0L,
                     deletedAt = entry.deletedAt,
                     updatedAt = entry.updatedAt,
+                    browserPath = payload.browserPath,
                 )
             }
         }
@@ -196,5 +239,6 @@ class DesktopTunnelRepository(db: NextShDatabase) : TunnelRepository {
         openBrowserOnConnect = row.openBrowserOnConnect == 1L,
         keepAliveAfterBrowserClose = row.keepAliveAfterBrowserClose == 1L,
         isFavorite = row.isFavorite == 1L,
+        browserPath = row.browserPath,
     )
 }

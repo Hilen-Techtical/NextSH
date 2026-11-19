@@ -71,6 +71,30 @@
 
 # ── Timber ────────────────────────────────────────────────────────────────────
 -dontwarn org.jetbrains.annotations.**
+# Les niveaux verbose et debug n'existent pas en release : R8 supprime les appels
+# (ReleaseLogTree les ignore deja, cela evite aussi de construire leurs messages).
+# Timber.d(...) passe par Timber$Forest, Timber.tag(...).d(...) par Timber$Tree.
+# tag(...) est retire avec l'appel qu'il prepare : Timber garde l'etiquette dans un
+# thread-local qu'un prochain appel consomme, donc un tag() reste seul etiquetterait
+# a tort la ligne INFO suivante.
+-assumenosideeffects class timber.log.Timber$Forest {
+    public *** v(...);
+    public *** d(...);
+    public *** tag(...);
+}
+-assumenosideeffects class timber.log.Timber$Tree {
+    public *** v(...);
+    public *** d(...);
+}
+-assumenosideeffects class timber.log.Timber {
+    public static *** v(...);
+    public static *** d(...);
+    public static *** tag(...);
+}
+
+# Les journaux de release donnent la classe des exceptions (errorClass) : sans cette regle
+# R8 renomme ces classes et la ligne devient illisible ("a<-b").
+-keepnames class * extends java.lang.Throwable
 
 # ── Android Security / Crypto ─────────────────────────────────────────────────
 -keep class androidx.security.crypto.** { *; }

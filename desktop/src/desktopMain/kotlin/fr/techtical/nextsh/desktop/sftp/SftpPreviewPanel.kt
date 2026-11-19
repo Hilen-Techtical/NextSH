@@ -54,12 +54,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import fr.techtical.nextsh.desktop.components.appDateLocale
 import fr.techtical.nextsh.desktop.generated.resources.Res
+import fr.techtical.nextsh.desktop.generated.resources.sftp_error_preview_too_large_max
 import fr.techtical.nextsh.desktop.generated.resources.sftp_preview_close
 import fr.techtical.nextsh.desktop.generated.resources.sftp_preview_collapse
 import fr.techtical.nextsh.desktop.generated.resources.sftp_preview_expand
 import fr.techtical.nextsh.desktop.generated.resources.sftp_preview_image_unsupported
 import fr.techtical.nextsh.desktop.generated.resources.sftp_preview_unavailable_title
+import fr.techtical.nextsh.desktop.generated.resources.sftp_preview_zoom
 import fr.techtical.nextsh.desktop.theme.ErrorRed
 import fr.techtical.nextsh.desktop.theme.Gold
 import fr.techtical.nextsh.desktop.theme.GoldMuted
@@ -117,6 +120,9 @@ fun SftpPreviewPanel(
                 is PreviewState.Text -> TextPreview(content = state.content)
                 is PreviewState.Image -> ImagePreview(bytes = state.bytes)
                 is PreviewState.Error -> PreviewError(message = state.message)
+                is PreviewState.TooLarge -> PreviewError(
+                    message = stringResource(Res.string.sftp_error_preview_too_large_max, state.maxKb),
+                )
             }
         }
     }
@@ -281,7 +287,7 @@ private fun ImagePreview(bytes: ByteArray) {
             modifier = Modifier.scale(zoom),
         )
         Text(
-            text = "%.1f×".format(zoom),
+            text = stringResource(Res.string.sftp_preview_zoom, String.format(appDateLocale(), "%.1f", zoom)),
             color = GoldMuted,
             style = MaterialTheme.typography.labelSmall,
             modifier = Modifier

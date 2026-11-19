@@ -3,11 +3,10 @@
 
 package fr.techtical.nextsh.core.ssh
 
+import fr.techtical.nextsh.testutil.ProjectFiles
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
-import java.io.File
 
 /**
  * [resolveConnectTimeoutMs] is the pure computation backing
@@ -69,24 +68,6 @@ class SshSessionManagerConnectTimeoutTest {
     // ── Source-level guard (see the class KDoc for why) ───────────────────────
 
     /**
-     * Locates `SshSessionManager.kt` by walking up from the test's working
-     * directory, which Gradle sets to the module directory (`app/`) but which
-     * other runners (IDE, CI wrappers) may point at the repository root
-     * instead. Returns null if neither layout resolves.
-     */
-    private fun locateSshSessionManagerSource(): File? {
-        val fromModuleRoot = "src/main/kotlin/fr/techtical/nextsh/core/ssh/SshSessionManager.kt"
-        val fromRepoRoot = "app/$fromModuleRoot"
-        var dir: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
-        while (dir != null) {
-            File(dir, fromModuleRoot).takeIf { it.isFile }?.let { return it }
-            File(dir, fromRepoRoot).takeIf { it.isFile }?.let { return it }
-            dir = dir.parentFile
-        }
-        return null
-    }
-
-    /**
      * Guards the wiring the unit tests above cannot reach: `createSshClient`
      * must still route the user setting through [resolveConnectTimeoutMs], and
      * `connectTimeout` must never be assigned a hard-coded number again.
@@ -97,18 +78,12 @@ class SshSessionManagerConnectTimeoutTest {
      * does catch is the actual regression: the call vanishing, or a literal
      * such as `connectTimeout = 10_000` coming back.
      *
-     * Skips rather than fails when the source file can't be located, so an
-     * unusual runner layout degrades to "no coverage" instead of a red build
-     * that has nothing to do with the code under test.
+     * A source file that can't be found FAILS the test (see [ProjectFiles]):
+     * a guard that checks nothing must not look green.
      */
     @Test
     fun productionStillRoutesThroughTheResolver() {
-        val source = locateSshSessionManagerSource()
-        assumeTrue(
-            source != null,
-            "SshSessionManager.kt not found from working dir ${System.getProperty("user.dir")}: guard skipped",
-        )
-        val text = source!!.readText()
+        val text = ProjectFiles.mainSource("core/ssh/SshSessionManager.kt").readText()
 
         // At least one CALL (the `(?<!fun )` lookbehind excludes the
         // declaration itself, which would otherwise satisfy a naive contains).

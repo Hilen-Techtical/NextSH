@@ -19,8 +19,10 @@ import org.junit.jupiter.api.Test
  *
  * These tests verify the split-screen data classes and state transitions
  * without instantiating SessionViewModel (which requires Android Context).
- * Tests simulate the ViewModel's _uiState.update {} patterns using
- * MutableStateFlow<SessionUiState>.
+ * Tests simulate the _uiState.update {} patterns the split logic used in the ViewModel, using
+ * MutableStateFlow<SessionUiState>. That logic now lives in TerminalTabStore, whose real
+ * operations (closeTab index adjustment, exit of the split, focusedSession...) are covered by
+ * TerminalTabStoreTest.
  *
  * Tests verify:
  * - SplitState data class defaults and field storage

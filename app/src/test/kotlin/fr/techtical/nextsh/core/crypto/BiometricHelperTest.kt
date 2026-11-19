@@ -3,7 +3,6 @@
 
 package fr.techtical.nextsh.core.crypto
 
-import android.content.Context
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
@@ -13,13 +12,17 @@ import androidx.biometric.BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE
 import androidx.biometric.BiometricManager.BIOMETRIC_ERROR_UNSUPPORTED
 import androidx.biometric.BiometricManager.BIOMETRIC_SUCCESS
 import fr.techtical.nextsh.core.crypto.BiometricHelper.BiometricCapability
-import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
+/**
+ * The capability check that unlocks the Vault accepts the device PIN as well as a biometric. It is
+ * not the check of a biometric SSH key (see [StrongBiometricStatusTest]), which never accepts the
+ * PIN: these tests keep the two apart.
+ */
 class BiometricHelperTest {
 
     private val strongOrCredential = BIOMETRIC_STRONG or DEVICE_CREDENTIAL
@@ -55,7 +58,6 @@ class BiometricHelperTest {
     }
 
     private fun helperFor(device: FakeDevice, sdkInt: Int) = BiometricHelper(
-        context = mockk<Context>(),
         sdkInt = sdkInt,
         canAuthenticateWith = device::canAuthenticate,
     )
@@ -151,7 +153,6 @@ class BiometricHelperTest {
             // Combinaison refusée, code seul accepté : le repli reste tenté à partir de l'API 30.
             val requested = mutableListOf<Int>()
             val helper = BiometricHelper(
-                context = mockk<Context>(),
                 sdkInt = sdkInt,
                 canAuthenticateWith = { authenticators ->
                     requested += authenticators
@@ -175,9 +176,27 @@ class BiometricHelperTest {
             )
             for ((error, expected) in cases) {
                 val device = FakeDevice(sdkInt = sdkInt, hasCode = false, resultWithoutCode = error)
+                val helper = helperFor(device, sdkInt = sdkInt)
 
-                assertEquals(expected, helperFor(device, sdkInt = sdkInt).checkCapability(), "API $sdkInt, erreur $error")
+                assertEquals(expected, helper.checkCapability(), "API $sdkInt, erreur $error")
+                assertFalse(helper.canAuthenticate(), "API $sdkInt, erreur $error")
             }
+        }
+    }
+
+    // The Vault and a biometric SSH key are two different checks
+
+    @Test
+    fun `a phone with a PIN and no fingerprint is available for the Vault but not for a biometric key`() {
+        for (sdkInt in listOf(29, 30, 36)) {
+            // The Vault request includes the code, so a PIN alone passes it; the key asks for a strong
+            // biometric only, and nothing is enrolled.
+            val device = FakeDevice(sdkInt = sdkInt, hasCode = true)
+            val helper = helperFor(device, sdkInt = sdkInt)
+
+            assertEquals(BiometricCapability.AVAILABLE, helper.checkCapability(), "API $sdkInt")
+            assertEquals(StrongBiometricStatus.NOT_ENROLLED, helper.checkStrongBiometric(), "API $sdkInt")
+            assertEquals(BIOMETRIC_STRONG, device.requested.last(), "API $sdkInt: the key asks for BIOMETRIC_STRONG alone")
         }
     }
 }

@@ -10,6 +10,7 @@ import fr.techtical.nextsh.core.ssh.SshTunnelManager
 import fr.techtical.nextsh.domain.model.*
 import fr.techtical.nextsh.domain.repository.TunnelRepository
 import fr.techtical.nextsh.domain.usecase.StopTunnelUseCase
+import fr.techtical.nextsh.shared.domain.tunnel.TunnelBrowserPath
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.net.URI
@@ -128,7 +129,8 @@ class TunnelBrowserViewModel internal constructor(
         releaseAuth(resetUiState = false, enable = true)
         viewModelScope.launch {
             val config = tunnelRepository.getById(tunnelId) ?: return@launch
-            val url = "http://127.0.0.1:${config.localPort}"
+            // The path may carry a secret in its query string: the URL is never logged.
+            val url = TunnelBrowserPath.buildBrowserUrl(config.localPort, config.browserPath)
             _uiState.update {
                 it.copy(tunnelConfig = config, initialUrl = url, currentUrl = url)
             }

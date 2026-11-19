@@ -144,4 +144,121 @@ class CrdtEngineTest {
         val result = CrdtEngine.merge(localEntry, remoteEntry)
         assertIs<MergeResult.Clean<StubPayload>>(result)
     }
+
+    // ── keepLocal ──────────────────────────────────────────────────────────
+
+    private fun concurrentPair(): Pair<SyncEntry<StubPayload>, SyncEntry<StubPayload>> {
+        val base = VectorClock.EMPTY
+        val local = entry(clock = base.tick("A", 100), value = "from-A", updatedAt = 100)
+        val remote = entry(clock = base.tick("B", 100), value = "from-B", updatedAt = 100)
+        assertIs<MergeResult.Conflict<StubPayload>>(CrdtEngine.merge(local, remote))
+        return local to remote
+    }
+
+    @Test
+    fun `keepLocal produces a clock that dominates both versions`() {
+        val (local, remote) = concurrentPair()
+
+        val kept = CrdtEngine.keepLocal(local, remote.clock, "A", 500)
+
+        assertTrue(kept.clock.dominates(local.clock), "must dominate the local clock")
+        assertTrue(kept.clock.dominates(remote.clock), "must dominate the remote clock")
+    }
+
+    @Test
+    fun `keepLocal keeps the payload and refreshes only the clock and updatedAt`() {
+        val (local, remote) = concurrentPair()
+
+        val kept = CrdtEngine.keepLocal(local, remote.clock, "A", 500)
+
+        assertEquals(local.id, kept.id)
+        assertEquals(local.payload, kept.payload)
+        assertEquals(local.deleted, kept.deleted)
+        assertEquals(local.deletedAt, kept.deletedAt)
+        assertEquals(500L, kept.updatedAt)
+    }
+
+    @Test
+    fun `merge of keepLocal against the remote is clean and carries the local payload`() {
+        val (local, remote) = concurrentPair()
+        val kept = CrdtEngine.keepLocal(local, remote.clock, "A", 500)
+
+        // Device A side: no conflict re-detected, the kept version stays.
+        val onA = CrdtEngine.merge(kept, remote)
+        assertIs<MergeResult.Clean<StubPayload>>(onA)
+        assertEquals(StubPayload("from-A"), onA.entry.payload)
+        assertEquals(kept, onA.entry)
+
+        // Device B side: the kept version arrives as a remote entry and wins cleanly.
+        val onB = CrdtEngine.merge(remote, kept)
+        assertIs<MergeResult.Clean<StubPayload>>(onB)
+        assertEquals(StubPayload("from-A"), onB.entry.payload)
+        assertEquals(kept, onB.entry)
+    }
+
+    @Test
+    fun `keepLocal on a tombstone keeps the deletion and wins over a live remote`() {
+        val base = VectorClock.EMPTY
+        val local = entry(
+            clock = base.tick("A", 100),
+            value = null,
+            deleted = true,
+            deletedAt = 100L,
+            updatedAt = 100L,
+        )
+        val remote = entry(clock = base.tick("B", 100), value = "edited-on-B", updatedAt = 100)
+        assertIs<MergeResult.Conflict<StubPayload>>(CrdtEngine.merge(local, remote))
+
+        val kept = CrdtEngine.keepLocal(local, remote.clock, "A", 700)
+
+        assertTrue(kept.deleted)
+        assertEquals(100L, kept.deletedAt)
+        assertEquals(null, kept.payload)
+        assertEquals(700L, kept.updatedAt)
+        val onB = CrdtEngine.merge(remote, kept)
+        assertIs<MergeResult.Clean<StubPayload>>(onB)
+        assertTrue(onB.entry.deleted, "the peer must accept the deletion")
+        val onA = CrdtEngine.merge(kept, remote)
+        assertIs<MergeResult.Clean<StubPayload>>(onA)
+        assertTrue(onA.entry.deleted)
+    }
+
+    @Test
+    fun `keepLocal still strictly increases when the device counter is ahead of the wall clock`() {
+        val ahead = VectorClock(mapOf("A" to 10_000L))
+        val local = entry(clock = ahead, value = "from-A")
+        val remote = entry(clock = VectorClock(mapOf("B" to 50L)), value = "from-B")
+
+        // Wall clock far behind the counter (clock skew): the tick must use counter + 1.
+        val kept = CrdtEngine.keepLocal(local, remote.clock, "A", 500)
+
+        assertEquals(10_001L, kept.clock.entries["A"])
+        assertEquals(50L, kept.clock.entries["B"])
+        assertTrue(kept.clock.dominates(local.clock))
+        assertTrue(kept.clock.dominates(remote.clock))
+    }
+
+    @Test
+    fun `keepLocal ticks even when the local clock already dominates the remote one`() {
+        val remote = entry(clock = VectorClock.EMPTY.tick("A", 100), value = "old")
+        val local = entry(clock = remote.clock.tick("A", 200), value = "new")
+
+        val kept = CrdtEngine.keepLocal(local, remote.clock, "A", 300)
+
+        assertTrue(kept.clock.dominates(local.clock), "the tick makes the result strictly newer")
+    }
+
+    @Test
+    fun `two simultaneous keepLocal choices stay concurrent instead of diverging silently`() {
+        val (a, b) = concurrentPair()
+
+        val keptByA = CrdtEngine.keepLocal(a, b.clock, "A", 500)
+        val keptByB = CrdtEngine.keepLocal(b, a.clock, "B", 500)
+
+        // Without the tick both clocks would be equal while the payloads differ, and merge
+        // would answer Clean(local) on both sides: permanent silent divergence.
+        assertTrue(keptByA.clock != keptByB.clock)
+        assertTrue(keptByA.clock.concurrentWith(keptByB.clock))
+        assertIs<MergeResult.Conflict<StubPayload>>(CrdtEngine.merge(keptByA, keptByB))
+    }
 }

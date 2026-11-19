@@ -7,13 +7,13 @@ package fr.techtical.nextsh.core.ssh
 private const val MAX_ENTRY_NAME_LENGTH = 255
 
 /**
- * Séparateurs de chemin et caractères de contrôle, NUL et DEL compris.
+ * Séparateurs de chemin.
  *
- * `\p{Cc}` couvre les contrôles C0 et C1 (U+0080 à U+009F), là où `\p{Cntrl}` de
- * [SftpManager.sanitizeFilename] est limité à l'ASCII en Java : c'est donc un
- * sur-ensemble, et `sanitizeFilename` laisse inchangé tout nom qui passe ici.
+ * Les contrôles (C0, DEL, C1, plus étendus que le `\p{Cntrl}` de [SftpManager.sanitizeFilename],
+ * limité à l'ASCII en Java) et les caractères de format invisibles sont traités à part par
+ * [replaceInvisibleCharacters] : `sanitizeFilename` laisse inchangé tout nom qui passe ici.
  */
-private val UNSAFE_ENTRY_CHARS = Regex("[/\\\\\\p{Cc}]")
+private val PATH_SEPARATORS = Regex("[/\\\\]")
 
 /**
  * Nom sûr sous lequel envoyer un fichier choisi dans le sélecteur Android.
@@ -23,11 +23,14 @@ private val UNSAFE_ENTRY_CHARS = Regex("[/\\\\\\p{Cc}]")
  * nom `../.ssh/authorized_keys` écrirait hors du dossier choisi. Les séparateurs
  * et les caractères de contrôle sont remplacés par `_` plutôt que refusés, pour
  * qu'un fichier dont le nom en contient (un fichier Drive nommé `a/b`) reste
- * envoyable. Les espaces en bordure sont retirées, le nom est coupé à 255
+ * envoyable. Il en va de même des caractères de format invisibles ([isInvisibleFormat],
+ * par exemple U+202E qui ferait lire `photo\u202Egpj.exe` comme « photoexe.jpg ») :
+ * `photo_gpj.exe` montre la vraie extension. Le remplacement passe avant le rognage,
+ * donc un tel caractère en bordure devient un `_` conservé. Les espaces en bordure sont retirées, le nom est coupé à 255
  * caractères, puis les espaces que la coupe aurait laissées en fin sont retirées
  * à leur tour.
  *
- * Le résultat ne contient aucun séparateur ni caractère de contrôle (C0 et C1),
+ * Le résultat ne contient aucun séparateur, caractère de contrôle (C0 et C1) ni caractère de format invisible,
  * n'est jamais `.` ni `..`, et [SftpManager.sanitizeFilename] le laisse inchangé.
  * La coupe est de 255 caractères, pas de 255 octets : un nom multi-octets trop
  * long sera refusé par le serveur, ce qui n'est pas une traversée.
@@ -36,8 +39,8 @@ private val UNSAFE_ENTRY_CHARS = Regex("[/\\\\\\p{Cc}]")
  *         blanc, `.` ou `..`) : l'appelant doit alors refuser l'envoi.
  */
 fun uploadEntryName(raw: String): String? {
-    val name = raw
-        .replace(UNSAFE_ENTRY_CHARS, "_")
+    val name = replaceInvisibleCharacters(raw, '_')
+        .replace(PATH_SEPARATORS, "_")
         .trim()
         .take(MAX_ENTRY_NAME_LENGTH)
         .trimEnd()

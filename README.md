@@ -1,6 +1,6 @@
 # NextSH
 
-[![Version](https://img.shields.io/badge/version-1.0.1-8B1A2F)](https://github.com/Hilen-Techtical/NextSH/releases)
+[![Version](https://img.shields.io/badge/version-1.1.0-8B1A2F)](https://github.com/Hilen-Techtical/NextSH/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-C9A84C)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Windows%20%7C%20Linux-blue)](https://github.com/Hilen-Techtical/NextSH/releases)
 
@@ -18,11 +18,11 @@ Built by [Techtical](https://www.techtical.fr).
 
 | Platform | Format | File |
 |---|---|---|
-| Android | APK | [NextSH-1.0.1.apk](https://github.com/Hilen-Techtical/NextSH/releases/download/android-v1.0.1/NextSH-1.0.1.apk) |
-| Windows | MSI installer | [NextSH-1.0.1.msi](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.0.1/NextSH-1.0.1.msi) |
-| Windows | EXE installer | [NextSH-1.0.1-setup.exe](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.0.1/NextSH-1.0.1-setup.exe) |
-| Linux | AppImage | [NextSH-1.0.1.AppImage](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.0.1/NextSH-1.0.1.AppImage) |
-| Linux | .deb | [NextSH_1.0.1-1_amd64.deb](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.0.1/NextSH_1.0.1-1_amd64.deb) |
+| Android | APK | [NextSH-1.1.0.apk](https://github.com/Hilen-Techtical/NextSH/releases/download/android-v1.1.0/NextSH-1.1.0.apk) |
+| Windows | MSI installer | [NextSH-1.1.0.msi](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.1.0/NextSH-1.1.0.msi) |
+| Windows | EXE installer | [NextSH-1.1.0-setup.exe](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.1.0/NextSH-1.1.0-setup.exe) |
+| Linux | AppImage | [NextSH-1.1.0.AppImage](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.1.0/NextSH-1.1.0.AppImage) |
+| Linux | .deb | [NextSH_1.1.0-1_amd64.deb](https://github.com/Hilen-Techtical/NextSH/releases/download/desktop-v1.1.0/NextSH_1.1.0-1_amd64.deb) |
 
 
 ---
@@ -59,7 +59,7 @@ Built by [Techtical](https://www.techtical.fr).
 - Named tunnel profiles with CRUD management
 - Real-time state tracking (Starting, Active, Reconnecting, Error, Stopped)
 - Auto-reconnect on network change with exponential backoff
-- Application-level liveness watchdog (Desktop): `keepalive@openssh.com` every 30 s
+- Application-level liveness watchdog (Desktop): `keepalive@openssh.com` every 15 s
 
 ### SFTP File Browser
 - Full directory navigation with interactive breadcrumb path
@@ -75,9 +75,8 @@ Built by [Techtical](https://www.techtical.fr).
 - CRDT engine with vector clocks, conflict resolution UI
 - Transport gate: WiFi, VPN, or Ethernet only, cellular blocked
 
-### FIDO2 / Passkeys
+### FIDO2 (security keys)
 - Hardware key support (CTAP2 via YubiKit USB+NFC) on Android
-- Passkey mode (Credential Manager) on Android
 - FIDO2 Desktop on Windows (webauthn.dll / Windows Hello) and on Linux (YubiKit, CTAP2 over HID FIDO with PC/SC fallback)
 - On Linux the HID transport needs read / write access to the key's `/dev/hidraw*` node : recent systemd distributions grant it to the logged-in user, otherwise install your distribution's FIDO udev rules (`libu2f-udev` on Debian / Ubuntu)
 
@@ -152,7 +151,7 @@ sealed class.
 | Terminal Desktop | jediterm-core 3.40 (emulator) + custom Compose Canvas renderer |
 | LAN Sync server | Ktor Netty 3.0.0 (HTTPS, port 47731) |
 | LAN Sync client | Ktor 3.0.0 (client-okhttp) |
-| FIDO2 | YubiKit (CTAP2 USB+NFC) + Credential Manager (Android), webauthn.dll (Windows) |
+| FIDO2 | YubiKit (CTAP2 USB+NFC), webauthn.dll (Windows) |
 
 ---
 
@@ -183,7 +182,7 @@ Found a vulnerability? Please report it **privately**, see
 ### Android
 - [x] SSH tunneling (local/remote/SOCKS5) with foreground service
 - [x] Integrated secure browser for tunneled web services
-- [x] FIDO2 SSH challenge-response (hardware key CTAP2 + passkey mode)
+- [x] FIDO2 SSH challenge-response (hardware key CTAP2)
 - [x] SFTP file browser (full CRUD, multi-select, preview, background transfers)
 - [x] Snippet manager with terminal integration
 - [x] Split-screen terminal

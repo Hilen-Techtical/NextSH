@@ -18,6 +18,8 @@ import fr.techtical.nextsh.shared.core.sync.SyncPayload
 import fr.techtical.nextsh.shared.core.sync.SyncProtocol
 import fr.techtical.nextsh.shared.core.sync.SyncRepository
 import fr.techtical.nextsh.shared.core.sync.SyncResult
+import fr.techtical.nextsh.shared.util.LogId
+import fr.techtical.nextsh.shared.util.errorClass
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
@@ -43,7 +45,6 @@ import java.net.UnknownHostException
 import java.security.SecureRandom
 import java.security.cert.CertificateException
 import java.util.concurrent.TimeUnit
-import javax.net.ssl.SSLException
 import javax.inject.Inject
 import javax.inject.Singleton
 import javax.net.ssl.SSLContext
@@ -75,6 +76,12 @@ private val PLAUSIBLE_HOSTNAME_REGEX =
  *
  * Retry policy: up to [MAX_RETRIES] attempts with exponential back-off (1s/2s/4s)
  * on [IOException] / [SocketTimeoutException] only. HTTP 4xx/5xx are not retried.
+ *
+ * [push], [pull] and [fullSync] return a [SyncResult] for network and protocol failures but
+ * still throw for local ones: the vault read of the shared secret
+ * ([fr.techtical.nextsh.shared.domain.vault.VaultAuthExpiredException], `IllegalArgumentException` on a
+ * corrupt value), database errors while applying a bundle, Ktor deserialization errors.
+ * Callers (the scheduler) must catch them; only [CancellationException] must be rethrown.
  */
 @Singleton
 class LanSyncClient @Inject constructor(
@@ -90,6 +97,11 @@ class LanSyncClient @Inject constructor(
 
     // ── SyncProtocol ─────────────────────────────────────────────────────────
 
+    /**
+     * @throws fr.techtical.nextsh.shared.domain.vault.VaultAuthExpiredException when the vault cannot be opened
+     *   to read the shared secret (authentication window expired).
+     * @throws RuntimeException for other local failures (corrupt secret, database, deserialization).
+     */
     override suspend fun push(device: EnrolledDevice): SyncResult {
         if (!networkMonitor.isOnLanTransport.value) return SyncResult.DeviceUnreachable
 
@@ -112,7 +124,7 @@ class LanSyncClient @Inject constructor(
             val credentialEntries = try {
                 credentialSyncRepository.exportEncryptedEntries(secret)
             } catch (e: Exception) {
-                Timber.w(e, "Sync push: credential export failed for ${device.deviceId}, skipping credentials")
+                Timber.tag(TAG).w("Sync push: credential export failed for device=${LogId.of(device.deviceId)} (${errorClass(e)}), skipping credentials")
                 emptyList()
             }
             val bundle = baseBundle.copy(credentials = credentialEntries)
@@ -156,18 +168,23 @@ class LanSyncClient @Inject constructor(
                 httpClient.close()
             }
         } catch (e: SocketTimeoutException) {
-            Timber.w(e, "Sync push timeout for ${device.deviceId}: ${e.message}")
-            SyncResult.Error(SyncError.NETWORK_TIMEOUT, "Délai dépassé ($host:$SYNC_PORT)")
+            Timber.tag(TAG).w("Sync push timeout for device=${LogId.of(device.deviceId)} (${errorClass(e)})")
+            SyncResult.Error(SyncError.NETWORK_TIMEOUT, "Request timed out")
         } catch (e: IOException) {
-            classifyIoError("push", device.deviceId, host, e)
+            classifyIoError("push", device.deviceId, e)
         } catch (e: kotlinx.serialization.SerializationException) {
-            Timber.w(e, "Sync push serialization error for ${device.deviceId}")
-            SyncResult.Error(SyncError.UNKNOWN, "Serialisation: ${e.message}")
+            Timber.tag(TAG).w("Sync push serialization error for device=${LogId.of(device.deviceId)} (${errorClass(e)})")
+            SyncResult.Error(SyncError.UNKNOWN, "Serialization failed")
         } finally {
             secret.fill(0)
         }
     }
 
+    /**
+     * @throws fr.techtical.nextsh.shared.domain.vault.VaultAuthExpiredException when the vault cannot be opened
+     *   to read the shared secret (authentication window expired).
+     * @throws RuntimeException for other local failures (corrupt secret, database, deserialization).
+     */
     override suspend fun pull(device: EnrolledDevice): SyncResult {
         if (!networkMonitor.isOnLanTransport.value) return SyncResult.DeviceUnreachable
 
@@ -204,7 +221,7 @@ class LanSyncClient @Inject constructor(
                         val bundle = try {
                             SyncBundleCodec.decrypt(payload, secret)
                         } catch (e: Exception) {
-                            Timber.w(TAG, "Sync pull decrypt failed for ${device.deviceId}")
+                            Timber.tag(TAG).w("Sync pull decrypt failed for device=${LogId.of(device.deviceId)} (${errorClass(e)})")
                             return SyncResult.Error(SyncError.DECRYPT_FAILED)
                         }
                         val applyResult: ApplyResult = syncRepository.applyRemoteBundle(bundle)
@@ -215,7 +232,7 @@ class LanSyncClient @Inject constructor(
                         val credConflicts: List<MergeResult.Conflict<*>> = try {
                             credentialSyncRepository.applyRemoteEntries(bundle.credentials, secret).conflicts
                         } catch (e: Exception) {
-                            Timber.w(e, "Sync pull: credential apply failed for ${device.deviceId}")
+                            Timber.tag(TAG).w("Sync pull: credential apply failed for device=${LogId.of(device.deviceId)} (${errorClass(e)})")
                             emptyList()
                         }
                         val syncedAt = System.currentTimeMillis()
@@ -235,13 +252,13 @@ class LanSyncClient @Inject constructor(
                 httpClient.close()
             }
         } catch (e: SocketTimeoutException) {
-            Timber.w(e, "Sync pull timeout for ${device.deviceId}: ${e.message}")
-            SyncResult.Error(SyncError.NETWORK_TIMEOUT, "Délai dépassé ($host:$SYNC_PORT)")
+            Timber.tag(TAG).w("Sync pull timeout for device=${LogId.of(device.deviceId)} (${errorClass(e)})")
+            SyncResult.Error(SyncError.NETWORK_TIMEOUT, "Request timed out")
         } catch (e: IOException) {
-            classifyIoError("pull", device.deviceId, host, e)
+            classifyIoError("pull", device.deviceId, e)
         } catch (e: kotlinx.serialization.SerializationException) {
-            Timber.w(e, "Sync pull serialization error for ${device.deviceId}")
-            SyncResult.Error(SyncError.UNKNOWN, "Serialisation: ${e.message}")
+            Timber.tag(TAG).w("Sync pull serialization error for device=${LogId.of(device.deviceId)} (${errorClass(e)})")
+            SyncResult.Error(SyncError.UNKNOWN, "Serialization failed")
         } finally {
             secret.fill(0)
         }
@@ -391,12 +408,12 @@ class LanSyncClient @Inject constructor(
                 }
             }
         } catch (e: TimeoutCancellationException) {
-            Timber.d(TAG, "validateCandidate: $host timed out for ${device.deviceId}")
+            Timber.tag(TAG).d("validateCandidate: candidate timed out for device=${LogId.of(device.deviceId)}")
             null
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Timber.d(TAG, "validateCandidate, $host did not validate for ${device.deviceId}: ${e.javaClass.simpleName}")
+            Timber.tag(TAG).d("validateCandidate: candidate did not validate for device=${LogId.of(device.deviceId)} (${errorClass(e)})")
             null
         } finally {
             secret.fill(0)
@@ -457,11 +474,11 @@ class LanSyncClient @Inject constructor(
                 return block()
             } catch (e: SocketTimeoutException) {
                 lastException = e
-                Timber.d(TAG, "Retry ${attempt + 1}/$maxAttempts after timeout")
+                Timber.tag(TAG).d("Retry ${attempt + 1}/$maxAttempts after timeout")
             } catch (e: IOException) {
                 lastException = e
                 if (firstUnreachable == null && isUnreachableCause(e)) firstUnreachable = e
-                Timber.d(TAG, "Retry ${attempt + 1}/$maxAttempts after IO error: ${e.javaClass.simpleName}")
+                Timber.tag(TAG).d("Retry ${attempt + 1}/$maxAttempts after IO error (${errorClass(e)})")
             }
             if (attempt < maxAttempts - 1) {
                 kotlinx.coroutines.delay(RETRY_DELAYS_MS[attempt.coerceAtMost(RETRY_DELAYS_MS.size - 1)])
@@ -473,36 +490,38 @@ class LanSyncClient @Inject constructor(
     /**
      * Classifies an IOException raised during push/pull into a precise SyncResult.
      *
-     * OkHttp wraps CertificateException (thrown by our PinnedTrustManager) inside
-     * an SSLHandshakeException which is an IOException. Walking the cause chain
-     * lets us surface a clear "TLS pin failed" error instead of a generic
-     * "DeviceUnreachable", so the user can distinguish a compromised/re-enrolled
-     * peer from an actual network outage.
+     * OkHttp wraps the CertificateException thrown by our PinnedTrustManager inside an
+     * SSLHandshakeException, which is an IOException. Walking the cause chain finds it: a pin that
+     * is refused means the peer is not the one that was enrolled (new certificate after a
+     * reinstall, or an impostor), which no retry fixes and only a new enrollment does. It is
+     * reported as [SyncResult.AuthFailed], the outcome the screens answer with "check the clocks,
+     * otherwise enroll the device again", and not as a network failure.
      *
-     * User-facing messages are built from [host] + [SYNC_PORT] rather than
-     * `e.message`: OkHttp embeds Java's `InetSocketAddress.toString()` there
-     * ("Failed to connect to /192.168.x.x:47731", leading slash included),
-     * which is neither readable nor localizable. The full technical detail
-     * stays in the Timber log.
+     * Any other [javax.net.ssl.SSLException] (a handshake cut short, a protocol error) carries no certificate
+     * and may be a plain network drop: it stays a generic [SyncError.UNKNOWN].
+     *
+     * The messages are developer texts and carry no address and no `e.message`: OkHttp embeds
+     * Java's `InetSocketAddress.toString()` there ("Failed to connect to /192.168.x.x:47731"),
+     * and no screen shows them (the settings say a sentence chosen from the reason). The log
+     * carries only the operation, the device as a [LogId] and the exception class chain (the
+     * Timber trees drop the message).
      */
-    internal fun classifyIoError(op: String, deviceId: String, host: String, e: IOException): SyncResult {
-        val rootCause = generateSequence<Throwable>(e) { it.cause }.lastOrNull() ?: e
-        val tlsFailure = generateSequence<Throwable>(e) { it.cause }
-            .any { it is CertificateException || it is SSLException }
-        val detail = "${e.javaClass.simpleName}: ${e.message ?: rootCause.message ?: "unknown"}"
+    internal fun classifyIoError(op: String, deviceId: String, e: IOException): SyncResult {
+        val pinRefused = generateSequence<Throwable>(e) { it.cause }.any { it is CertificateException }
+        val device = LogId.of(deviceId)
 
         return when {
-            tlsFailure -> {
-                Timber.w(e, "Sync $op TLS error for $deviceId: $detail")
-                SyncResult.Error(SyncError.UNKNOWN, "Certificat TLS refusé ($host) : ré-appairage requis ?")
+            pinRefused -> {
+                Timber.tag(TAG).w("Sync $op TLS pin refused for device=$device (${errorClass(e)})")
+                SyncResult.AuthFailed
             }
             isUnreachableCause(e) -> {
-                Timber.w(e, "Sync $op host unreachable for $deviceId: $detail")
-                SyncResult.Error(SyncError.HOST_UNREACHABLE, "Hôte injoignable ($host:$SYNC_PORT)")
+                Timber.tag(TAG).w("Sync $op host unreachable for device=$device (${errorClass(e)})")
+                SyncResult.Error(SyncError.HOST_UNREACHABLE, "Host unreachable")
             }
             else -> {
-                Timber.w(e, "Sync $op network error for $deviceId: $detail")
-                SyncResult.Error(SyncError.UNKNOWN, "Erreur réseau ($host:$SYNC_PORT)")
+                Timber.tag(TAG).w("Sync $op network error for device=$device (${errorClass(e)})")
+                SyncResult.Error(SyncError.UNKNOWN, "Network error")
             }
         }
     }
@@ -522,7 +541,8 @@ class LanSyncClient @Inject constructor(
  *
  * Deliberately NOT [SocketTimeoutException] (a read/write timeout means the server accepted the
  * connection, so the address is right) and NOT the TLS exceptions (the peer answered, a pin
- * mismatch is a security signal, not a routing problem, and is classified before this check).
+ * mismatch is a security signal, not a routing problem, and is classified before this check as
+ * [SyncResult.AuthFailed]).
  */
 private fun isUnreachableCause(e: IOException): Boolean =
     e is ConnectException || e is NoRouteToHostException || e is UnknownHostException

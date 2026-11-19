@@ -299,4 +299,86 @@ class ListDirectoryUseCaseTest {
         assertEquals(4, files.size)
         assertFalse(files.any { it.name.startsWith('.') })
     }
+
+    // ── The leftovers of interrupted uploads stay listed with the hidden files off ──
+
+    private val leftoverName = ".report.pdf.nextsh-part-1a2b3c4d"
+
+    private fun leftover(
+        name: String = leftoverName,
+        isDirectory: Boolean = false,
+        isSymlink: Boolean = false,
+    ) = SftpFile(
+        name = name,
+        path = "/home/user/$name",
+        size = 10L,
+        permissions = 384,
+        isDirectory = isDirectory,
+        isSymlink = isSymlink,
+        modifiedAt = 700L,
+    )
+
+    @Test
+    fun `a leftover of an interrupted upload is kept when the hidden files are off`() = runTest {
+        coEvery { sftpManager.listDirectory(any(), any()) } returns
+            SshResult.Success(createTestFiles() + leftover())
+
+        val result = useCase.invoke("session-1", "/home/user", SortOrder.NAME_ASC, showHidden = false)
+
+        val files = (result as SshResult.Success).data
+        assertTrue(files.any { it.name == leftoverName })
+        // The other hidden file is filtered as before.
+        assertFalse(files.any { it.name == ".hidden" })
+        assertEquals(5, files.size)
+    }
+
+    @Test
+    fun `an ordinary hidden file whose name only resembles a leftover is still filtered`() = runTest {
+        val resembling = listOf(
+            ".report.pdf.nextsh-part-1A2B3C4D",
+            ".report.pdf.nextsh-part-1a2b3c4",
+            "..nextsh-part-1a2b3c4d",
+            ".report.pdf.nextsh-part-1a2b3c4d.bak",
+        ).map { leftover(it) }
+        coEvery { sftpManager.listDirectory(any(), any()) } returns SshResult.Success(createTestFiles() + resembling)
+
+        val result = useCase.invoke("session-1", "/home/user", SortOrder.NAME_ASC, showHidden = false)
+
+        assertEquals(4, (result as SshResult.Success).data.size)
+    }
+
+    @Test
+    fun `a folder or a link with the name of a leftover is filtered like any hidden entry`() = runTest {
+        coEvery { sftpManager.listDirectory(any(), any()) } returns SshResult.Success(
+            createTestFiles() + leftover(isDirectory = true) + leftover(".other.txt.nextsh-part-00000000", isSymlink = true),
+        )
+
+        val result = useCase.invoke("session-1", "/home/user", SortOrder.NAME_ASC, showHidden = false)
+
+        assertEquals(4, (result as SshResult.Success).data.size)
+    }
+
+    @Test
+    fun `a leftover is listed once when the hidden files are on`() = runTest {
+        coEvery { sftpManager.listDirectory(any(), any()) } returns
+            SshResult.Success(createTestFiles() + leftover())
+
+        val result = useCase.invoke("session-1", "/home/user", SortOrder.NAME_ASC, showHidden = true)
+
+        val files = (result as SshResult.Success).data
+        assertEquals(1, files.count { it.name == leftoverName })
+        assertEquals(6, files.size)
+    }
+
+    @Test
+    fun `a leftover is sorted with the files, after the folders`() = runTest {
+        coEvery { sftpManager.listDirectory(any(), any()) } returns
+            SshResult.Success(createTestFiles() + leftover())
+
+        val result = useCase.invoke("session-1", "/home/user", SortOrder.NAME_ASC, showHidden = false)
+
+        val names = (result as SshResult.Success).data.map { it.name }
+        // Folders first, then the files by name: the hidden name sorts before the others.
+        assertEquals(listOf("documents", "subdir", leftoverName, "file1.txt", "file2.txt"), names)
+    }
 }

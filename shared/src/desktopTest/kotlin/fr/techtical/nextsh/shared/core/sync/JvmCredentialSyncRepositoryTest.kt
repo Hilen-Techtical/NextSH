@@ -4,6 +4,8 @@
 package fr.techtical.nextsh.shared.core.sync
 
 import fr.techtical.nextsh.shared.domain.vault.VaultManager
+import fr.techtical.nextsh.shared.util.LogId
+import fr.techtical.nextsh.shared.util.Logger
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
@@ -207,6 +209,24 @@ class JvmCredentialSyncRepositoryTest {
         assertEquals(0, result.cleanApplied)
         assertEquals(1, result.skipped)
         assertNull(vaultB.getPassword("host-42"), "Vault must remain empty when decryption fails")
+    }
+
+    @Test
+    fun `decrypt failure log carries neither the credential id nor the exception message`() = runTest {
+        val vaultA = FakeVault().apply { passwords["host-42"] = "s3cret".toCharArray() }
+        val (rA, _, _) = repo(vault = vaultA)
+        val entries = rA.exportEncryptedEntries(sharedSecret)
+        val (rB, _, _) = repo(vault = FakeVault(), deviceId = "peer-B")
+
+        val lines = Logger.capture { rB.applyRemoteEntries(entries, wrongSecret) }
+
+        val line = lines.single { it.contains("Credential decrypt failed") }
+        assertTrue(line.contains("type=HOST_PASSWORD"), line)
+        assertTrue(line.contains("id=${LogId.of("pwd:host-42")}"), line)
+        assertTrue(line.contains("SyncCodecException"), line)
+        for (value in listOf("host-42", "pwd:", "mismatch", "s3cret")) {
+            assertFalse(line.contains(value), "'$value' leaked in: $line")
+        }
     }
 
     @Test
@@ -514,6 +534,239 @@ class JvmCredentialSyncRepositoryTest {
         assertContentEquals("authkey".toCharArray(), vault.getPassword(lanId), "secret stays in the vault")
         assertEquals(1, entries.size, "only host-1 is exported")
         assertTrue(entries.none { it.id.contains(LAN_SYNC_SECRET_KEY_PREFIX) }, "no LAN tombstone may be re-emitted")
+    }
+
+    // ─── Keep local (reassertLocalCredential) ──────────────────────────────
+
+    /**
+     * Both peers set a different password for the same credential while offline, then
+     * each applies the other's export: both record a conflict. Returns the two repos
+     * with their stores so a test can resolve one side and sync again.
+     */
+    private class ConflictedPeers(
+        val vaultA: FakeVault,
+        val vaultB: FakeVault,
+        val repoA: JvmCredentialSyncRepository,
+        val repoB: JvmCredentialSyncRepository,
+        val metaA: InMemoryMetaStore,
+        val metaB: InMemoryMetaStore,
+        val conflictsA: FakeConflictRepo,
+        val conflictsB: FakeConflictRepo,
+    )
+
+    private suspend fun conflictedPeers(): ConflictedPeers {
+        val vaultA = FakeVault().apply { passwords["host-x"] = "pw-A".toCharArray() }
+        val vaultB = FakeVault().apply { passwords["host-x"] = "pw-B".toCharArray() }
+        val (rA, _, stA) = repo(vault = vaultA, deviceId = "peer-A", nowMs = 1_000)
+        val (rB, _, stB) = repo(vault = vaultB, deviceId = "peer-B", nowMs = 2_000)
+
+        val exportA = rA.exportEncryptedEntries(sharedSecret)
+        val exportB = rB.exportEncryptedEntries(sharedSecret)
+        assertEquals(1, rA.applyRemoteEntries(exportB, sharedSecret).conflicts.size)
+        assertEquals(1, rB.applyRemoteEntries(exportA, sharedSecret).conflicts.size)
+        return ConflictedPeers(vaultA, vaultB, rA, rB, stA.first, stB.first, stA.second, stB.second)
+    }
+
+    private fun FakeConflictRepo.remoteEntry(): SyncEntry<CredentialEntry> =
+        ConflictSerializer.decodeCredential(saved.single().remoteJson)
+
+    @Test
+    fun `keeping the local credential stops the conflict from coming back on the next sync`() = runTest {
+        val p = conflictedPeers()
+        val localBefore = p.metaA.get("pwd:host-x")!!
+        val remote = p.conflictsA.remoteEntry()
+
+        assertTrue(p.repoA.reassertLocalCredential(remote))
+
+        val after = p.metaA.get("pwd:host-x")!!
+        assertTrue(after.vectorClock.dominates(localBefore.vectorClock), "must dominate the local clock")
+        assertTrue(after.vectorClock.dominates(remote.clock), "must dominate the remote clock")
+        assertTrue(after.updatedAt > localBefore.updatedAt)
+        assertEquals(localBefore.contentHashBase64, after.contentHashBase64, "content hash is untouched")
+        assertEquals(localBefore.type, after.type)
+        assertFalse(after.deleted)
+        assertTrue(p.conflictsA.saved.isEmpty(), "the pending conflict is removed")
+        assertContentEquals("pw-A".toCharArray(), p.vaultA.getPassword("host-x"), "the vault is untouched")
+
+        // A sends its kept version: B applies it cleanly and converges on A's password.
+        val onB = p.repoB.applyRemoteEntries(p.repoA.exportEncryptedEntries(sharedSecret), sharedSecret)
+        assertEquals(0, onB.conflicts.size, "no conflict is recreated on the peer")
+        assertEquals(1, onB.cleanApplied)
+        assertContentEquals("pw-A".toCharArray(), p.vaultB.getPassword("host-x"))
+        assertTrue(p.conflictsB.saved.isEmpty(), "the peer's own marker is cleared by the clean apply")
+
+        // And the other direction stays quiet too.
+        val onA = p.repoA.applyRemoteEntries(p.repoB.exportEncryptedEntries(sharedSecret), sharedSecret)
+        assertEquals(0, onA.conflicts.size)
+        assertTrue(p.conflictsA.saved.isEmpty())
+        assertContentEquals("pw-A".toCharArray(), p.vaultA.getPassword("host-x"))
+    }
+
+    @Test
+    fun `deleting only the conflict marker brings the same conflict back`() = runTest {
+        // Control: removing only the marker leaves the two clocks concurrent, so the same
+        // conflict is detected again.
+        val p = conflictedPeers()
+        val marker = p.conflictsA.saved.single()
+        p.conflictsA.deleteById(marker.id)
+
+        val again = p.repoA.applyRemoteEntries(p.repoB.exportEncryptedEntries(sharedSecret), sharedSecret)
+
+        assertEquals(1, again.conflicts.size)
+    }
+
+    @Test
+    fun `keeping a local deletion keeps the tombstone and removes the credential on the peer`() = runTest {
+        val vaultA = FakeVault().apply { passwords["host-x"] = "pw-1".toCharArray() }
+        val vaultB = FakeVault()
+        val (rA, _, stA) = repo(vault = vaultA, deviceId = "peer-A", nowMs = 1_000)
+        val (rB, _, stB) = repo(vault = vaultB, deviceId = "peer-B", nowMs = 2_000)
+        // Shared starting point: B has A's credential.
+        rB.applyRemoteEntries(rA.exportEncryptedEntries(sharedSecret), sharedSecret)
+        // A deletes it, B edits it, while apart.
+        vaultA.passwords.remove("host-x")
+        val tombstoneExport = rA.exportEncryptedEntries(sharedSecret)
+        assertTrue(tombstoneExport.single().deleted)
+        vaultB.passwords["host-x"] = "pw-edited-on-B".toCharArray()
+        val editExport = rB.exportEncryptedEntries(sharedSecret)
+        assertEquals(1, rA.applyRemoteEntries(editExport, sharedSecret).conflicts.size)
+        assertEquals(1, rB.applyRemoteEntries(tombstoneExport, sharedSecret).conflicts.size)
+        val deletedAtBefore = stA.first.get("pwd:host-x")!!.deletedAt
+
+        assertTrue(rA.reassertLocalCredential(stA.second.remoteEntry()))
+
+        val after = stA.first.get("pwd:host-x")!!
+        assertTrue(after.deleted, "the kept local deletion stays a tombstone")
+        assertEquals(deletedAtBefore, after.deletedAt)
+        val onB = rB.applyRemoteEntries(rA.exportEncryptedEntries(sharedSecret), sharedSecret)
+        assertEquals(0, onB.conflicts.size)
+        assertEquals(1, onB.cleanApplied)
+        assertNull(vaultB.getPassword("host-x"), "the peer applies the kept deletion")
+        assertTrue(stB.first.get("pwd:host-x")!!.deleted)
+    }
+
+    @Test
+    fun `reassert uses the current local metadata, not the snapshot stored in the conflict`() = runTest {
+        val p = conflictedPeers()
+        val remote = p.conflictsA.remoteEntry()
+        // The user edits the password again between the conflict and the choice.
+        p.vaultA.passwords["host-x"] = "pw-A-edited-later".toCharArray()
+        p.repoA.exportEncryptedEntries(sharedSecret)
+        val editedMeta = p.metaA.get("pwd:host-x")!!
+
+        assertTrue(p.repoA.reassertLocalCredential(remote))
+
+        val after = p.metaA.get("pwd:host-x")!!
+        assertTrue(after.vectorClock.dominates(editedMeta.vectorClock), "the later local edit is not lost")
+        assertEquals(editedMeta.contentHashBase64, after.contentHashBase64)
+    }
+
+    @Test
+    fun `reassert returns false and changes nothing when there is no local metadata`() = runTest {
+        val (r, _, stores) = repo(deviceId = "peer-A")
+        val remote = SyncEntry(
+            id = "pwd:unknown",
+            payload = CredentialEntry("unknown", CredentialType.HOST_PASSWORD, "iv", "ct", "h"),
+            clock = VectorClock.EMPTY.tick("peer-B", 5),
+            updatedAt = 5,
+        )
+        val marker = PendingConflict(
+            id = "marker-unknown",
+            entityType = SyncableEntityType.CREDENTIAL,
+            entityId = "pwd:unknown",
+            localJson = "{}",
+            remoteJson = "{}",
+            detectedAt = 1L,
+        )
+        stores.second.save(marker)
+
+        assertFalse(r.reassertLocalCredential(remote))
+
+        assertNull(stores.first.get("pwd:unknown"), "no metadata is invented")
+        // The caller deletes the marker itself by id when the result is false.
+        assertEquals(listOf(marker), stores.second.saved.toList(), "the marker is left for the caller")
+    }
+
+    @Test
+    fun `reasserting twice keeps returning true and the clock keeps strictly increasing`() = runTest {
+        val p = conflictedPeers()
+        val remote = p.conflictsA.remoteEntry()
+
+        assertTrue(p.repoA.reassertLocalCredential(remote))
+        val afterFirst = p.metaA.get("pwd:host-x")!!
+        assertTrue(p.repoA.reassertLocalCredential(remote))
+        val afterSecond = p.metaA.get("pwd:host-x")!!
+
+        assertTrue(afterSecond.vectorClock.dominates(afterFirst.vectorClock))
+        assertTrue(afterSecond.updatedAt > afterFirst.updatedAt)
+        assertEquals(afterFirst.contentHashBase64, afterSecond.contentHashBase64)
+        assertTrue(p.conflictsA.saved.isEmpty())
+    }
+
+    @Test
+    fun `keeping a live local credential against a remote tombstone makes it live again on the peer`() = runTest {
+        val vaultA = FakeVault().apply { passwords["host-x"] = "pw-1".toCharArray() }
+        val vaultB = FakeVault()
+        val (rA, _, stA) = repo(vault = vaultA, deviceId = "peer-A", nowMs = 1_000)
+        val (rB, _, stB) = repo(vault = vaultB, deviceId = "peer-B", nowMs = 2_000)
+        // Shared starting point: B has A's credential.
+        rB.applyRemoteEntries(rA.exportEncryptedEntries(sharedSecret), sharedSecret)
+        // B deletes it, A edits it, while apart.
+        vaultB.passwords.remove("host-x")
+        val tombstoneExport = rB.exportEncryptedEntries(sharedSecret)
+        assertTrue(tombstoneExport.single().deleted)
+        vaultA.passwords["host-x"] = "pw-edited-on-A".toCharArray()
+        val editExport = rA.exportEncryptedEntries(sharedSecret)
+        assertEquals(1, rA.applyRemoteEntries(tombstoneExport, sharedSecret).conflicts.size)
+        assertEquals(1, rB.applyRemoteEntries(editExport, sharedSecret).conflicts.size)
+
+        assertTrue(rA.reassertLocalCredential(stA.second.remoteEntry()))
+
+        assertFalse(stA.first.get("pwd:host-x")!!.deleted, "the kept local credential stays live")
+        val onB = rB.applyRemoteEntries(rA.exportEncryptedEntries(sharedSecret), sharedSecret)
+        assertEquals(0, onB.conflicts.size)
+        assertEquals(1, onB.cleanApplied)
+        assertContentEquals("pw-edited-on-A".toCharArray(), vaultB.getPassword("host-x"), "live again on the peer")
+        assertFalse(stB.first.get("pwd:host-x")!!.deleted)
+        assertTrue(stB.second.saved.isEmpty(), "the peer's own marker is cleared by the clean apply")
+    }
+
+    @Test
+    fun `reassert refuses a LAN secret entry`() = runTest {
+        val lanId = "${LAN_SYNC_SECRET_KEY_PREFIX}desktop-1"
+        val metaStore = InMemoryMetaStore()
+        val (r, _, _) = repo(metaStore = metaStore, deviceId = "peer-A")
+        val remote = SyncEntry(
+            id = "pwd:$lanId",
+            payload = CredentialEntry(lanId, CredentialType.HOST_PASSWORD, "iv", "ct", "h"),
+            clock = VectorClock.EMPTY.tick("peer-B", 5),
+            updatedAt = 5,
+        )
+
+        assertFalse(r.reassertLocalCredential(remote))
+
+        assertNull(metaStore.get("pwd:$lanId"))
+    }
+
+    @Test
+    fun `reassert leaves the conflict of another credential alone`() = runTest {
+        val p = conflictedPeers()
+        val other = PendingConflict(
+            id = "other-marker",
+            entityType = SyncableEntityType.CREDENTIAL,
+            entityId = "pwd:host-y",
+            localJson = "{}",
+            remoteJson = "{}",
+            detectedAt = 1L,
+        )
+        p.conflictsA.save(other)
+        val remote = ConflictSerializer.decodeCredential(
+            p.conflictsA.saved.first { it.entityId == "pwd:host-x" }.remoteJson,
+        )
+
+        assertTrue(p.repoA.reassertLocalCredential(remote))
+
+        assertEquals(listOf(other), p.conflictsA.saved.toList())
     }
 
     @Test

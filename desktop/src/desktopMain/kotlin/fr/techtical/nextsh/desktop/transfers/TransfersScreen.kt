@@ -53,7 +53,13 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Server
 import com.composables.icons.lucide.Upload
 import com.composables.icons.lucide.X
+import fr.techtical.nextsh.desktop.components.absoluteDateText
+import fr.techtical.nextsh.desktop.components.dateTimeText
 import fr.techtical.nextsh.desktop.components.PageHeader
+import fr.techtical.nextsh.desktop.components.formatFileSize
+import fr.techtical.nextsh.desktop.components.relativeTimeLabel
+import fr.techtical.nextsh.desktop.components.timeText
+import fr.techtical.nextsh.desktop.sftp.displayEntryName
 import fr.techtical.nextsh.desktop.core.ssh.DesktopTransferManager
 import fr.techtical.nextsh.desktop.data.di.DesktopContainer
 import fr.techtical.nextsh.desktop.theme.Border1
@@ -87,14 +93,15 @@ import fr.techtical.nextsh.desktop.generated.resources.transfers_empty_hint
 import fr.techtical.nextsh.desktop.generated.resources.transfers_empty_title
 import fr.techtical.nextsh.desktop.generated.resources.transfers_failed_default
 import fr.techtical.nextsh.desktop.generated.resources.transfers_queued_with_size
-import fr.techtical.nextsh.desktop.generated.resources.transfers_relative_just_now
 import fr.techtical.nextsh.desktop.generated.resources.transfers_state_cancelled_label
 import fr.techtical.nextsh.desktop.generated.resources.transfers_state_done_label
 import fr.techtical.nextsh.desktop.generated.resources.transfers_state_failed_label
 import fr.techtical.nextsh.desktop.generated.resources.transfers_state_inprogress_label
 import fr.techtical.nextsh.desktop.generated.resources.transfers_state_queued_label
+import fr.techtical.nextsh.desktop.generated.resources.transfers_summary_active
+import fr.techtical.nextsh.desktop.generated.resources.transfers_summary_finished_many
+import fr.techtical.nextsh.desktop.generated.resources.transfers_summary_finished_one
 import fr.techtical.nextsh.desktop.generated.resources.transfers_title
-import fr.techtical.nextsh.desktop.generated.resources.statusbar_relative_minutes_ago
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -121,12 +128,17 @@ fun TransfersScreen(
     }
     val hasFinished = terminalCount > 0
 
+    val finishedText = if (terminalCount == 1) {
+        stringResource(Res.string.transfers_summary_finished_one)
+    } else {
+        stringResource(Res.string.transfers_summary_finished_many, terminalCount)
+    }
     val subtitle = when {
         transfers.isEmpty() -> stringResource(Res.string.transfers_empty_title)
         activeCount > 0 && terminalCount > 0 ->
-            "$activeCount en cours · $terminalCount terminé${if (terminalCount > 1) "s" else ""}"
-        activeCount > 0 -> "$activeCount en cours"
-        else -> "$terminalCount terminé${if (terminalCount > 1) "s" else ""}"
+            "${stringResource(Res.string.transfers_summary_active, activeCount)} · $finishedText"
+        activeCount > 0 -> stringResource(Res.string.transfers_summary_active, activeCount)
+        else -> finishedText
     }
 
     Column(modifier = modifier.fillMaxSize().background(NearBlack)) {
@@ -209,7 +221,7 @@ private fun TransferCard(
                 Spacer(Modifier.width(Spacing.Sm))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = state.request.displayName,
+                        text = displayEntryName(state.request.displayName),
                         color = TextPrimary,
                         fontFamily = SpaceGroteskFamily,
                         fontWeight = FontWeight.SemiBold,
@@ -219,7 +231,7 @@ private fun TransferCard(
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = state.request.remotePath,
+                        text = displayEntryName(state.request.remotePath),
                         color = TextSecondary,
                         fontFamily = JetBrainsMonoFamily,
                         fontSize = 11.sp,
@@ -254,7 +266,7 @@ private fun ProgressOrStatus(state: TransferState) {
     when (state) {
         is TransferState.Queued -> ProgressRow(
             progress = 0f,
-            label = stringResource(Res.string.transfers_queued_with_size, formatBytes(state.request.fileSize)),
+            label = stringResource(Res.string.transfers_queued_with_size, formatFileSize(state.request.fileSize)),
             color = TextDisabled,
         )
         is TransferState.InProgress -> {
@@ -263,12 +275,12 @@ private fun ProgressOrStatus(state: TransferState) {
             else 0f
             ProgressRow(
                 progress = ratio,
-                label = "${formatBytes(state.bytesTransferred)} / ${formatBytes(state.totalBytes)}  •  ${(ratio * 100).toInt()} %",
+                label = "${formatFileSize(state.bytesTransferred)} / ${formatFileSize(state.totalBytes)}  •  ${(ratio * 100).toInt()} %",
                 color = colorForDirection(state.request.direction),
             )
         }
         is TransferState.Completed -> StatusLine(
-            text = stringResource(Res.string.transfers_completed_with_size, formatBytes(state.request.fileSize)),
+            text = stringResource(Res.string.transfers_completed_with_size, formatFileSize(state.request.fileSize)),
             color = SuccessGreen,
         )
         is TransferState.Failed -> StatusLine(
@@ -542,22 +554,12 @@ private fun BtnGhostSm(
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-private fun formatBytes(bytes: Long): String {
-    if (bytes < 1024) return "$bytes B"
-    val kb = bytes / 1024.0
-    if (kb < 1024) return "%.1f Ko".format(kb)
-    val mb = kb / 1024.0
-    if (mb < 1024) return "%.1f Mo".format(mb)
-    return "%.2f Go".format(mb / 1024.0)
-}
-
 /**
- * Format relatif/court selon l'âge :
- *  - < 60 s     → "à l'instant"
- *  - < 60 min   → "il y a Xmin"
- *  - même jour  → "HH:mm"
- *  - même année → "dd/MM HH:mm"
- *  - autre      → "dd/MM/yyyy"
+ * Format relatif/court selon l'âge (c'est un historique, l'heure compte) :
+ *  - < 1 h      → temps écoulé de `relativeTimeLabel` ("à l'instant", "il y a 5 min")
+ *  - même jour  → heure courte localisée ("14:30", "2:30 PM")
+ *  - même année → date et heure localisées ("5 mars 2027 14:30", "Mar 5, 2027, 2:30 PM")
+ *  - autre      → date localisée avec l'année ("5 mars 2027", "Mar 5, 2027")
  */
 @Composable
 private fun formatTimestamp(epochMillis: Long): String {
@@ -565,20 +567,14 @@ private fun formatTimestamp(epochMillis: Long): String {
     val ts = java.time.Instant.ofEpochMilli(epochMillis)
     val zone = java.time.ZoneId.systemDefault()
     val seconds = java.time.Duration.between(ts, now).seconds
+    if (seconds < 3600) return relativeTimeLabel(epochMillis, now.toEpochMilli()).text
+    val dtNow = java.time.LocalDateTime.ofInstant(now, zone)
+    val dt = java.time.LocalDateTime.ofInstant(ts, zone)
+    val sameDay = dt.toLocalDate() == dtNow.toLocalDate()
+    val sameYear = dt.year == dtNow.year
     return when {
-        seconds < 60 -> stringResource(Res.string.transfers_relative_just_now)
-        seconds < 3600 -> stringResource(Res.string.statusbar_relative_minutes_ago, (seconds / 60).toInt())
-        else -> {
-            val dtNow = java.time.LocalDateTime.ofInstant(now, zone)
-            val dt = java.time.LocalDateTime.ofInstant(ts, zone)
-            val sameDay = dt.toLocalDate() == dtNow.toLocalDate()
-            val sameYear = dt.year == dtNow.year
-            val time = "%02d:%02d".format(dt.hour, dt.minute)
-            when {
-                sameDay -> time
-                sameYear -> "%02d/%02d %s".format(dt.dayOfMonth, dt.monthValue, time)
-                else -> "%02d/%02d/%04d".format(dt.dayOfMonth, dt.monthValue, dt.year)
-            }
-        }
+        sameDay -> timeText(epochMillis)
+        sameYear -> dateTimeText(epochMillis)
+        else -> absoluteDateText(epochMillis)
     }
 }

@@ -20,6 +20,7 @@ import fr.techtical.nextsh.desktop.core.ssh.DesktopSftpManager
 import fr.techtical.nextsh.desktop.core.ssh.DesktopSshSessionManager
 import fr.techtical.nextsh.desktop.core.ssh.DesktopSshTerminalSession
 import fr.techtical.nextsh.desktop.core.ssh.HostKeyVerifyResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.withLock
 import fr.techtical.nextsh.desktop.theme.ResolvedTheme
 import fr.techtical.nextsh.desktop.theme.TerminalThemePalette
@@ -32,6 +33,7 @@ import fr.techtical.nextsh.shared.domain.model.SshErrorCode
 import fr.techtical.nextsh.shared.domain.model.SshKeyType
 import fr.techtical.nextsh.shared.domain.model.SshResult
 import fr.techtical.nextsh.shared.domain.model.SshSession
+import fr.techtical.nextsh.shared.domain.model.TransferState
 import fr.techtical.nextsh.shared.domain.repository.CustomTerminalThemeRepository
 import fr.techtical.nextsh.shared.domain.repository.HostRepository
 import fr.techtical.nextsh.shared.domain.repository.SshKeyRepository
@@ -41,8 +43,13 @@ import fr.techtical.nextsh.shared.util.randomUuid
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.compose.resources.getString
 import java.util.Arrays
 import java.util.concurrent.ConcurrentHashMap
@@ -61,6 +68,16 @@ sealed interface TerminalTabStatus {
         val terminal: DesktopSshTerminalSession,
     ) : TerminalTabStatus
     data class Disconnected(val reason: String) : TerminalTabStatus
+
+    /**
+     * The remote shell ended by itself (`exit`, Ctrl+D) while the connection was healthy. Not an
+     * error and not a loss: the pane says so and offers Reconnect / Close. [exitCode] is the
+     * server's exit status, null when it did not send one. The terminal stays on screen, read-only,
+     * so the last words of the server remain readable: [sshSessionId] only names its render session
+     * (kept until the pane is closed or reconnected). It is NOT a live connection: the connection
+     * is closed as soon as no SFTP pane or tab uses it, and [sshSessionIdsIn] does not count it.
+     */
+    data class Ended(val exitCode: Int?, val sshSessionId: String) : TerminalTabStatus
     data class Error(val message: String) : TerminalTabStatus
 }
 
@@ -83,11 +100,29 @@ sealed interface TabContent {
     data class Terminal(
         val theme: ResolvedTheme,
         val status: TerminalTabStatus,
+        /**
+         * The host THIS pane connects to: the tab's host for the pane opened with the tab, the
+         * host picked in the split dialog for a pane added by a split. Set when the pane is
+         * created and carried by every `copy`; reconnect and password submission use it, never
+         * [SessionTab.host].
+         */
+        val host: Host,
     ) : TabContent
 
+    /**
+     * [paneId] identifies THIS browser for as long as it lives, wherever it sits in the
+     * tab's tree: a pane address (the path of [PaneSlot]s) changes when a sibling is closed
+     * or a split is added, and two panes of two different splits can end with the same
+     * last slot. Everything that must follow one browser rather than a place (the pending
+     * "replace this file?" questions of `SftpTransferInbox`) is keyed on it. It is minted
+     * when the pane is created and survives every `copy`, which is how the tree is updated.
+     */
     data class Sftp(
         val linkedSshSessionId: String,
         val state: SftpTabState,
+        /** The host of the session this browser rides on (the host of the pane it was opened from). */
+        val host: Host,
+        val paneId: String = randomUuid(),
     ) : TabContent
 
     /**
@@ -138,6 +173,35 @@ internal fun focusedConnectedTerminalId(content: TabContent): String? = when (co
 }
 
 /**
+ * Host of the deepest focused pane of [content] (descends `focusedSlot`s). Pure so it stays
+ * directly unit-testable with hand-built trees.
+ */
+internal fun focusedPaneHost(content: TabContent): Host = when (content) {
+    is TabContent.Terminal -> content.host
+    is TabContent.Sftp -> content.host
+    is TabContent.Split -> focusedPaneHost(content.pane(content.focusedSlot))
+}
+
+/** Ids of the hosts targeted by the panes of [content]. */
+internal fun hostIdsIn(content: TabContent): Set<String> = when (content) {
+    is TabContent.Terminal -> setOf(content.host.id)
+    is TabContent.Sftp -> setOf(content.host.id)
+    is TabContent.Split -> hostIdsIn(content.first) + hostIdsIn(content.second)
+}
+
+/**
+ * Host of the pane of [content] that carries the SSH session [sshSessionId]: a Terminal
+ * `Connected` on it, else an SFTP pane linked to it. Null when no pane references it.
+ */
+internal fun hostOfSessionIn(content: TabContent, sshSessionId: String): Host? = when (content) {
+    is TabContent.Terminal ->
+        content.host.takeIf { (content.status as? TerminalTabStatus.Connected)?.sshSessionId == sshSessionId }
+    is TabContent.Sftp -> content.host.takeIf { content.linkedSshSessionId == sshSessionId }
+    is TabContent.Split ->
+        hostOfSessionIn(content.first, sshSessionId) ?: hostOfSessionIn(content.second, sshSessionId)
+}
+
+/**
  * Lists the sshSessionId of every Terminal pane in [content] that is
  * currently [TerminalTabStatus.Connected], in DFS visual order (mirrors
  * [paneLeafPaths]). Unlike [sshSessionIdsIn] this deliberately EXCLUDES Sftp
@@ -153,6 +217,36 @@ internal fun connectedTerminalIdsIn(content: TabContent): List<String> = when (c
         ?.sshSessionId?.let { listOf(it) } ?: emptyList()
     is TabContent.Sftp -> emptyList()
     is TabContent.Split -> connectedTerminalIdsIn(content.first) + connectedTerminalIdsIn(content.second)
+}
+
+/**
+ * The [TabContent.Sftp.paneId] of every SFTP pane in [content]: the browsers that exist in
+ * this tab right now. Pure so it stays directly unit-testable with hand-built trees. Backs
+ * the cleaning of `SftpTransferInbox` (a closed pane takes its pending questions with it).
+ */
+internal fun sftpPaneIdsIn(content: TabContent): Set<String> = when (content) {
+    is TabContent.Terminal -> emptySet()
+    is TabContent.Sftp -> setOf(content.paneId)
+    is TabContent.Split -> sftpPaneIdsIn(content.first) + sftpPaneIdsIn(content.second)
+}
+
+/**
+ * [content] with the state of the SFTP pane [paneId] passed through [transform]; unchanged
+ * when no pane has that id. The pane is found by its stable id, never by its position, which
+ * changes with the tree and can be the same for two panes of two different splits.
+ */
+internal fun withSftpPaneState(
+    content: TabContent,
+    paneId: String,
+    transform: (SftpTabState) -> SftpTabState,
+): TabContent = when (content) {
+    is TabContent.Terminal -> content
+    is TabContent.Sftp ->
+        if (content.paneId == paneId) content.copy(state = transform(content.state)) else content
+    is TabContent.Split -> content.copy(
+        first = withSftpPaneState(content.first, paneId, transform),
+        second = withSftpPaneState(content.second, paneId, transform),
+    )
 }
 
 /**
@@ -197,6 +291,7 @@ internal fun terminalPaneLeafPaths(content: TabContent): List<List<PaneSlot>> = 
 
 data class SessionTab(
     val tabId: String,
+    /** Host of the tab (title, sidebar, snippet filter); NOT the target of a pane, see [TabContent.Terminal.host]. */
     val host: Host,
     val content: TabContent,
     val connectedAt: Long? = null,
@@ -211,6 +306,7 @@ data class SessionTab(
                 is TerminalTabStatus.AwaitingPassword -> SessionStatus.CONNECTING
                 is TerminalTabStatus.Connected -> SessionStatus.CONNECTED
                 is TerminalTabStatus.Disconnected -> SessionStatus.DISCONNECTED
+                is TerminalTabStatus.Ended -> SessionStatus.DISCONNECTED
                 is TerminalTabStatus.Error -> SessionStatus.ERROR
             }
             is TabContent.Sftp -> when (c.state) {
@@ -240,7 +336,23 @@ class DesktopSessionManager(
     private val appScope: AppScope,
     private val sshKeyRepository: SshKeyRepository? = null,
     private val customThemeRepository: CustomTerminalThemeRepository? = null,
+    /**
+     * The in-app file transfers ([fr.techtical.nextsh.desktop.core.ssh.DesktopTransferManager.transfers]),
+     * keyed by transfer id. A transfer reads or writes through its SSH connection
+     * (`TransferRequest.sessionId` is that connection's id), so a connection that no pane uses any more
+     * must stay open while one is queued or running. Null (tests, no transfer manager) means no transfer
+     * ever holds a connection.
+     */
+    private val transfers: StateFlow<Map<String, TransferState>>? = null,
 ) {
+    /** Connections no pane uses any more but that a transfer in flight still needs. */
+    private val connectionsHeldForTransfers = ConcurrentHashMap.newKeySet<String>()
+
+    private fun activeTransferSessionIds(all: Map<String, TransferState>): Set<String> =
+        all.values
+            .filter { it is TransferState.Queued || it is TransferState.InProgress }
+            .mapTo(HashSet()) { it.request.sessionId }
+
     private val _tabs = MutableStateFlow<List<SessionTab>>(emptyList())
     val tabs: StateFlow<List<SessionTab>> = _tabs.asStateFlow()
 
@@ -299,6 +411,21 @@ class DesktopSessionManager(
             }
         }
 
+        // A connection kept open for a transfer is closed once its last transfer is over (see
+        // [closeIfOrphan]). Only the SET of connections with a transfer in flight is watched.
+        transfers?.let { flow ->
+            appScope.coroutineScope.launch {
+                flow.map { activeTransferSessionIds(it) }.distinctUntilChanged().collect { active ->
+                    for (id in connectionsHeldForTransfers.toList()) {
+                        if (id in active) continue
+                        connectionsHeldForTransfers.remove(id)
+                        // A tab may have used the connection again meanwhile: closeIfOrphan then closes nothing.
+                        closeIfOrphan(id)
+                    }
+                }
+            }
+        }
+
         // Keep the custom-theme snapshot fresh so theme resolution sees the
         // latest user/synced themes without a suspending lookup.
         customThemeRepository?.let { repo ->
@@ -331,6 +458,11 @@ class DesktopSessionManager(
                 tab.copy(content = mapDeadSessions(tab.content, gone, lostMessage, linkedClosedMessage))
             }
         }
+        // A pane that is no longer Connected has no use for its emulator, executors and render
+        // thread: release them now rather than at tab close (the pane keeps its Reconnect view).
+        // Except the render session of an Ended pane: its terminal stays readable.
+        val shown = _tabs.value.flatMapTo(HashSet()) { endedRenderSessionIdsIn(it.content) }
+        gone.filterNot { it in shown }.forEach { disposeComposeSession(it) }
         // Any broadcasting tab that just lost a Connected pane may have
         // dropped below the "≥ 2 connected panes" floor, same guard as
         // closePaneAt. Re-read the post-update tabs so the pane count
@@ -384,12 +516,34 @@ class DesktopSessionManager(
     @Volatile private var currentHostKeyDeferred: kotlinx.coroutines.CompletableDeferred<Boolean>? = null
     private val hostKeyPromptMutex = kotlinx.coroutines.sync.Mutex()
 
+    /** True during the vault wipe: every host key question is answered "no" at once, none is shown. */
+    @Volatile private var hostKeyLockdown = false
+
+    /**
+     * Vault wipe: while [enabled], no host key question reaches the UI (a pending one is refused, one queued
+     * behind the mutex or raised later is refused as soon as it runs) and the mismatch alert is dropped.
+     * Otherwise a prompt of a connection of the old vault would reappear after the new vault is created, and
+     * accepting it would write the fingerprint of an erased host into the new database.
+     */
+    fun setHostKeyLockdown(enabled: Boolean) {
+        hostKeyLockdown = enabled
+        if (enabled) {
+            currentHostKeyDeferred?.complete(false)
+            _hostKeyMismatch.value = null
+        }
+    }
+
     init {
         knownHostsVerifier.unknownHostCallback = { unknown ->
-            hostKeyPromptMutex.withLock {
+            if (hostKeyLockdown) false else hostKeyPromptMutex.withLock {
+                // A question that waited for the mutex while the lockdown began.
+                if (hostKeyLockdown) return@withLock false
                 val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
                 currentHostKeyDeferred = deferred
-                _hostKeyPrompt.value = unknown
+                // The lockdown may have begun between the test above and the assignment, when
+                // setHostKeyLockdown could not see this deferred yet: look again now that it is visible.
+                if (hostKeyLockdown) deferred.complete(false)
+                if (!deferred.isCompleted) _hostKeyPrompt.value = unknown
                 try {
                     deferred.await()
                 } finally {
@@ -399,7 +553,7 @@ class DesktopSessionManager(
             }
         }
         knownHostsVerifier.mismatchListener = { mismatch ->
-            _hostKeyMismatch.value = mismatch
+            if (!hostKeyLockdown) _hostKeyMismatch.value = mismatch
         }
     }
 
@@ -436,6 +590,16 @@ class DesktopSessionManager(
         composeSessions.remove(sessionId)?.close()
     }
 
+    /** The cached render session of [sessionId], without creating one (an Ended pane shows what is left of it). */
+    fun composeSessionFor(sessionId: String): fr.techtical.nextsh.desktop.sessions.compose.ComposeTerminalSession? =
+        composeSessions[sessionId]
+
+    private fun endedRenderSessionIdsIn(content: TabContent): Set<String> = when (content) {
+        is TabContent.Terminal -> (content.status as? TerminalTabStatus.Ended)?.let { setOf(it.sshSessionId) } ?: emptySet()
+        is TabContent.Sftp -> emptySet()
+        is TabContent.Split -> endedRenderSessionIdsIn(content.first) + endedRenderSessionIdsIn(content.second)
+    }
+
     fun getOrCreateComposeSession(
         sessionId: String,
         connector: TtyConnector,
@@ -458,9 +622,44 @@ class DesktopSessionManager(
                 // session lifetime: see [relayUserInput] for why it is NOT
                 // installed/removed as broadcast is toggled.
                 onUserInput = { bytes -> relayUserInput(sessionId, bytes) }
+                onShellExited = { exitCode -> onShellExited(sessionId, exitCode) }
                 start()
             }
         }
+
+    /**
+     * The shell of [sshSessionId] ended by itself (`exit`). Order matters: the pane becomes
+     * [TerminalTabStatus.Ended] FIRST, before anything is closed, otherwise the registry removal
+     * that follows a disconnect would rewrite it as "connection lost" ([handleSessionsGone]
+     * only touches `Connected` panes). The terminal stays on screen, read-only (its render session
+     * is released when the pane is closed or reconnected), and the connection is closed unless an
+     * SFTP pane or tab still uses it ([closeIfOrphan]).
+     */
+    private fun onShellExited(sshSessionId: String, exitCode: Int?) {
+        appScope.coroutineScope.launch {
+            _tabs.update { tabs ->
+                tabs.map { tab -> tab.copy(content = markShellEnded(tab.content, sshSessionId, exitCode)) }
+            }
+            _tabs.value.forEach { tab ->
+                if (tab.tabId in _broadcastTabIds.value) {
+                    refreshOrDisableBroadcastAfterTopologyChange(tab.tabId, tab.content)
+                }
+            }
+            closeIfOrphan(sshSessionId)
+        }
+    }
+
+    private fun markShellEnded(content: TabContent, sshSessionId: String, exitCode: Int?): TabContent = when (content) {
+        is TabContent.Terminal ->
+            if ((content.status as? TerminalTabStatus.Connected)?.sshSessionId == sshSessionId) {
+                content.copy(status = TerminalTabStatus.Ended(exitCode, sshSessionId))
+            } else content
+        is TabContent.Sftp -> content
+        is TabContent.Split -> content.copy(
+            first = markShellEnded(content.first, sshSessionId, exitCode),
+            second = markShellEnded(content.second, sshSessionId, exitCode),
+        )
+    }
 
     // ── Terminal tabs ─────────────────────────────────────────────────────────
 
@@ -479,7 +678,7 @@ class DesktopSessionManager(
     fun openSession(host: Host, thenOpenSftp: Boolean = false): String {
         val tabId = randomUuid()
         val theme = resolveThemeName(host.terminalTheme)
-        val content = TabContent.Terminal(theme = theme, status = TerminalTabStatus.Connecting)
+        val content = TabContent.Terminal(theme = theme, status = TerminalTabStatus.Connecting, host = host)
         _tabs.update { it + SessionTab(tabId, host, content) }
         _activeTabId.value = tabId
         if (thenOpenSftp) sftpAfterConnect.add(tabId)
@@ -501,19 +700,20 @@ class DesktopSessionManager(
 
     fun submitPassword(tabId: String, password: CharArray) {
         val tab = _tabs.value.firstOrNull { it.tabId == tabId }
-        val status = (tab?.content as? TabContent.Terminal)?.status
-        if (status !is TerminalTabStatus.AwaitingPassword) {
+        val term = tab?.content as? TabContent.Terminal
+        if (term == null || term.status !is TerminalTabStatus.AwaitingPassword) {
             Arrays.fill(password, '\u0000')
             return
         }
         updateTerminalStatus(tabId) { TerminalTabStatus.Connecting }
-        appScope.coroutineScope.launch { connectWithPassword(tabId, tab.host, password) }
+        appScope.coroutineScope.launch { connectWithPassword(tabId, term.host, password) }
     }
 
     fun reconnect(tabId: String) {
         val tab = _tabs.value.firstOrNull { it.tabId == tabId } ?: return
         updateTerminalStatus(tabId) { TerminalTabStatus.Connecting }
-        appScope.coroutineScope.launch { prepareConnection(tabId, tab.host) }
+        val host = (tab.content as? TabContent.Terminal)?.host ?: tab.host
+        appScope.coroutineScope.launch { prepareConnection(tabId, host) }
     }
 
     fun selectTab(tabId: String) {
@@ -531,47 +731,39 @@ class DesktopSessionManager(
     fun openSftpTab(host: Host, linkedSshSessionId: String): String? {
         if (sshSessionManager.getTerminalSession(linkedSshSessionId) == null) return null
         val tabId = randomUuid()
-        val content = TabContent.Sftp(linkedSshSessionId = linkedSshSessionId, state = SftpTabState.Opening)
+        val content = TabContent.Sftp(linkedSshSessionId = linkedSshSessionId, state = SftpTabState.Opening, host = host)
         _tabs.update { it + SessionTab(tabId, host, content) }
         _activeTabId.value = tabId
-        appScope.coroutineScope.launch { prepareSftpTab(tabId, linkedSshSessionId) }
+        appScope.coroutineScope.launch { prepareSftpTab(tabId, content.paneId, linkedSshSessionId) }
         return tabId
     }
 
-    private suspend fun prepareSftpTab(tabId: String, linkedSshSessionId: String) {
+    private suspend fun prepareSftpTab(tabId: String, paneId: String, linkedSshSessionId: String) {
         when (val open = sftpManager.openSftp(linkedSshSessionId)) {
             is SshResult.Success -> {
                 when (val home = sftpManager.getHomeDirectory(linkedSshSessionId)) {
-                    is SshResult.Success -> updateSftpState(tabId) { SftpTabState.Open(home.data) }
-                    is SshResult.Error -> updateSftpState(tabId) {
-                        SftpTabState.Error(home.message.ifBlank { home.code.name })
-                    }
+                    is SshResult.Success -> settleSftpOpening(tabId, paneId, SftpTabState.Open(home.data))
+                    is SshResult.Error ->
+                        settleSftpOpening(tabId, paneId, SftpTabState.Error(home.message.ifBlank { home.code.name }))
                 }
             }
-            is SshResult.Error -> updateSftpState(tabId) {
-                SftpTabState.Error(open.message.ifBlank { open.code.name })
-            }
+            is SshResult.Error ->
+                settleSftpOpening(tabId, paneId, SftpTabState.Error(open.message.ifBlank { open.code.name }))
         }
     }
 
     /**
-     * Update the cached cwd for an SFTP surface. [slot] is `null` for a
-     * tab-level SFTP (single Sftp tab) or non-null for an SFTP **pane**
-     * inside a Split: the update is routed to the right cell so that the
-     * cwd is preserved if the user switches tabs and comes back.
+     * Remembers [cwd] as the current folder of the SFTP pane [paneId] of [tabId], so that it
+     * is still there when the user switches tabs and comes back. The pane is found by its
+     * stable id, wherever it sits in the tree. Only an `Open` pane is updated: a late listing
+     * must not bring back to `Open` a pane that has since failed (linked terminal closed).
      */
-    /**
-     * Update the cached cwd for an SFTP surface. [path] = empty for a tab-
-     * level Sftp tab; non-empty addresses an SFTP pane inside one or more
-     * Splits. The cwd is preserved across tab switches.
-     */
-    fun updateSftpCwdAt(tabId: String, path: List<PaneSlot>, cwd: String) {
-        updateSftpStateAt(tabId, path) { SftpTabState.Open(cwd) }
-    }
-
-    /** Legacy: single-level cwd update by slot (null = tab root). */
-    fun updateSftpCwd(tabId: String, cwd: String, slot: PaneSlot? = null) {
-        updateSftpCwdAt(tabId, slot?.let { listOf(it) } ?: emptyList(), cwd)
+    fun updateSftpPaneCwd(tabId: String, paneId: String, cwd: String) {
+        updateTab(tabId) { tab ->
+            tab.copy(content = withSftpPaneState(tab.content, paneId) { state ->
+                if (state is SftpTabState.Open) SftpTabState.Open(cwd) else state
+            })
+        }
     }
 
     // ── Split ─────────────────────────────────────────────────────────────────
@@ -597,7 +789,7 @@ class DesktopSessionManager(
         val terminal = target as? TabContent.Terminal ?: return false
         if (terminal.status !is TerminalTabStatus.Connected) return false
         val secondTheme = resolveThemeName(secondHost.terminalTheme)
-        val newSecondPane = TabContent.Terminal(theme = secondTheme, status = TerminalTabStatus.Connecting)
+        val newSecondPane = TabContent.Terminal(theme = secondTheme, status = TerminalTabStatus.Connecting, host = secondHost)
         updateTab(tabId) {
             it.copy(content = updateAtPath(it.content, path) {
                 TabContent.Split(
@@ -631,7 +823,7 @@ class DesktopSessionManager(
         val terminal = target as? TabContent.Terminal ?: return false
         val connected = terminal.status as? TerminalTabStatus.Connected ?: return false
         val sshSessionId = connected.sshSessionId
-        val newSftpPane = TabContent.Sftp(linkedSshSessionId = sshSessionId, state = SftpTabState.Opening)
+        val newSftpPane = TabContent.Sftp(linkedSshSessionId = sshSessionId, state = SftpTabState.Opening, host = terminal.host)
         updateTab(tabId) {
             it.copy(content = updateAtPath(it.content, path) {
                 TabContent.Split(
@@ -643,8 +835,7 @@ class DesktopSessionManager(
             })
         }
         focusPathAfterSplit(tabId, path)
-        val newPanePath = path + PaneSlot.RIGHT_OR_BOTTOM
-        appScope.coroutineScope.launch { preparePaneSftpAt(tabId, newPanePath, sshSessionId) }
+        appScope.coroutineScope.launch { preparePaneSftpAt(tabId, newSftpPane.paneId, sshSessionId) }
         return true
     }
 
@@ -691,7 +882,11 @@ class DesktopSessionManager(
         // SFTP split).
         val keep = sshSessionIdsIn(newContent)
         disposePane(toRemove, keepSshSessionIds = keep)
-        updateTab(tabId) { it.copy(content = newContent) }
+        // The tab belongs to a host one of its panes still targets (title, sidebar, snippet
+        // filter): when the closed pane was the last one on the tab host, follow the focused pane.
+        val tabHost = if (tab.host.id in hostIdsIn(newContent)) tab.host else focusedPaneHost(newContent)
+        updateTab(tabId) { it.copy(content = newContent, host = tabHost) }
+        releaseSessionsOfSftpPanes(toRemove)
         // The tab may have dropped below 2 connected Terminal panes (or, if
         // still ≥ 2, the surviving panes' relay target list has shrunk):
         // refresh broadcast for this tab either way.
@@ -804,6 +999,27 @@ class DesktopSessionManager(
         if (_activeTabId.value == tabId) {
             _activeTabId.value = remaining.lastOrNull()?.tabId
         }
+        releaseSessionsOfSftpPanes(tab.content)
+    }
+
+    /**
+     * An SFTP pane or tab that was just removed may have been the last user of its connection: its
+     * terminal was closed earlier and the connection was kept for it (the `keep` set of
+     * [closePaneAt]), or the terminal ended by itself ([onShellExited]). Without this, closing that
+     * SFTP leaves the client authenticated until the process ends. Called AFTER the tabs were
+     * updated, because [closeIfOrphan] reads them. The connection stays open while a transfer uses it. A connection whose terminal was in the same
+     * removed content was already disconnected by [disposePane]: not repeated.
+     */
+    private fun releaseSessionsOfSftpPanes(removed: TabContent) {
+        val ids = sftpLinkedSessionIdsIn(removed) - connectedTerminalIdsIn(removed).toSet()
+        if (ids.isEmpty()) return
+        appScope.coroutineScope.launch { ids.forEach { closeIfOrphan(it) } }
+    }
+
+    private fun sftpLinkedSessionIdsIn(content: TabContent): Set<String> = when (content) {
+        is TabContent.Terminal -> emptySet()
+        is TabContent.Sftp -> setOf(content.linkedSshSessionId)
+        is TabContent.Split -> sftpLinkedSessionIdsIn(content.first) + sftpLinkedSessionIdsIn(content.second)
     }
 
     // ── Tab navigation (Desktop keyboard shortcuts) ────────────────────────────
@@ -884,11 +1100,84 @@ class DesktopSessionManager(
         requestTerminalFocus()
     }
 
-    fun closeAllSessions() {
-        _tabs.value.forEach { tab -> disposePane(tab.content) }
+    /**
+     * Closes every tab. Returns the background jobs that disconnect the sessions (one per connected
+     * terminal): the close itself does not wait for them, a caller that has to can join them.
+     */
+    fun closeAllSessions(): List<Job> {
+        val launched = mutableListOf<Job>()
+        _tabs.value.forEach { tab -> disposePane(tab.content, launched = launched) }
         _tabs.value = emptyList()
         _activeTabId.value = null
         _broadcastTabIds.value = emptySet()
+        connectionsHeldForTransfers.clear()
+        // No tab is left to consume them: a flag kept here would fire on an unrelated tab id.
+        sftpAfterConnect.clear()
+        return launched
+    }
+
+    /**
+     * [closeAllSessions], then waits until the sessions are disconnected, at most [timeoutMs] in all: a
+     * transport that does not answer (SSHJ waits up to 30 s on a dead route) must not freeze the caller. For
+     * the vault wipe, which must not erase anything while a connection is still alive.
+     *
+     * Everything closes in parallel, in the app scope (only the wait is bounded): the background disconnects
+     * of the tabs (joined, because
+     * `disconnect` returns at once when one of them already took the session), the SFTP client and
+     * the disconnect of every session no tab references. A session that fails to close does not stop the
+     * others. Returns true when everything ended in time.
+     */
+    suspend fun closeAllSessionsAndWait(timeoutMs: Long = 10_000L): Boolean {
+        val sessionIds = sshSessionManager.sessions.value.map { it.id }
+        val jobs = closeAllSessions().toMutableList()
+        // The closes run in the APP scope, not as children of this call: they are blocking (SSHJ waits on
+        // the socket), a coroutineScope would wait for them whatever the deadline. Only the WAIT is bounded.
+        for (id in sessionIds) {
+            jobs += appScope.coroutineScope.launch {
+                try {
+                    sftpManager.closeSftp(id)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // Best effort, the disconnect below closes the transport anyway.
+                }
+            }
+        }
+        jobs += appScope.coroutineScope.launch { sshSessionManager.disconnectAll() }
+        return withTimeoutOrNull(timeoutMs) { jobs.joinAll() } != null
+    }
+
+    /**
+     * True when a queued or running transfer still uses the connection [sshSessionId]: it is then
+     * remembered, and closed by the collector in `init` once its last transfer is over (unless a tab
+     * uses it again by then).
+     */
+    private fun holdForTransfers(sshSessionId: String): Boolean {
+        if (sshSessionId !in activeTransferSessionIds(transfers?.value.orEmpty())) return false
+        connectionsHeldForTransfers.add(sshSessionId)
+        // The last transfer may have ended between the check and the add, before the collector
+        // could see the connection as held: look again, or it would stay open for good.
+        if (sshSessionId in activeTransferSessionIds(transfers?.value.orEmpty())) return true
+        connectionsHeldForTransfers.remove(sshSessionId)
+        return false
+    }
+
+    /**
+     * A connection can succeed after the tab (or pane) that asked for it is gone: closed by the user, or by
+     * [closeAllSessions]. Nothing would ever disconnect that session, it would stay authenticated for the
+     * whole process. Rule: a connected session that no open tab references is closed. Returns true when it
+     * was closed here, so that the caller does not announce a connection nobody sees. A connection that
+     * a queued or running transfer still uses is NOT closed (returns false): it is remembered and closed
+     * when its last transfer ends, unless a tab uses it again by then.
+     */
+    private suspend fun closeIfOrphan(sshSessionId: String): Boolean {
+        if (_tabs.value.any { tab -> sshSessionId in sshSessionIdsIn(tab.content) }) return false
+        // A transfer in flight still reads or writes through this connection: keep it, and close it when
+        // the last transfer is over (the collector in `init`).
+        if (holdForTransfers(sshSessionId)) return false
+        sftpManager.closeSftp(sshSessionId)
+        sshSessionManager.disconnect(sshSessionId)
+        return true
     }
 
     // ── Broadcast ("synchronize-panes", Ctrl+Shift+B) ──────────────────────────
@@ -989,17 +1278,27 @@ class DesktopSessionManager(
      * those sessions are NOT disconnected, only the widget is torn down.
      * Called for both plain tab closures and split-pane disposals.
      */
-    private fun disposePane(content: TabContent, keepSshSessionIds: Set<String> = emptySet()) {
+    private fun disposePane(
+        content: TabContent,
+        keepSshSessionIds: Set<String> = emptySet(),
+        launched: MutableList<Job>? = null,
+    ) {
         when (content) {
             is TabContent.Terminal -> {
+                (content.status as? TerminalTabStatus.Ended)?.let { disposeComposeSession(it.sshSessionId) }
                 (content.status as? TerminalTabStatus.Connected)?.let { connected ->
                     disposeComposeSession(connected.sshSessionId)
-                    if (connected.sshSessionId !in keepSshSessionIds) {
+                    // A closed pane does not cut a transfer in flight: the connection is kept and closed when the
+                    // last transfer ends (see [holdForTransfers]). Only the forced close of everything (quit,
+                    // vault wipe) disconnects regardless.
+                    if (connected.sshSessionId !in keepSshSessionIds &&
+                        (launched != null || !holdForTransfers(connected.sshSessionId))
+                    ) {
                         appScope.coroutineScope.launch {
                             // Close SFTP first so the SFTPClient releases its channel cleanly.
                             sftpManager.closeSftp(connected.sshSessionId)
                             sshSessionManager.disconnect(connected.sshSessionId)
-                        }
+                        }.also { launched?.add(it) }
                         // Any SFTP tabs linked to this session become orphans.
                         // Launched rather than applied inline because the
                         // message is resolved from compose-resources (suspend)
@@ -1025,8 +1324,8 @@ class DesktopSessionManager(
                 // No-op: the shared SSHClient is owned by the linked terminal.
             }
             is TabContent.Split -> {
-                disposePane(content.first, keepSshSessionIds)
-                disposePane(content.second, keepSshSessionIds)
+                disposePane(content.first, keepSshSessionIds, launched)
+                disposePane(content.second, keepSshSessionIds, launched)
             }
         }
     }
@@ -1052,8 +1351,8 @@ class DesktopSessionManager(
      * PaneHeader for split panes: the second pane of a split connects to a
      * different host than the tab's primary host (`tab.host`), so reading
      * `tab.host` for both panes wrongly mirrors the first pane's identity.
-     * Falls back to null if the session doesn't exist (yet): caller should
-     * default to `tab.host` in that case.
+     * Falls back to null if the session doesn't exist (yet). Terminal panes
+     * carry their own host ([TabContent.Terminal.host]); this is for SFTP panes.
      */
     fun hostForSshSession(sshSessionId: String): Host? =
         sshSessionManager.sessions.value.firstOrNull { it.id == sshSessionId }?.host
@@ -1074,13 +1373,12 @@ class DesktopSessionManager(
         _tabs.value.sumOf { connectedTerminalIdsIn(it.content).size }
 
     /**
-     * Returns the active tab's host, or null if no tab is open. Used by the
-     * snippet picker to filter snippets by the host the user is currently
-     * working with.
+     * Returns the host of the active tab's focused pane, or null if no tab is open. Used by
+     * the snippet picker to filter snippets by the host the user is currently working with.
      */
     fun activeTabHost(): Host? {
         val tabId = _activeTabId.value ?: return null
-        return _tabs.value.firstOrNull { it.tabId == tabId }?.host
+        return _tabs.value.firstOrNull { it.tabId == tabId }?.let { focusedPaneHost(it.content) }
     }
 
     /**
@@ -1212,14 +1510,25 @@ class DesktopSessionManager(
             Arrays.fill(password, Char(0)); return
         }
         updateTerminalStatusAt(tabId, path) { TerminalTabStatus.Connecting }
-        appScope.coroutineScope.launch { connectPaneWithPasswordAt(tabId, path, tab.host, password) }
+        appScope.coroutineScope.launch { connectPaneWithPasswordAt(tabId, path, pane.host, password) }
     }
 
-    /** Reconnect the Terminal pane at [path]. */
+    /**
+     * Reconnect the Terminal pane at [path] to ITS OWN host. No-op unless the pane is
+     * Disconnected or in Error: a second click that lands before the UI recomposes must not
+     * start a second connection, whose session would overwrite the first and stay open.
+     */
     fun reconnectAt(tabId: String, path: List<PaneSlot>) {
         val tab = _tabs.value.firstOrNull { it.tabId == tabId } ?: return
+        val pane = paneAt(tab.content, path) as? TabContent.Terminal ?: return
+        if (pane.status !is TerminalTabStatus.Disconnected &&
+            pane.status !is TerminalTabStatus.Error &&
+            pane.status !is TerminalTabStatus.Ended
+        ) return
+        // The ended terminal made way for a new connection (new session id): release its render session.
+        (pane.status as? TerminalTabStatus.Ended)?.let { disposeComposeSession(it.sshSessionId) }
         updateTerminalStatusAt(tabId, path) { TerminalTabStatus.Connecting }
-        appScope.coroutineScope.launch { preparePaneConnectionAt(tabId, path, tab.host) }
+        appScope.coroutineScope.launch { preparePaneConnectionAt(tabId, path, pane.host) }
     }
 
     /** Legacy single-level convenience used by the root tab APIs. */
@@ -1331,6 +1640,10 @@ class DesktopSessionManager(
                         connectedAt = System.currentTimeMillis(),
                     )
                 }
+                if (closeIfOrphan(result.data.id)) {
+                    sftpAfterConnect.remove(tabId)
+                    return
+                }
                 hostRepository.updateLastConnected(host.id)
                 // Deferred SFTP-after-connect (host list's SFTP button): the
                 // terminal is now Connected non-null, so splitPaneAsSftpAt's
@@ -1375,10 +1688,16 @@ class DesktopSessionManager(
         }
     }
 
-    private fun updateSftpState(tabId: String, transform: (SftpTabState) -> SftpTabState) {
+    /**
+     * Moves the SFTP pane [paneId] of [tabId] from `Opening` to [next]. Only a pane still `Opening` is
+     * touched: a late result must not bring back to `Open` a pane that failed meanwhile (linked terminal
+     * closed). The pane is found by its id, not by a position that may have changed.
+     */
+    private fun settleSftpOpening(tabId: String, paneId: String, next: SftpTabState) {
         updateTab(tabId) { tab ->
-            val sftp = tab.content as? TabContent.Sftp ?: return@updateTab tab
-            tab.copy(content = sftp.copy(state = transform(sftp.state)))
+            tab.copy(content = withSftpPaneState(tab.content, paneId) { state ->
+                if (state is SftpTabState.Opening) next else state
+            })
         }
     }
 
@@ -1405,31 +1724,22 @@ class DesktopSessionManager(
         }
     }
 
-    private fun updateSftpStateAt(
-        tabId: String,
-        path: List<PaneSlot>,
-        transform: (SftpTabState) -> SftpTabState,
-    ) {
-        updateTab(tabId) {
-            it.copy(content = updateAtPath(it.content, path) { node ->
-                (node as? TabContent.Sftp)?.let { s -> s.copy(state = transform(s.state)) } ?: node
-            })
-        }
-    }
-
-    private suspend fun preparePaneSftpAt(tabId: String, path: List<PaneSlot>, sshSessionId: String) {
+    /**
+     * Opens the SFTP pane [paneId] of [tabId] and moves it from `Opening` to `Open` (or
+     * `Error`). The pane is found by its id when the answer comes back, not by the position it
+     * had when the opening started: the tree may have changed meanwhile (a sibling closed).
+     * Only a pane still `Opening` is touched.
+     */
+    private suspend fun preparePaneSftpAt(tabId: String, paneId: String, sshSessionId: String) {
+        val settle = { next: SftpTabState -> settleSftpOpening(tabId, paneId, next) }
         when (val open = sftpManager.openSftp(sshSessionId)) {
             is SshResult.Success -> {
                 when (val home = sftpManager.getHomeDirectory(sshSessionId)) {
-                    is SshResult.Success -> updateSftpStateAt(tabId, path) { SftpTabState.Open(home.data) }
-                    is SshResult.Error -> updateSftpStateAt(tabId, path) {
-                        SftpTabState.Error(home.message.ifBlank { home.code.name })
-                    }
+                    is SshResult.Success -> settle(SftpTabState.Open(home.data))
+                    is SshResult.Error -> settle(SftpTabState.Error(home.message.ifBlank { home.code.name }))
                 }
             }
-            is SshResult.Error -> updateSftpStateAt(tabId, path) {
-                SftpTabState.Error(open.message.ifBlank { open.code.name })
-            }
+            is SshResult.Error -> settle(SftpTabState.Error(open.message.ifBlank { open.code.name }))
         }
     }
 
@@ -1512,6 +1822,7 @@ class DesktopSessionManager(
                 updateTerminalStatusAt(tabId, path) {
                     TerminalTabStatus.Connected(result.data.id, terminal)
                 }
+                if (closeIfOrphan(result.data.id)) return
                 hostRepository.updateLastConnected(host.id)
             }
             is SshResult.Error -> {

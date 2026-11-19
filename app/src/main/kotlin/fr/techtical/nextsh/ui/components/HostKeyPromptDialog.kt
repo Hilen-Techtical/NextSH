@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,20 +22,26 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.ShieldQuestion
-import com.composables.icons.lucide.TriangleAlert
+import fr.techtical.nextsh.R
 import fr.techtical.nextsh.core.ssh.HostKeyPromptCoordinator
 import fr.techtical.nextsh.ui.theme.Burgundy
-import fr.techtical.nextsh.ui.theme.ErrorRed
 import fr.techtical.nextsh.ui.theme.Gold
 import fr.techtical.nextsh.ui.theme.GoldLight
 import fr.techtical.nextsh.ui.theme.JetBrainsMonoFamily
@@ -47,94 +52,51 @@ import fr.techtical.nextsh.ui.theme.SurfaceVariant
 import fr.techtical.nextsh.ui.theme.TextDisabled
 import fr.techtical.nextsh.ui.theme.TextPrimary
 import fr.techtical.nextsh.ui.theme.TextSecondary
-import fr.techtical.nextsh.ui.theme.WarningAmber
 import fr.techtical.nextsh.ui.theme.White
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 
 /**
- * Dialogue de vérification TOFU "host key", rendu globalement par
+ * Dialogue de vérification TOFU "host key" (première connexion à un serveur), rendu globalement par
  * MainActivity au-dessus du NavGraph. Observe le `HostKeyPromptCoordinator`
  * Singleton, ce qui permet à l'utilisateur de répondre depuis n'importe
  * quel écran (HostList, Sessions, Tunnels…).
+ *
+ * Tous les textes viennent des ressources (français par défaut, anglais), comme ceux de la clé de
+ * sécurité et de l'empreinte : c'est le dialogue où l'utilisateur décide à qui il fait confiance.
+ *
+ * Une clé qui ne correspond plus à celle enregistrée n'a pas de dialogue : la connexion est refusée
+ * sans que l'utilisateur puisse passer outre (voir `InteractiveHostKeyVerifier`).
  */
 @Composable
 fun HostKeyPromptDialog(coordinator: HostKeyPromptCoordinator) {
     val state by coordinator.state.collectAsState()
     val s = state ?: return
 
-    if (s.isMismatch) {
-        // MITM warning, pas de bypass utilisateur
-        AlertDialog(
-            onDismissRequest = { coordinator.respond(false) },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .background(ErrorRed.copy(alpha = 0.12f), RoundedCornerShape(Radii.Md)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Lucide.TriangleAlert,
-                            contentDescription = null,
-                            tint = ErrorRed,
-                            modifier = Modifier.size(13.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        text = "Empreinte changée",
-                        color = ErrorRed,
-                        fontFamily = SpaceGroteskFamily,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 16.sp,
-                    )
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "L'empreinte de ${s.hostname} a changé depuis la dernière connexion. Cela peut indiquer une attaque MITM. Connexion refusée.",
-                        color = TextPrimary,
-                        fontSize = 13.sp,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text("Stockée", color = TextSecondary, fontSize = 11.sp)
-                    Text(
-                        text = s.storedFingerprint.orEmpty(),
-                        color = WarningAmber,
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 11.sp,
-                    )
-                    Text("Reçue", color = TextSecondary, fontSize = 11.sp)
-                    Text(
-                        text = s.fingerprint,
-                        color = ErrorRed,
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 11.sp,
-                    )
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                Button(
-                    onClick = { coordinator.respond(false) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = ErrorRed,
-                        contentColor = White,
-                    ),
-                    shape = RoundedCornerShape(Radii.Md),
-                ) {
-                    Text("Annuler la connexion", fontWeight = FontWeight.Medium)
-                }
-            },
-            containerColor = Surface,
-            shape = RoundedCornerShape(Radii.Lg),
-        )
-        return
+    // "Faire confiance" ne s'active qu'un instant après l'apparition du dialogue : un appui parti
+    // avant qu'il ne surgisse (par exemple pendant une reconnexion, sur un autre écran) ne doit pas
+    // valider une clé que personne n'a lue. Remis à zéro pour chaque demande (l'état change), et à
+    // chaque retour de l'app au premier plan : un utilisateur qui la quitte puis y revient retrouve
+    // le dialogue comme à son apparition, pas actif dès la première image.
+    var confirmArmed by remember(s) { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(s, lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            try {
+                delay(HostKeyPromptCoordinator.CONFIRM_ARM_MS)
+                confirmArmed = true
+                awaitCancellation()
+            } finally {
+                // L'app quitte le premier plan : désarmé tout de suite, avant même la reprise.
+                confirmArmed = false
+            }
+        }
     }
 
+    // Les réponses portent l'état affiché : celle d'un dialogue déjà remplacé par le suivant est
+    // ignorée, elle ne doit pas faire confiance à la clé d'un autre hôte.
     AlertDialog(
-        onDismissRequest = { coordinator.respond(false) },
+        onDismissRequest = { coordinator.respond(s, false) },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
@@ -152,7 +114,7 @@ fun HostKeyPromptDialog(coordinator: HostKeyPromptCoordinator) {
                 }
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    text = "Vérifier l'hôte",
+                    text = stringResource(R.string.dialog_host_verification_title),
                     color = TextPrimary,
                     fontFamily = SpaceGroteskFamily,
                     fontWeight = FontWeight.SemiBold,
@@ -162,8 +124,13 @@ fun HostKeyPromptDialog(coordinator: HostKeyPromptCoordinator) {
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                LabelValue(label = "Hôte", value = s.hostname)
-                LabelValue(label = "Algorithme", value = s.algorithm, mono = true)
+                Text(
+                    text = stringResource(R.string.host_key_dialog_hint),
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                )
+                LabelValue(label = stringResource(R.string.label_host), value = s.hostname)
+                LabelValue(label = stringResource(R.string.host_key_dialog_algorithm), value = s.algorithm, mono = true)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -173,7 +140,7 @@ fun HostKeyPromptDialog(coordinator: HostKeyPromptCoordinator) {
                 ) {
                     Column {
                         Text(
-                            text = "EMPREINTE SHA-256",
+                            text = stringResource(R.string.host_key_dialog_fingerprint),
                             color = TextDisabled,
                             fontFamily = JetBrainsMonoFamily,
                             fontSize = 9.sp,
@@ -188,27 +155,36 @@ fun HostKeyPromptDialog(coordinator: HostKeyPromptCoordinator) {
                     }
                 }
                 Text(
-                    text = "Faire confiance à cet hôte ?",
-                    color = TextSecondary,
-                    fontSize = 12.sp,
+                    text = stringResource(R.string.dialog_trust_host_question),
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                )
+                Text(
+                    text = stringResource(
+                        R.string.host_key_dialog_time_limit,
+                        (HostKeyPromptCoordinator.PROMPT_TIMEOUT_MS / 1_000L).toInt(),
+                    ),
+                    color = TextDisabled,
+                    fontSize = 11.sp,
                 )
             }
         },
         confirmButton = {
             Button(
-                onClick = { coordinator.respond(true) },
+                onClick = { coordinator.respond(s, true) },
+                enabled = confirmArmed,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Burgundy,
                     contentColor = White,
                 ),
                 shape = RoundedCornerShape(Radii.Md),
             ) {
-                Text("Faire confiance", fontWeight = FontWeight.Medium)
+                Text(stringResource(R.string.action_trust_host), fontWeight = FontWeight.Medium)
             }
         },
         dismissButton = {
-            TextButton(onClick = { coordinator.respond(false) }) {
-                Text("Refuser", color = TextSecondary)
+            TextButton(onClick = { coordinator.respond(s, false) }) {
+                Text(stringResource(R.string.action_reject), color = TextSecondary)
             }
         },
         containerColor = Surface,

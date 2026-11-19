@@ -73,7 +73,7 @@ class SoftwareOsrPanel : JPanel() {
 
         addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
-                requestFocusInWindow()
+                if (isFocusable) requestFocusInWindow()
                 browser?.sendMouseEvent(e)
             }
             override fun mouseReleased(e: MouseEvent) { browser?.sendMouseEvent(e) }
@@ -144,6 +144,30 @@ class SoftwareOsrPanel : JPanel() {
     /** Call when the browser is being disposed so stale events are dropped cleanly. */
     fun detachBrowser() {
         browser = null
+    }
+
+    private var keyboardBlocked = false
+
+    /**
+     * While [blocked], the panel cannot hold the keyboard focus. Used while the sign-in form
+     * is up, so nothing typed for the form can land in an input of the page.
+     *
+     * Order matters: the panel is made non-focusable FIRST, which makes AWT move the focus on
+     * if this panel owned it, and only then is Chromium told it lost the focus (best effort).
+     *
+     * On unblocking, when [restoreFocus] is true (the overlay is visible) the panel asks for
+     * the focus again, so keys reach the page without a click. A panel that is not showing
+     * simply does not get it.
+     */
+    fun setKeyboardBlocked(blocked: Boolean, restoreFocus: Boolean = false) {
+        val wasBlocked = keyboardBlocked
+        keyboardBlocked = blocked
+        isFocusable = !blocked
+        if (blocked) {
+            runCatching { browser?.setFocus(false) }
+        } else if (wasBlocked && restoreFocus) {
+            requestFocusInWindow()
+        }
     }
 
     /**

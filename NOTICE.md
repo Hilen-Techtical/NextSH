@@ -44,7 +44,6 @@ The terminal emulator embedded in the Android client is a fork of
 | AndroidX Core / Lifecycle / Activity / Navigation | (latest stable) | Apache License 2.0 |
 | AndroidX Biometric | 1.2.0-alpha05 | Apache License 2.0 |
 | AndroidX Security Crypto | 1.1.0-alpha06 | Apache License 2.0 |
-| AndroidX Credentials | 1.3.0 | Apache License 2.0 |
 | AndroidX Room | 2.6.1 | Apache License 2.0 |
 | AndroidX DataStore | 1.1.1 | Apache License 2.0 |
 | AndroidX WorkManager | 2.9.1 | Apache License 2.0 |

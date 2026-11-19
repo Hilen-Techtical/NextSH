@@ -41,7 +41,6 @@ package fr.techtical.nextsh.desktop.sessions
 // currently synchronous is a false negative waiting for the day it isn't.
 // ──────────────────────────────────────────────────────────────────────────────
 
-import com.jediterm.terminal.TtyConnector
 import fr.techtical.nextsh.desktop.core.ssh.DesktopKnownHostsVerifier
 import fr.techtical.nextsh.desktop.core.ssh.DesktopSftpManager
 import fr.techtical.nextsh.desktop.core.ssh.DesktopSshSessionManager
@@ -109,11 +108,13 @@ class DesktopSessionManagerBroadcastTest {
             sshSessionId = sshSessionId,
             terminal     = mockk<DesktopSshTerminalSession>(relaxed = true),
         ),
+        host   = makeHost("A"),
     )
 
     private fun sftpPane(linkedSshSessionId: String = "linked") = TabContent.Sftp(
         linkedSshSessionId = linkedSshSessionId,
         state              = SftpTabState.Opening,
+        host               = makeHost("A"),
     )
 
     /**
@@ -163,10 +164,10 @@ class DesktopSessionManagerBroadcastTest {
     @Test
     fun `non-connected terminal states are excluded`() {
         val host = makeHost("A")
-        assertEquals(emptyList(), connectedTerminalIdsIn(TabContent.Terminal(theme, TerminalTabStatus.Connecting)))
-        assertEquals(emptyList(), connectedTerminalIdsIn(TabContent.Terminal(theme, TerminalTabStatus.AwaitingPassword(host))))
-        assertEquals(emptyList(), connectedTerminalIdsIn(TabContent.Terminal(theme, TerminalTabStatus.Disconnected("gone"))))
-        assertEquals(emptyList(), connectedTerminalIdsIn(TabContent.Terminal(theme, TerminalTabStatus.Error("boom"))))
+        assertEquals(emptyList(), connectedTerminalIdsIn(TabContent.Terminal(theme, TerminalTabStatus.Connecting, host)))
+        assertEquals(emptyList(), connectedTerminalIdsIn(TabContent.Terminal(theme, TerminalTabStatus.AwaitingPassword(host), host)))
+        assertEquals(emptyList(), connectedTerminalIdsIn(TabContent.Terminal(theme, TerminalTabStatus.Disconnected("gone"), host)))
+        assertEquals(emptyList(), connectedTerminalIdsIn(TabContent.Terminal(theme, TerminalTabStatus.Error("boom"), host)))
     }
 
     @Test
@@ -187,7 +188,7 @@ class DesktopSessionManagerBroadcastTest {
     fun `nested split excludes non-connected panes but keeps every connected terminal in DFS order`() {
         // root: first = A (connected) ; second = Split(first = B (connecting), second = C (connected))
         val inner = TabContent.Split(
-            first       = TabContent.Terminal(theme, TerminalTabStatus.Connecting),
+            first       = TabContent.Terminal(theme, TerminalTabStatus.Connecting, makeHost("A")),
             second      = connectedTerminal("ssh-C"),
             orientation = SplitOrientation.VERTICAL,
             focusedSlot = PaneSlot.RIGHT_OR_BOTTOM,
@@ -231,8 +232,8 @@ class DesktopSessionManagerBroadcastTest {
             advanceUntilIdle()
             assertTrue(mgr.splitPaneAt(tabId, emptyList(), makeHost("B")))
             advanceUntilIdle()
-            mgr.getOrCreateComposeSession("ssh-A", mockk<TtyConnector>(relaxed = true), palette)
-            mgr.getOrCreateComposeSession("ssh-B", mockk<TtyConnector>(relaxed = true), palette)
+            mgr.getOrCreateComposeSession("ssh-A", liveShellConnector(), palette)
+            mgr.getOrCreateComposeSession("ssh-B", liveShellConnector(), palette)
             advanceUntilIdle()
 
             mgr.toggleBroadcastOnActiveTab()
@@ -254,8 +255,8 @@ class DesktopSessionManagerBroadcastTest {
             advanceUntilIdle()
             assertTrue(mgr.splitPaneAt(tabId, emptyList(), makeHost("B")))
             advanceUntilIdle()
-            val connectorA = mockk<TtyConnector>(relaxed = true)
-            val connectorB = mockk<TtyConnector>(relaxed = true)
+            val connectorA = liveShellConnector()
+            val connectorB = liveShellConnector()
             mgr.getOrCreateComposeSession("ssh-A", connectorA, palette)
             mgr.getOrCreateComposeSession("ssh-B", connectorB, palette)
             advanceUntilIdle()
@@ -275,8 +276,8 @@ class DesktopSessionManagerBroadcastTest {
             advanceUntilIdle()
             assertTrue(mgr.splitPaneAt(tabId, emptyList(), makeHost("B")))
             advanceUntilIdle()
-            val connectorA = mockk<TtyConnector>(relaxed = true)
-            val connectorB = mockk<TtyConnector>(relaxed = true)
+            val connectorA = liveShellConnector()
+            val connectorB = liveShellConnector()
             mgr.getOrCreateComposeSession("ssh-A", connectorA, palette)
             mgr.getOrCreateComposeSession("ssh-B", connectorB, palette)
             advanceUntilIdle()
@@ -303,7 +304,7 @@ class DesktopSessionManagerBroadcastTest {
             advanceUntilIdle()
             assertTrue(mgr.splitPaneAt(tabId, emptyList(), makeHost("B")))
             advanceUntilIdle()
-            val connectorA = mockk<TtyConnector>(relaxed = true)
+            val connectorA = liveShellConnector()
             mgr.getOrCreateComposeSession("ssh-A", connectorA, palette)
             advanceUntilIdle()
 
@@ -326,8 +327,8 @@ class DesktopSessionManagerBroadcastTest {
             advanceUntilIdle()
             assertTrue(mgr.splitPaneAt(tabId, emptyList(), makeHost("B")))
             advanceUntilIdle()
-            val connectorA = mockk<TtyConnector>(relaxed = true)
-            val connectorB = mockk<TtyConnector>(relaxed = true)
+            val connectorA = liveShellConnector()
+            val connectorB = liveShellConnector()
             val composeA = mgr.getOrCreateComposeSession("ssh-A", connectorA, palette)
             mgr.getOrCreateComposeSession("ssh-B", connectorB, palette)
             advanceUntilIdle()
@@ -378,8 +379,8 @@ class DesktopSessionManagerBroadcastTest {
         advanceUntilIdle()
         assertTrue(mgr.splitPaneAt(tabId, emptyList(), makeHost("B")))
         advanceUntilIdle()
-        val connectorA = mockk<TtyConnector>(relaxed = true)
-        val connectorB = mockk<TtyConnector>(relaxed = true)
+        val connectorA = liveShellConnector()
+        val connectorB = liveShellConnector()
         val composeA = mgr.getOrCreateComposeSession("ssh-A", connectorA, palette)
         mgr.getOrCreateComposeSession("ssh-B", connectorB, palette)
         advanceUntilIdle()
@@ -419,8 +420,8 @@ class DesktopSessionManagerBroadcastTest {
             advanceUntilIdle()
             assertTrue(mgr.splitPaneAt(tabId, emptyList(), makeHost("B")))
             advanceUntilIdle()
-            val connectorA = mockk<TtyConnector>(relaxed = true)
-            val connectorB = mockk<TtyConnector>(relaxed = true)
+            val connectorA = liveShellConnector()
+            val connectorB = liveShellConnector()
             val composeA = mgr.getOrCreateComposeSession("ssh-A", connectorA, palette)
             mgr.getOrCreateComposeSession("ssh-B", connectorB, palette)
             advanceUntilIdle()
@@ -432,7 +433,7 @@ class DesktopSessionManagerBroadcastTest {
             // ── C joins the tab AFTER broadcast was switched on ──
             assertTrue(mgr.splitPaneAt(tabId, listOf(PaneSlot.RIGHT_OR_BOTTOM), makeHost("C")))
             advanceUntilIdle()
-            val connectorC = mockk<TtyConnector>(relaxed = true)
+            val connectorC = liveShellConnector()
             mgr.getOrCreateComposeSession("ssh-C", connectorC, palette)
             advanceUntilIdle()
             assertTrue(tabId in mgr.broadcastTabIds.value, "adding a pane must not drop broadcast")
@@ -459,8 +460,8 @@ class DesktopSessionManagerBroadcastTest {
             advanceUntilIdle()
             assertTrue(mgr.splitPaneAt(tabId, emptyList(), makeHost("B")))
             advanceUntilIdle()
-            val connectorA = mockk<TtyConnector>(relaxed = true)
-            val connectorB = mockk<TtyConnector>(relaxed = true)
+            val connectorA = liveShellConnector()
+            val connectorB = liveShellConnector()
             mgr.getOrCreateComposeSession("ssh-A", connectorA, palette)
             mgr.getOrCreateComposeSession("ssh-B", connectorB, palette)
             advanceUntilIdle()
@@ -470,7 +471,7 @@ class DesktopSessionManagerBroadcastTest {
 
             assertTrue(mgr.splitPaneAt(tabId, listOf(PaneSlot.RIGHT_OR_BOTTOM), makeHost("C")))
             advanceUntilIdle()
-            val connectorC = mockk<TtyConnector>(relaxed = true)
+            val connectorC = liveShellConnector()
             val composeC = mgr.getOrCreateComposeSession("ssh-C", connectorC, palette)
             advanceUntilIdle()
 
@@ -498,8 +499,8 @@ class DesktopSessionManagerBroadcastTest {
             advanceUntilIdle()
             assertTrue(mgr.splitPaneAt(tab1, emptyList(), makeHost("B")))
             advanceUntilIdle()
-            val connectorA = mockk<TtyConnector>(relaxed = true)
-            val connectorB = mockk<TtyConnector>(relaxed = true)
+            val connectorA = liveShellConnector()
+            val connectorB = liveShellConnector()
             mgr.getOrCreateComposeSession("ssh-A", connectorA, palette)
             mgr.getOrCreateComposeSession("ssh-B", connectorB, palette)
             advanceUntilIdle()
@@ -512,8 +513,8 @@ class DesktopSessionManagerBroadcastTest {
             advanceUntilIdle()
             assertTrue(mgr.splitPaneAt(tab2, emptyList(), makeHost("D")))
             advanceUntilIdle()
-            val connectorC = mockk<TtyConnector>(relaxed = true)
-            val connectorD = mockk<TtyConnector>(relaxed = true)
+            val connectorC = liveShellConnector()
+            val connectorD = liveShellConnector()
             val composeC = mgr.getOrCreateComposeSession("ssh-C", connectorC, palette)
             mgr.getOrCreateComposeSession("ssh-D", connectorD, palette)
             advanceUntilIdle()
@@ -572,8 +573,8 @@ class DesktopSessionManagerBroadcastTest {
         advanceUntilIdle()
         assertTrue(mgr.splitPaneAt(tabId, emptyList(), makeHost("B")))
         advanceUntilIdle()
-        mgr.getOrCreateComposeSession("ssh-A", mockk<TtyConnector>(relaxed = true), palette)
-        mgr.getOrCreateComposeSession("ssh-B", mockk<TtyConnector>(relaxed = true), palette)
+        mgr.getOrCreateComposeSession("ssh-A", liveShellConnector(), palette)
+        mgr.getOrCreateComposeSession("ssh-B", liveShellConnector(), palette)
         advanceUntilIdle()
         mgr.toggleBroadcastOnActiveTab()
         advanceUntilIdle()
@@ -595,8 +596,8 @@ class DesktopSessionManagerBroadcastTest {
             advanceUntilIdle()
             assertTrue(mgr.splitPaneAt(tabId, emptyList(), makeHost("B")))
             advanceUntilIdle()
-            mgr.getOrCreateComposeSession("ssh-A", mockk<TtyConnector>(relaxed = true), palette)
-            mgr.getOrCreateComposeSession("ssh-B", mockk<TtyConnector>(relaxed = true), palette)
+            mgr.getOrCreateComposeSession("ssh-A", liveShellConnector(), palette)
+            mgr.getOrCreateComposeSession("ssh-B", liveShellConnector(), palette)
             advanceUntilIdle()
             mgr.toggleBroadcastOnActiveTab()
             advanceUntilIdle()
@@ -622,9 +623,9 @@ class DesktopSessionManagerBroadcastTest {
             assertTrue(mgr.splitPaneAt(tabId, listOf(PaneSlot.RIGHT_OR_BOTTOM), makeHost("C")))
             advanceUntilIdle()
 
-            val connectorA = mockk<TtyConnector>(relaxed = true)
-            val connectorB = mockk<TtyConnector>(relaxed = true)
-            val connectorC = mockk<TtyConnector>(relaxed = true)
+            val connectorA = liveShellConnector()
+            val connectorB = liveShellConnector()
+            val connectorC = liveShellConnector()
             mgr.getOrCreateComposeSession("ssh-A", connectorA, palette)
             mgr.getOrCreateComposeSession("ssh-B", connectorB, palette)
             mgr.getOrCreateComposeSession("ssh-C", connectorC, palette)

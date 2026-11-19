@@ -97,7 +97,7 @@ object ImportFormatDetector {
      * [ImportFormat.TERMIUS] per the fallback rules documented on the class.
      */
     fun detect(content: String): ImportFormat {
-        val trimmed = content.trimStart('﻿', ' ', '\t', '\r', '\n')
+        val trimmed = content.trimStart('\uFEFF', ' ', '\t', '\r', '\n')
         val firstChar = trimmed.firstOrNull()
         if (firstChar != '{' && firstChar != '[') {
             return ImportFormat.KEEPASSXC

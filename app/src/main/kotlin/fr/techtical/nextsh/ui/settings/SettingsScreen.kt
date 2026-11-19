@@ -35,6 +35,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -50,20 +52,26 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.ExternalLink
+import com.composables.icons.lucide.Lock
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Palette
 import com.composables.icons.lucide.RefreshCcw
@@ -75,12 +83,14 @@ import com.composables.icons.lucide.TriangleAlert
 import fr.techtical.nextsh.BuildConfig
 import fr.techtical.nextsh.R
 import fr.techtical.nextsh.core.RepositoryUrls
+import fr.techtical.nextsh.core.lock.AutoLockDelay
+import fr.techtical.nextsh.data.preferences.SCROLLBACK_STEPS
+import fr.techtical.nextsh.data.preferences.nearestScrollbackStep
 import fr.techtical.nextsh.shared.core.sync.SyncInterval
 import fr.techtical.nextsh.shared.core.sync.SyncStatus
-import fr.techtical.nextsh.shared.util.RelativeTime
 import fr.techtical.nextsh.ui.components.BrandText
 import fr.techtical.nextsh.ui.components.VersionText
-import fr.techtical.nextsh.ui.components.rememberNowTicking
+import fr.techtical.nextsh.ui.components.relativeTimeText
 import fr.techtical.nextsh.ui.theme.Border1
 import fr.techtical.nextsh.ui.theme.Border2
 import fr.techtical.nextsh.ui.theme.Burgundy
@@ -104,6 +114,12 @@ import kotlin.math.roundToInt
 import fr.techtical.nextsh.ui.theme.Surface as SurfaceColor
 
 /**
+ * The word to type to confirm the wipe of the vault. The same as on Desktop, and not translated: it is a
+ * confirmation word, not a sentence.
+ */
+internal const val WIPE_CONFIRMATION_TOKEN = "CONFIRMER"
+
+/**
  * SettingsScreen : refonte Phase 3.1 (DA Techtical portée du Desktop).
  *
  * Sections cards Surface/Border1/Radii.Lg avec headers GoldLight
@@ -112,9 +128,12 @@ import fr.techtical.nextsh.ui.theme.Surface as SurfaceColor
  * LAN expose son statut (dot + label) en intra-card et un alert de
  * conflit (parité ConflictAlert Desktop) avec icône TriangleAlert.
  *
- * Conventions Android conservées : Scaffold + TopAppBar + AlertDialog
- * (un seul pas de confirmation pour le wipe, le ViewModel ne réclame
- * pas de token comme côté Desktop ; on garde la simplicité existante).
+ * Conventions Android conservées : Scaffold + TopAppBar + AlertDialog.
+ * L'effacement du vault se confirme en deux étapes, comme sur Desktop : un
+ * dialogue qui dit ce qui sera perdu, puis un second où l'on tape le mot
+ * [WIPE_CONFIRMATION_TOKEN]. L'effacement lui-même ne tourne pas ici : il
+ * appartient à l'application (`AndroidVaultWipe`), sa progression et son
+ * échec s'affichent dans la fenêtre de `MainActivity`.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -130,8 +149,13 @@ fun SettingsScreen(
     val state by viewModel.state.collectAsState()
     val syncState by viewModel.syncState.collectAsState()
     var showWipeDialog by remember { mutableStateOf(false) }
-    var showAboutLinkDialog by remember { mutableStateOf(false) }
+    // Saveable : « ouvrir le lien » n'est pas destructif, la rotation ne doit pas le fermer.
+    var showAboutLinkDialog by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
+
+    // Second step of the wipe: the word to type. Not a secret, but it must not survive the dialog.
+    var showWipeTokenDialog by remember { mutableStateOf(false) }
+    var wipeToken by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -146,7 +170,7 @@ fun SettingsScreen(
                             fontSize = 20.sp,
                         )
                         Text(
-                            text = "Connexion, terminal, sécurité, sync LAN",
+                            text = stringResource(R.string.settings_subtitle),
                             color = TextDisabled,
                             fontSize = 12.sp,
                         )
@@ -184,17 +208,21 @@ fun SettingsScreen(
                     displayValue = stringResource(R.string.settings_font_size_pt, state.terminalFontSize),
                     onValueChange = { viewModel.updateFontSize(it.roundToInt()) },
                 )
+                val scrollbackIndex = SCROLLBACK_STEPS.indexOf(nearestScrollbackStep(state.scrollbackLines))
                 SliderRow(
                     label = stringResource(R.string.label_scrollback),
-                    value = state.scrollbackLines.toFloat(),
-                    valueRange = 1000f..100000f,
-                    steps = 0,
-                    displayValue = formatScrollback(
-                        state.scrollbackLines,
-                        stringResource(R.string.settings_scrollback_lines, state.scrollbackLines),
-                        stringResource(R.string.settings_scrollback_klines, state.scrollbackLines / 1000),
+                    value = scrollbackIndex.toFloat(),
+                    valueRange = 0f..(SCROLLBACK_STEPS.size - 1).toFloat(),
+                    steps = SCROLLBACK_STEPS.size - 2,
+                    displayValue = stringResource(
+                        R.string.settings_scrollback_klines,
+                        SCROLLBACK_STEPS[scrollbackIndex] / 1000,
                     ),
-                    onValueChange = { viewModel.updateScrollback(it.roundToInt()) },
+                    onValueChange = { index ->
+                        val step = SCROLLBACK_STEPS[index.roundToInt().coerceIn(0, SCROLLBACK_STEPS.size - 1)]
+                        viewModel.updateScrollback(step)
+                    },
+                    hint = stringResource(R.string.settings_scrollback_help),
                 )
                 NavigationRowItem(
                     label = stringResource(R.string.settings_terminal_themes),
@@ -261,22 +289,11 @@ fun SettingsScreen(
 
             // ── Connexion ────────────────────────────────────────────────────
             FormSection(title = stringResource(R.string.section_connection)) {
-                SliderRow(
-                    label = stringResource(R.string.label_keepalive_interval),
-                    value = state.keepAliveInterval.toFloat(),
-                    valueRange = 0f..120f,
-                    steps = 23,
-                    displayValue = if (state.keepAliveInterval == 0) {
-                        stringResource(R.string.status_disabled)
-                    } else {
-                        stringResource(R.string.settings_keepalive_seconds, state.keepAliveInterval)
-                    },
-                    onValueChange = { viewModel.updateKeepAlive(it.roundToInt()) },
-                )
                 ToggleRow(
                     label = stringResource(R.string.label_auto_reconnect),
                     checked = state.autoReconnect,
                     onToggle = { viewModel.toggleAutoReconnect() },
+                    hint = stringResource(R.string.settings_auto_reconnect_help),
                 )
                 SliderRow(
                     label = stringResource(R.string.label_connection_timeout),
@@ -316,12 +333,30 @@ fun SettingsScreen(
                         viewModel.updateClipboardClearTimeout(snapped)
                     },
                 )
+                val autoLockSteps = AutoLockDelay.entries
+                SliderRow(
+                    label = stringResource(R.string.label_auto_lock),
+                    value = autoLockSteps.indexOf(state.autoLockDelay).coerceAtLeast(0).toFloat(),
+                    valueRange = 0f..(autoLockSteps.size - 1).toFloat(),
+                    steps = autoLockSteps.size - 2,
+                    displayValue = autoLockDisplay(state.autoLockDelay),
+                    onValueChange = { index ->
+                        val snapped = autoLockSteps[index.roundToInt().coerceIn(0, autoLockSteps.size - 1)]
+                        viewModel.updateAutoLockDelay(snapped)
+                    },
+                    hint = stringResource(R.string.settings_auto_lock_hint),
+                )
+                BtnSecondaryFull(
+                    onClick = { viewModel.lockNow() },
+                    icon = Lucide.Lock,
+                    label = stringResource(R.string.action_lock_now),
+                )
             }
 
             // ── Zone dangereuse ──────────────────────────────────────────────
-            FormSection(title = "Zone dangereuse", accent = ErrorRed) {
+            FormSection(title = stringResource(R.string.section_danger_zone), accent = ErrorRed) {
                 Text(
-                    text = "Action irréversible. Toutes les données locales seront perdues.",
+                    text = stringResource(R.string.settings_danger_zone_hint),
                     color = TextSecondary,
                     fontSize = 12.sp,
                 )
@@ -416,16 +451,95 @@ fun SettingsScreen(
                 )
             },
             confirmButton = {
+                // First step: only opens the second one, nothing is wiped by it.
                 BtnDangerSolid(
                     onClick = {
-                        viewModel.wipeVault()
                         showWipeDialog = false
+                        wipeToken = ""
+                        showWipeTokenDialog = true
                     },
-                    label = stringResource(R.string.action_wipe),
+                    label = stringResource(R.string.action_continue),
                 )
             },
             dismissButton = {
                 TextButton(onClick = { showWipeDialog = false }) {
+                    Text(stringResource(R.string.action_cancel), color = TextSecondary)
+                }
+            },
+            containerColor = SurfaceColor,
+            shape = RoundedCornerShape(Radii.Lg),
+        )
+    }
+
+    // ── Second step: the word to type ───────────────────────────────────
+    if (showWipeTokenDialog) {
+        AlertDialog(
+            onDismissRequest = { showWipeTokenDialog = false },
+            title = {
+                Text(
+                    text = stringResource(R.string.settings_wipe_token_title, WIPE_CONFIRMATION_TOKEN),
+                    color = TextPrimary,
+                    fontFamily = SpaceGroteskFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
+                    Text(
+                        text = stringResource(R.string.settings_wipe_token_body, WIPE_CONFIRMATION_TOKEN),
+                        color = TextSecondary,
+                        fontSize = 13.sp,
+                    )
+                    OutlinedTextField(
+                        value = wipeToken,
+                        onValueChange = { wipeToken = it },
+                        label = {
+                            Text(
+                                stringResource(R.string.settings_wipe_token_field_label),
+                                fontFamily = JetBrainsMonoFamily,
+                                fontSize = 13.sp,
+                            )
+                        },
+                        singleLine = true,
+                        // No suggestion nor correction: the word is typed as it is.
+                        keyboardOptions = KeyboardOptions(autoCorrect = false, capitalization = KeyboardCapitalization.Characters),
+                        textStyle = TextStyle(
+                            fontFamily = JetBrainsMonoFamily,
+                            fontSize = 13.sp,
+                            color = TextPrimary,
+                        ),
+                        shape = RoundedCornerShape(Radii.Md),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Gold,
+                            unfocusedBorderColor = Border2,
+                            cursorColor = Gold,
+                            focusedContainerColor = SurfaceVariant,
+                            unfocusedContainerColor = SurfaceVariant,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                // The only way to the wipe: armed when the word is exactly the expected one.
+                BtnDangerSolid(
+                    onClick = {
+                        if (wipeToken == WIPE_CONFIRMATION_TOKEN) {
+                            viewModel.wipeVault()
+                            showWipeTokenDialog = false
+                            wipeToken = ""
+                        }
+                    },
+                    enabled = wipeToken == WIPE_CONFIRMATION_TOKEN,
+                    label = stringResource(R.string.action_wipe),
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showWipeTokenDialog = false
+                    wipeToken = ""
+                }) {
                     Text(stringResource(R.string.action_cancel), color = TextSecondary)
                 }
             },
@@ -612,26 +726,33 @@ private fun ToggleRow(
     label: String,
     checked: Boolean,
     onToggle: () -> Unit,
+    /** Optional plain-language supporting text rendered below the row (non-technical explanation). */
+    hint: String? = null,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, color = TextPrimary, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        Spacer(Modifier.width(Spacing.Sm))
-        Switch(
-            checked = checked,
-            onCheckedChange = { onToggle() },
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = White,
-                checkedTrackColor = Burgundy,
-                checkedBorderColor = Burgundy,
-                uncheckedThumbColor = TextSecondary,
-                uncheckedTrackColor = SurfaceVariant,
-                uncheckedBorderColor = Border2,
-            ),
-        )
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, color = TextPrimary, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(Spacing.Sm))
+            Switch(
+                checked = checked,
+                onCheckedChange = { onToggle() },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = White,
+                    checkedTrackColor = Burgundy,
+                    checkedBorderColor = Burgundy,
+                    uncheckedThumbColor = TextSecondary,
+                    uncheckedTrackColor = SurfaceVariant,
+                    uncheckedBorderColor = Border2,
+                ),
+            )
+        }
+        if (!hint.isNullOrBlank()) {
+            Text(text = hint, color = TextSecondary, fontSize = 11.sp)
+        }
     }
 }
 
@@ -732,10 +853,11 @@ private fun SyncStatusBlock(
             Spacer(Modifier.width(Spacing.Sm))
             Text(text = statusText, color = statusColor, fontSize = 11.sp)
         }
-        val now = rememberNowTicking(lastSyncAt)
-        val lastSyncText = lastSyncAt?.let { ts ->
-            stringResource(R.string.sync_last_sync_at, formatRelativeBucket(RelativeTime.bucket(now - ts)))
-        } ?: stringResource(R.string.sync_never_synced)
+        val lastSyncText = if (lastSyncAt != null) {
+            stringResource(R.string.sync_last_sync_at, relativeTimeText(lastSyncAt))
+        } else {
+            stringResource(R.string.sync_never_synced)
+        }
         Text(
             text = lastSyncText,
             color = TextDisabled,
@@ -743,15 +865,6 @@ private fun SyncStatusBlock(
             modifier = Modifier.padding(start = 14.dp),
         )
     }
-}
-
-/** Convertit un [RelativeTime.Bucket] en chaîne localisée courte. */
-@Composable
-private fun formatRelativeBucket(bucket: RelativeTime.Bucket): String = when (bucket.unit) {
-    RelativeTime.Unit.SECONDS -> stringResource(R.string.relative_seconds_ago, bucket.value)
-    RelativeTime.Unit.MINUTES -> stringResource(R.string.relative_minutes_ago, bucket.value)
-    RelativeTime.Unit.HOURS   -> stringResource(R.string.relative_hours_ago, bucket.value)
-    RelativeTime.Unit.DAYS    -> stringResource(R.string.relative_days_ago, bucket.value)
 }
 
 @Composable
@@ -770,7 +883,9 @@ private fun ConflictAlert(count: Int, onClick: () -> Unit) {
         Icon(Lucide.TriangleAlert, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(15.dp))
         Spacer(Modifier.width(Spacing.Sm))
         Text(
-            text = if (count == 1) "1 conflit à résoudre" else "$count conflits à résoudre",
+            // Only shown when there is at least one conflict (the caller checks), so the French
+            // plural "one", which also covers 0, never reads "0 conflit".
+            text = pluralStringResource(R.plurals.conflict_subtitle_pending, count, count),
             color = TextPrimary,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
@@ -829,12 +944,15 @@ private fun DangerRowButton(icon: ImageVector, label: String, onClick: () -> Uni
 }
 
 @Composable
-private fun BtnDangerSolid(onClick: () -> Unit, label: String) {
+private fun BtnDangerSolid(onClick: () -> Unit, label: String, enabled: Boolean = true) {
     OutlinedButton(
         onClick = onClick,
+        enabled = enabled,
         colors = ButtonDefaults.outlinedButtonColors(
             containerColor = ErrorRed,
             contentColor = White,
+            disabledContainerColor = ErrorRed.copy(alpha = 0.3f),
+            disabledContentColor = White.copy(alpha = 0.5f),
         ),
         border = BorderStroke(0.dp, Color.Transparent),
         shape = RoundedCornerShape(Radii.Md),
@@ -844,5 +962,11 @@ private fun BtnDangerSolid(onClick: () -> Unit, label: String) {
     }
 }
 
-private fun formatScrollback(lines: Int, linesStr: String, kLinesStr: String): String =
-    if (lines >= 1000) kLinesStr else linesStr
+/** The name of a delay of the automatic lock, as the slider shows it: "Immediately", "5 min". */
+@Composable
+private fun autoLockDisplay(delay: AutoLockDelay): String =
+    if (delay == AutoLockDelay.IMMEDIATELY) {
+        stringResource(R.string.settings_auto_lock_immediately)
+    } else {
+        stringResource(R.string.settings_auto_lock_minutes, delay.minutes)
+    }

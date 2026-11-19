@@ -41,8 +41,11 @@ SELECT * FROM hosts WHERE "group" = ? AND deleted = 0 ORDER BY label;
 selectGroups:
 SELECT DISTINCT "group" FROM hosts WHERE "group" IS NOT NULL AND deleted = 0 ORDER BY "group";
 
+-- Plain INSERT on purpose: INSERT OR REPLACE is a DELETE then an INSERT, which cascades to the tunnels of
+-- the host (tunnels.hostId is ON DELETE CASCADE) and resets createdAt and lastConnectedAt. A row that
+-- already exists is rewritten with updateFromSync instead.
 insert:
-INSERT OR REPLACE INTO hosts(id, label, hostname, port, username, authType, credentialId, "group", keepAliveSeconds, autoReconnect, terminalTheme, fido2Mode, isFavorite, createdAt, lastConnectedAt, vectorClock, deleted, deletedAt, updatedAt)
+INSERT INTO hosts(id, label, hostname, port, username, authType, credentialId, "group", keepAliveSeconds, autoReconnect, terminalTheme, fido2Mode, isFavorite, createdAt, lastConnectedAt, vectorClock, deleted, deletedAt, updatedAt)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 update:
@@ -51,6 +54,7 @@ WHERE id = ?;
 
 -- Sync write on an existing row (live or tombstoned). Leaves the local-only columns createdAt and
 -- lastConnectedAt alone, and never deletes the row (INSERT OR REPLACE would cascade to tunnels).
+-- Also used by DesktopHostRepository.save to overwrite an existing id (backup restore).
 updateFromSync:
 UPDATE hosts SET label = ?, hostname = ?, port = ?, username = ?, authType = ?, credentialId = ?, "group" = ?, keepAliveSeconds = ?, autoReconnect = ?, terminalTheme = ?, fido2Mode = ?, isFavorite = ?, vectorClock = ?, deleted = ?, deletedAt = ?, updatedAt = ?
 WHERE id = ?;
@@ -66,3 +70,7 @@ UPDATE hosts SET deleted = 1, deletedAt = ?, updatedAt = ?, vectorClock = ? WHER
 
 delete:
 DELETE FROM hosts WHERE id = ?;
+
+-- Vault wipe: every row, tombstones included. Generated, so that the listeners of the table are notified.
+deleteAll:
+DELETE FROM hosts;

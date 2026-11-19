@@ -4,14 +4,15 @@
 package fr.techtical.nextsh.desktop.snippets
 
 import fr.techtical.nextsh.desktop.data.di.DesktopContainer
+import fr.techtical.nextsh.desktop.scope.ScreenViewModel
+import fr.techtical.nextsh.shared.core.backup.BackupFieldProblem
+import fr.techtical.nextsh.shared.core.backup.BackupFieldRules
 import fr.techtical.nextsh.shared.domain.model.Host
 import fr.techtical.nextsh.shared.domain.model.Snippet
 import fr.techtical.nextsh.shared.domain.repository.HostRepository
 import fr.techtical.nextsh.shared.domain.repository.SnippetRepository
+import fr.techtical.nextsh.shared.util.AppScope
 import fr.techtical.nextsh.shared.util.randomUuid
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,11 +20,42 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** The problem found in each text field of a snippet, null when the field is fine. */
+data class SnippetFieldProblems(
+    val label: BackupFieldProblem?,
+    val command: BackupFieldProblem?,
+    val category: BackupFieldProblem?,
+) {
+    val hasAny: Boolean get() = label != null || command != null || category != null
+}
+
+/**
+ * Checks the three text fields of a snippet as they will be stored (trimmed), with the rules of
+ * [BackupFieldRules] so that the editor accepts exactly what a backup restore accepts. Label and command are
+ * also required (blank gives [BackupFieldProblem.EMPTY]); a blank category means "no category".
+ */
+fun snippetFieldProblems(label: String, command: String, category: String?): SnippetFieldProblems {
+    val trimmedLabel = label.trim()
+    val trimmedCommand = command.trim()
+    return SnippetFieldProblems(
+        label = if (trimmedLabel.isEmpty()) BackupFieldProblem.EMPTY
+        else BackupFieldRules.snippetLabelProblem(trimmedLabel),
+        command = if (trimmedCommand.isEmpty()) BackupFieldProblem.EMPTY
+        else BackupFieldRules.snippetCommandProblem(trimmedCommand),
+        category = BackupFieldRules.snippetCategoryProblem(category?.trim()?.takeIf { it.isNotEmpty() }),
+    )
+}
+
+/**
+ * ViewModel de l'écran des snippets. Le collecteur de la base vit dans le scope de l'écran ; l'enregistrement
+ * et la suppression restent dans le scope de l'app pour aller au bout même si l'écran est quitté juste après.
+ * Les dépôts sont sûrs vis-à-vis du thread (`withContext(Dispatchers.IO)` dans chaque appel).
+ */
 class SnippetListViewModel(
     private val snippetRepo: SnippetRepository = DesktopContainer.snippetRepository,
     private val hostRepo: HostRepository = DesktopContainer.hostRepository,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-) {
+    appScope: AppScope = DesktopContainer.appScope,
+) : ScreenViewModel(appScope) {
     data class UiState(
         val allSnippets: List<Snippet> = emptyList(),
         val snippets: List<Snippet> = emptyList(),
@@ -41,7 +73,7 @@ class SnippetListViewModel(
 
     init {
         // Observe repo flows and merge into UiState, preserving volatile fields.
-        scope.launch {
+        screenScope.launch {
             combine(
                 snippetRepo.observeAll(),
                 snippetRepo.observeCategories(),
@@ -82,15 +114,22 @@ class SnippetListViewModel(
     }
 
     fun save(label: String, command: String, category: String?, hostId: String?, existingId: String?) {
-        if (label.isBlank()) {
+        // Same rules as the editor and as a backup restore (BackupFieldRules): a snippet saved here can always
+        // be exported and restored.
+        val problems = snippetFieldProblems(label, command, category)
+        if (problems.label == BackupFieldProblem.EMPTY) {
             _uiState.update { it.copy(error = "snippets_error_label_empty") }
             return
         }
-        if (command.isBlank()) {
+        if (problems.command == BackupFieldProblem.EMPTY) {
             _uiState.update { it.copy(error = "snippets_error_command_empty") }
             return
         }
-        scope.launch {
+        if (problems.hasAny) {
+            _uiState.update { it.copy(error = "snippets_error_invalid_field") }
+            return
+        }
+        appScope.coroutineScope.launch {
             try {
                 val snippet = Snippet(
                     id = existingId ?: randomUuid(),
@@ -110,7 +149,7 @@ class SnippetListViewModel(
     }
 
     fun delete(id: String) {
-        scope.launch {
+        appScope.coroutineScope.launch {
             try {
                 snippetRepo.delete(id)
                 _uiState.update { it.copy(successMessage = "snippets_message_deleted") }

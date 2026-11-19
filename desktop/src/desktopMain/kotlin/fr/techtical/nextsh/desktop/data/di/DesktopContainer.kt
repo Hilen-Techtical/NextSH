@@ -31,18 +31,23 @@ import fr.techtical.nextsh.desktop.core.vault.DesktopVaultImporter
 import fr.techtical.nextsh.desktop.core.vault.DesktopVaultManager
 import fr.techtical.nextsh.desktop.core.vault.VaultPinManager
 import fr.techtical.nextsh.desktop.sessions.DesktopSessionManager
+import fr.techtical.nextsh.desktop.sessions.sftpPaneIdsIn
 import fr.techtical.nextsh.desktop.data.db.DatabaseFactory
 import fr.techtical.nextsh.desktop.data.preferences.DesktopSettingsStore
 import fr.techtical.nextsh.desktop.data.db.repository.DesktopCustomTerminalThemeRepository
 import fr.techtical.nextsh.desktop.data.db.repository.DesktopEnrolledDeviceRepository
 import fr.techtical.nextsh.desktop.data.db.repository.DesktopHostFolderRepository
 import fr.techtical.nextsh.desktop.data.db.repository.DesktopHostRepository
+import fr.techtical.nextsh.desktop.data.db.repository.DesktopOrphanTunnelRepair
 import fr.techtical.nextsh.desktop.data.db.repository.DesktopPendingConflictRepository
 import fr.techtical.nextsh.desktop.data.db.repository.DesktopSnippetRepository
 import fr.techtical.nextsh.desktop.data.db.repository.DesktopSshKeyRepository
 import fr.techtical.nextsh.desktop.data.db.repository.DesktopTunnelRepository
+import fr.techtical.nextsh.desktop.data.db.repository.DesktopVaultRestoreStore
 import fr.techtical.nextsh.desktop.navigation.DesktopNavigator
 import fr.techtical.nextsh.desktop.scope.DesktopAppScope
+import fr.techtical.nextsh.desktop.sftp.SftpPaneKey
+import fr.techtical.nextsh.desktop.sftp.SftpTransferInbox
 import fr.techtical.nextsh.desktop.sync.LanSyncServer
 import fr.techtical.nextsh.desktop.sync.LanSyncServerLifecycle
 import fr.techtical.nextsh.desktop.sync.TlsCertificateManager
@@ -80,8 +85,22 @@ object DesktopContainer {
     val customThemeRepository: CustomTerminalThemeRepository by lazy { DesktopCustomTerminalThemeRepository(database.db) }
     val enrolledDeviceRepository: EnrolledDeviceRepository by lazy { DesktopEnrolledDeviceRepository(database.db) }
     val pendingConflictRepository: PendingConflictRepository by lazy { DesktopPendingConflictRepository(database.db) }
+
+    /**
+     * Tombstones the live tunnels of deleted hosts. Run at unlock (before the auto-start), after a sync
+     * bundle is applied and after a HOST conflict is resolved: those are the moments such tunnels appear.
+     */
+    val orphanTunnelRepair: DesktopOrphanTunnelRepair by lazy { DesktopOrphanTunnelRepair(database.db) }
     val syncRepository: SyncRepository by lazy {
-        DesktopSyncRepository(hostRepository, tunnelRepository, sshKeyRepository, snippetRepository, customThemeRepository, pendingConflictRepository)
+        DesktopSyncRepository(
+            hostRepo = hostRepository,
+            tunnelRepo = tunnelRepository,
+            sshKeyRepo = sshKeyRepository,
+            snippetRepo = snippetRepository,
+            customThemeRepo = customThemeRepository,
+            pendingConflictRepository = pendingConflictRepository,
+            afterHostsAndTunnelsApplied = { orphanTunnelRepair.run() },
+        )
     }
     val navigator by lazy { DesktopNavigator() }
 
@@ -89,11 +108,13 @@ object DesktopContainer {
     val vaultManager: VaultManager by lazy { DesktopVaultManager(vaultPinManager) }
     val vaultKeyProvider: VaultKeyProvider by lazy { VaultKeyProvider() }
     val enrolledDeviceSecretStore: EnrolledDeviceSecretStore by lazy { EnrolledDeviceSecretStore(vaultManager) }
-    val credentialMetaStore: CredentialMetaStore by lazy {
+    /** The credential metadata file, also deleted by the vault wipe ([eraseVaultData]). */
+    val credentialMetaFile: File by lazy {
         val home = System.getenv("NEXTSH_HOME")?.takeIf { it.isNotBlank() }
             ?: "${System.getProperty("user.home")}/.nextsh"
-        FileCredentialMetaStore(File(home, "credential-meta.json"))
+        File(home, "credential-meta.json")
     }
+    val credentialMetaStore: CredentialMetaStore by lazy { FileCredentialMetaStore(credentialMetaFile) }
     val credentialSyncRepository: CredentialSyncRepository by lazy {
         JvmCredentialSyncRepository(
             vault = vaultManager,
@@ -145,7 +166,24 @@ object DesktopContainer {
             appScope = appScope,
             sshKeyRepository = sshKeyRepository,
             customThemeRepository = customThemeRepository,
+            transfers = transferManager.transfers,
         )
+    }
+    /**
+     * The questions "replace this file?" and the refusal notices of the SFTP browsers: they
+     * outlive the browser screens. A closed pane (or tab) takes its pending ones with it, so
+     * the inbox follows the SFTP panes that exist in the open tabs.
+     */
+    val sftpTransferInbox: SftpTransferInbox by lazy {
+        SftpTransferInbox().also { inbox ->
+            appScope.coroutineScope.launch {
+                sessionManager.tabs.collect { tabs ->
+                    val live = HashSet<SftpPaneKey>()
+                    for (tab in tabs) sftpPaneIdsIn(tab.content).mapTo(live) { SftpPaneKey(it) }
+                    inbox.retainPanes(live)
+                }
+            }
+        }
     }
     val settingsStore: DesktopSettingsStore by lazy { DesktopSettingsStore() }
 
@@ -176,14 +214,18 @@ object DesktopContainer {
             sshKeyRepository = sshKeyRepository,
             hostRepository = hostRepository,
             tunnelRepository = tunnelRepository,
+            snippetRepository = snippetRepository,
+            customThemeRepository = customThemeRepository,
+            knownHostsStore = knownHostsStore,
+            settings = settingsStore,
         )
     }
     internal val vaultImporter: DesktopVaultImporter by lazy {
         DesktopVaultImporter(
             vaultManager = vaultManager,
-            sshKeyRepository = sshKeyRepository,
-            hostRepository = hostRepository,
-            tunnelRepository = tunnelRepository,
+            // One SQL transaction for the whole database half of a restore (known hosts included).
+            restoreStore = DesktopVaultRestoreStore(database.db),
+            settings = settingsStore,
         )
     }
     // ── end Wave 4 ───────────────────────────────────────────────────────────
@@ -230,6 +272,7 @@ object DesktopContainer {
             credentialSyncRepository = credentialSyncRepository,
             enrolledDeviceRepository = enrolledDeviceRepository,
             secretStore = enrolledDeviceSecretStore,
+            afterConflictResolved = { orphanTunnelRepair.run() },
         )
     }
 
@@ -319,6 +362,7 @@ object DesktopContainer {
             hostRepository = hostRepository,
             appScope = appScope,
             browserSessionHolder = browserSessionHolder,
+            repairOrphanTunnels = { orphanTunnelRepair.run() },
         )
     }
     val tunnelTray: DesktopTunnelTray by lazy {
@@ -326,11 +370,49 @@ object DesktopContainer {
     }
     // ── /Wave 5 ───────────────────────────────────────────────────────────────
 
+    /**
+     * The vault is usable (unlocked, or just created by the first launch): starts the services that need
+     * it. Called by the three paths that get there, see [startVaultDependentServices].
+     */
+    fun onVaultReady() = startVaultDependentServices(lanSyncServerLifecycle, tunnelService)
+
+    /**
+     * State of the "Wipe the vault" action, read by the whole app: the progress modal, the global shortcut
+     * dispatcher of `Main.kt` (ignored while RUNNING or FAILED) and the Settings view model. A plain field, no lazy
+     * initialisation behind it: reading it costs nothing on the cold-start path.
+     */
+    val vaultWipeState = MutableStateFlow(VaultWipeState.IDLE)
+
+    /** Runs the vault wipe, see [VaultWipeRunner]. */
+    internal val vaultWipeRunner: VaultWipeRunner by lazy {
+        VaultWipeRunner(
+            scope = appScope.coroutineScope,
+            state = vaultWipeState,
+            stop = { stopVaultDependentWork(lanSyncServerLifecycle, tunnelService, transferManager, sessionManager) },
+            erase = { steps ->
+                eraseVaultData(vaultManager, database, knownHostsStore, settingsStore, credentialMetaFile, steps)
+            },
+            vaultGone = { !vaultPinManager.hasVaultFiles() },
+            afterWipe = { sessionManager.setHostKeyLockdown(false) },
+            // The user gave up after a failure: the app must not stay on the main screens with a deleted or
+            // locked vault. Unlock screen when vault.meta is still there, creation screen otherwise (the creation deletes an orphan vault.dat).
+            abandon = { _ ->
+                navigator.navigate(
+                    if (vaultPinManager.isSetup()) fr.techtical.nextsh.desktop.navigation.Screen.VaultUnlock
+                    else fr.techtical.nextsh.desktop.navigation.Screen.FirstLaunch,
+                )
+            },
+        )
+    }
+
     fun shutdown() {
         tunnelTray.stop()
         clipboardManager.stop()
         tunnelService.onAppExit()
         sessionManager.closeAllSessions()
+        // The sessions are closed: the downloads they carried are over, but the thread that
+        // would clean up after each of them dies with the process. Do it here, synchronously.
+        runCatching { transferManager.deleteTemporaries() }
         lanSyncServer.stop()
         vaultPinManager.lock()
         (appScope as? DesktopAppScope)?.onDestroy() ?: appScope.onDestroy()
@@ -349,6 +431,9 @@ object DesktopContainer {
      * [VaultKeyProvider.wipe] (which targets the active backend, file fallback
      * included) AND delete the data dir AND the key-fallback dir.
      *
+     * The temporary files of the downloads still running (next to their chosen
+     * destinations, outside both folders) are deleted too.
+     *
      * Every step is best-effort (`runCatching`): one failing step must never
      * abort the rest, so a partial environment still ends up as clean as
      * possible. Order matters: services are stopped and the SQLite driver is
@@ -361,6 +446,10 @@ object DesktopContainer {
         runCatching { clipboardManager.stop() }
         runCatching { tunnelService.onAppExit() }
         runCatching { sessionManager.closeAllSessions() }
+        // The sessions are closed, but the process ends right after the purge: the downloads they
+        // carried cannot clean up after themselves. Their temporary files sit next to the chosen
+        // destinations, outside the folders deleted below.
+        runCatching { transferManager.deleteTemporaries() }
         runCatching { lanSyncServer.stop() }
         runCatching { vaultPinManager.lock() }
         runCatching { database.driver.close() }

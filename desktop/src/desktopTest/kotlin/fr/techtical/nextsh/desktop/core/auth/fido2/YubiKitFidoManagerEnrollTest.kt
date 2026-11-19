@@ -3,9 +3,9 @@
 
 package fr.techtical.nextsh.desktop.core.auth.fido2
 
+import fr.techtical.nextsh.desktop.vault.Fido2EnrollError
 import fr.techtical.nextsh.desktop.vault.Fido2EnrollState
 import fr.techtical.nextsh.desktop.vault.Fido2EnrollViewModel
-import fr.techtical.nextsh.desktop.vault.WINDOWS_HID_LOCKED_MESSAGE
 import fr.techtical.nextsh.shared.core.ssh.fido2.SkSshPublicKey
 import fr.techtical.nextsh.shared.core.sync.SyncEntry
 import fr.techtical.nextsh.shared.domain.model.SshKey
@@ -289,7 +289,7 @@ class YubiKitFidoManagerEnrollTest {
 
         val state = vm.state.value
         assertIs<Fido2EnrollState.Error>(state, "Expected Error but got $state")
-        assertTrue(state.message.isNotBlank(), "Error message should not be blank")
+        assertEquals(Fido2EnrollError.NoDevice, state.reason)
     }
 
     @Test
@@ -335,11 +335,8 @@ class YubiKitFidoManagerEnrollTest {
 
         val state = vm.state.value
         assertIs<Fido2EnrollState.Error>(state, "Expected Error but got $state")
-        assertEquals(WINDOWS_HID_LOCKED_MESSAGE, state.message,
-            "WindowsHidLocked must surface the specific multi-line workaround message")
-        assertTrue(state.message.contains("CCID"), "Message should mention CCID workaround")
-        assertTrue(state.message.contains("NFC"), "Message should mention NFC workaround")
-        assertTrue(state.message.contains("administrateur"), "Message should mention admin workaround")
+        assertEquals(Fido2EnrollError.WindowsHidLocked, state.reason,
+            "WindowsHidLocked must surface its own reason (the workaround text lives in the string resources)")
     }
 
     @Test
@@ -354,6 +351,6 @@ class YubiKitFidoManagerEnrollTest {
 
         val state = vm.state.value
         assertIs<Fido2EnrollState.Error>(state, "Expected Error for WindowsHidLocked makeCredential")
-        assertEquals(WINDOWS_HID_LOCKED_MESSAGE, state.message)
+        assertEquals(Fido2EnrollError.WindowsHidLocked, state.reason)
     }
 }

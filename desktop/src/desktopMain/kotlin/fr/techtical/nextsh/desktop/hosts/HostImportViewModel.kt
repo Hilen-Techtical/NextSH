@@ -16,6 +16,7 @@ import fr.techtical.nextsh.shared.domain.repository.SshKeyRepository
 import fr.techtical.nextsh.shared.domain.vault.VaultManager
 import fr.techtical.nextsh.shared.util.AppScope
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.atomic.AtomicReference
 
 private const val TAG = "HostImportVM"
 
@@ -105,7 +107,7 @@ enum class ImportErrorKind {
  * SECURITY: the parsed [ParsedHost] list (with secrets) lives only in
  * [parsedHosts] here; the UI sees only [ImportPreviewRow] (non-secret fields).
  * Secrets are wiped by [HostImportService] after storage, and any un-imported
- * entries are wiped on [reset].
+ * entries are wiped on [reset], or on [discard] when the screen is left.
  */
 class HostImportViewModel(
     private val hostRepository: HostRepository = DesktopContainer.hostRepository,
@@ -117,8 +119,16 @@ class HostImportViewModel(
     private val _state = MutableStateFlow<HostImportState>(HostImportState.Idle)
     val state: StateFlow<HostImportState> = _state.asStateFlow()
 
-    /** Parsed entries indexed by [ImportPreviewRow.index]; carries secrets. */
-    private var parsedHosts: List<ParsedHost> = emptyList()
+    /**
+     * Parsed entries indexed by [ImportPreviewRow.index]; carries secrets. Only ever emptied by swapping
+     * ([wipeRetained]): the thread that takes the list out is the only one that wipes it, so two callers
+     * ([reset], [discard], the end of a parse) never walk the same list or miss one.
+     */
+    private val parsedHosts = AtomicReference<List<ParsedHost>>(emptyList())
+
+    /** Set by [discard]: the screen is gone, whatever is parsed from now on is dropped. */
+    @Volatile
+    private var discarded = false
 
     /**
      * Reads + parses [file], auto-detecting the source format from its content
@@ -151,15 +161,24 @@ class HostImportViewModel(
                 val content = withContext(Dispatchers.IO) { file.readText(Charsets.UTF_8) }
                 val format = withContext(Dispatchers.Default) { ImportFormatDetector.detect(content) }
                 val hosts = withContext(Dispatchers.Default) { parseContent(content, format) }
+                // Retained from here on: every exit below (empty file, failure, screen left) wipes them
+                // through the field, there is no local copy left holding secrets.
+                parsedHosts.set(hosts)
                 if (hosts.isEmpty()) {
                     _state.value = HostImportState.Error(ImportErrorKind.NoHosts)
                     return@launch
                 }
-                parsedHosts = hosts
                 _state.value = HostImportState.Preview(rows = hosts.toPreviewRows(), format = format)
             } catch (e: Exception) {
-                Logger.w(TAG, "Host import parse failed (${e.message})")
+                // Class name only: a parser message can quote the content of the file.
+                Logger.w(TAG, "Host import parse failed (${errorClass(e)})")
+                wipeRetained()
                 _state.value = HostImportState.Error(ImportErrorKind.Generic)
+            } finally {
+                // The screen was left while the file was being parsed (or the parse failed after the
+                // assignment): nobody will confirm this preview, its secrets must not stay in memory.
+                // Whatever the exit, and whenever [discard] landed, either it or this line wipes them.
+                if (discarded) reset()
             }
         }
     }
@@ -185,7 +204,7 @@ class HostImportViewModel(
         val current = _state.value
         if (current !is HostImportState.Preview) return
         val selectedIndices = current.rows.filter { it.selected }.map { it.index }.toSet()
-        val toImport = parsedHosts.filterIndexed { i, _ -> i in selectedIndices }
+        val toImport = parsedHosts.get().filterIndexed { i, _ -> i in selectedIndices }
         if (toImport.isEmpty()) {
             // Nothing selected: wipe and treat as a no-op cancel.
             reset()
@@ -204,17 +223,17 @@ class HostImportViewModel(
                 }
                 // Wipe any entries the user chose NOT to import (the imported ones are
                 // already wiped by the service).
-                parsedHosts.filterIndexed { i, _ -> i !in selectedIndices }.forEach { it.wipeSecrets() }
-                parsedHosts = emptyList()
+                parsedHosts.getAndSet(emptyList())
+                    .filterIndexed { i, _ -> i !in selectedIndices }
+                    .forEach { it.wipeSecrets() }
                 _state.value = HostImportState.Done(imported = result.imported, skipped = result.skipped)
             } catch (e: Exception) {
                 // Parity with Android's import(): on any unexpected failure,
                 // wipe every retained secret (not just the unselected ones:
                 // we don't know how far importService got) rather than leaving
                 // plaintext credentials sitting in [parsedHosts] indefinitely.
-                Logger.w(TAG, "Host import failed (${e::class.simpleName})")
-                parsedHosts.forEach { it.wipeSecrets() }
-                parsedHosts = emptyList()
+                Logger.w(TAG, "Host import failed (${errorClass(e)})")
+                wipeRetained()
                 _state.value = HostImportState.Error(ImportErrorKind.Generic)
             }
         }
@@ -222,9 +241,27 @@ class HostImportViewModel(
 
     /** Clears the flow back to idle, wiping any retained secret material. */
     fun reset() {
-        parsedHosts.forEach { it.wipeSecrets() }
-        parsedHosts = emptyList()
+        wipeRetained()
         _state.value = HostImportState.Idle
+    }
+
+    /** Takes the retained entries out of the field, then wipes them: see [parsedHosts]. */
+    private fun wipeRetained() {
+        parsedHosts.getAndSet(emptyList()).forEach { it.wipeSecrets() }
+    }
+
+    /**
+     * Called when the screen is left: an import abandoned half way (a preview nobody will confirm, a file
+     * still being parsed) must not keep plaintext passwords and passphrases in memory until the garbage
+     * collector gets round to it.
+     *
+     * Not [reset] alone: while the import is RUNNING the service is reading these very entries and wipes
+     * them itself when it is done, so wiping them under its feet would store blank passwords. That case
+     * is left to finish. A ViewModel that was discarded is not reused (the next visit builds a new one).
+     */
+    fun discard() {
+        discarded = true
+        if (_state.value !is HostImportState.Importing) reset()
     }
 
     private fun parseContent(content: String, format: ImportFormat): List<ParsedHost> =

@@ -3,11 +3,14 @@
 
 package fr.techtical.nextsh.desktop.snippets
 
+import fr.techtical.nextsh.shared.core.backup.BackupFieldProblem
+import fr.techtical.nextsh.shared.core.backup.BackupLimits
 import fr.techtical.nextsh.shared.core.sync.SyncEntry
 import fr.techtical.nextsh.shared.domain.model.Host
 import fr.techtical.nextsh.shared.domain.model.Snippet
 import fr.techtical.nextsh.shared.domain.repository.HostRepository
 import fr.techtical.nextsh.shared.domain.repository.SnippetRepository
+import fr.techtical.nextsh.shared.util.AppScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
@@ -27,6 +30,11 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SnippetListViewModelTest {
+
+    private class TestAppScope(scope: CoroutineScope) : AppScope {
+        override val coroutineScope: CoroutineScope = scope
+        override fun onDestroy() = Unit
+    }
 
     private lateinit var testScope: CoroutineScope
 
@@ -112,7 +120,7 @@ class SnippetListViewModelTest {
         return SnippetListViewModel(
             snippetRepo = repo,
             hostRepo = FakeHostRepository(),
-            scope = testScope,
+            appScope = TestAppScope(testScope),
         )
     }
 
@@ -223,6 +231,81 @@ class SnippetListViewModelTest {
         assertEquals("new-cat", updated.category)
         assertFalse(vm.uiState.value.isEditing)
         assertEquals("snippets_message_saved", vm.uiState.value.successMessage)
+    }
+
+    // ── Field rules shared with the backup restore (BackupFieldRules) ───────
+
+    private val zeroWidthSpace = Char(0x200B).toString()
+    private val rightToLeftOverride = Char(0x202E).toString()
+    private val escape = Char(0x1B).toString()
+
+    @Test
+    fun `snippetFieldProblems accepts an ordinary snippet and a multi line command`() {
+        val problems = snippetFieldProblems("Deploy", "cd /srv\n\tmake deploy", "ops")
+
+        assertFalse(problems.hasAny)
+    }
+
+    @Test
+    fun `snippetFieldProblems requires a label and a command but not a category`() {
+        val problems = snippetFieldProblems("  ", "", "   ")
+
+        assertEquals(BackupFieldProblem.EMPTY, problems.label)
+        assertEquals(BackupFieldProblem.EMPTY, problems.command)
+        assertNull(problems.category)
+    }
+
+    @Test
+    fun `snippetFieldProblems refuses invisible format characters in every field`() {
+        val problems = snippetFieldProblems("a${rightToLeftOverride}b", "ls${zeroWidthSpace}-la", "c${zeroWidthSpace}d")
+
+        assertEquals(BackupFieldProblem.INVISIBLE_FORMAT, problems.label)
+        assertEquals(BackupFieldProblem.INVISIBLE_FORMAT, problems.command)
+        assertEquals(BackupFieldProblem.INVISIBLE_FORMAT, problems.category)
+    }
+
+    @Test
+    fun `snippetFieldProblems refuses control characters`() {
+        val problems = snippetFieldProblems("a${escape}b", "echo${escape}[31m", "x${Char(0)}y")
+
+        assertEquals(BackupFieldProblem.CONTROL_CHARACTER, problems.label)
+        assertEquals(BackupFieldProblem.CONTROL_CHARACTER, problems.command)
+        assertEquals(BackupFieldProblem.CONTROL_CHARACTER, problems.category)
+    }
+
+    @Test
+    fun `snippetFieldProblems refuses a label over the limit and a command over 64 KiB`() {
+        val problems = snippetFieldProblems(
+            "a".repeat(BackupLimits.MAX_TEXT_LENGTH + 1),
+            "a".repeat(BackupLimits.MAX_COMMAND_BYTES + 1),
+            "a".repeat(BackupLimits.MAX_TEXT_LENGTH + 1),
+        )
+
+        assertEquals(BackupFieldProblem.TOO_LONG, problems.label)
+        assertEquals(BackupFieldProblem.TOO_LONG, problems.command)
+        assertEquals(BackupFieldProblem.TOO_LONG, problems.category)
+    }
+
+    @Test
+    fun `save refuses a command with an invisible character and skips the repo`() = runTest {
+        val repo = FakeSnippetRepository()
+        val vm = TestEnv(repo)
+
+        vm.save(label = "Valid", command = "ls${zeroWidthSpace}", category = null, hostId = null, existingId = null)
+
+        assertEquals("snippets_error_invalid_field", vm.uiState.value.error)
+        assertEquals(0, repo.snapshot().size)
+    }
+
+    @Test
+    fun `save refuses a category that a restore would refuse`() = runTest {
+        val repo = FakeSnippetRepository()
+        val vm = TestEnv(repo)
+
+        vm.save(label = "Valid", command = "ls", category = "c${rightToLeftOverride}d", hostId = null, existingId = null)
+
+        assertEquals("snippets_error_invalid_field", vm.uiState.value.error)
+        assertEquals(0, repo.snapshot().size)
     }
 
     @Test

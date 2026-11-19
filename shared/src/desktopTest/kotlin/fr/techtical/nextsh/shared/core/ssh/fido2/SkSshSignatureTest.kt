@@ -3,7 +3,6 @@
 
 package fr.techtical.nextsh.shared.core.ssh.fido2
 
-import net.schmizz.sshj.common.Buffer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -37,34 +36,6 @@ class SkSshSignatureTest {
         assertEquals(SkKeyType.SK_ECDSA_256, sig.keyType)
         assertEquals(SkSshSignature.FLAG_USER_PRESENT, sig.flags)
         assertEquals(42u, sig.counter)
-        sig.close()
-    }
-
-    @Suppress("DEPRECATION")
-    @Test
-    fun `encodeInner produces correct wire format`() {
-        val rawSig = byteArrayOf(1, 2, 3, 4)
-        val sig = SkSshSignature.create(
-            keyType = SkKeyType.SK_ED25519,
-            rawSignature = rawSig,
-            flags = 0x05, // USER_PRESENT + USER_VERIFIED
-            counter = 256u,
-        )
-
-        val inner = sig.encodeInner()
-        val buf = Buffer.PlainBuffer(inner)
-
-        // string raw_signature
-        val decodedSig = buf.readStringAsBytes()
-        assertTrue(byteArrayOf(1, 2, 3, 4).contentEquals(decodedSig))
-
-        // byte flags
-        assertEquals(0x05.toByte(), buf.readByte())
-
-        // uint32 counter
-        assertEquals(256L, buf.readUInt32())
-
-        inner.fill(0)
         sig.close()
     }
 

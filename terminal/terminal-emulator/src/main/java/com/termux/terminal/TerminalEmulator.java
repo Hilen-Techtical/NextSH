@@ -975,7 +975,8 @@ public final class TerminalEmulator {
                                 try {
                                     c = (char) Long.decode("0x" + part.charAt(i) + "" + part.charAt(i + 1)).longValue();
                                 } catch (NumberFormatException e) {
-                                    Logger.logStackTraceWithMessage(mClient, LOG_TAG, "Invalid device termcap/terminfo encoded name \"" + part + "\"", e);
+                                    // Fixed text only: the DCS payload is what the remote host sent.
+                                    Logger.logStackTraceWithMessage(mClient, LOG_TAG, "Invalid device termcap/terminfo encoded name", e);
                                     continue;
                                 }
                                 transBuffer.append(c);
@@ -1003,7 +1004,8 @@ public final class TerminalEmulator {
                                     case "&8": // Undo key - ignore.
                                         break;
                                     default:
-                                        Logger.logWarn(mClient, LOG_TAG, "Unhandled termcap/terminfo name: '" + trans + "'");
+                                        // Fixed text only: the decoded name is what the remote host asked for.
+                                        Logger.logWarn(mClient, LOG_TAG, "Unhandled termcap/terminfo name");
                                 }
                                 // Respond with invalid request:
                                 mSession.write("\033P0+r" + part + "\033\\");
@@ -1015,12 +1017,12 @@ public final class TerminalEmulator {
                                 mSession.write("\033P1+r" + part + "=" + hexEncoded + "\033\\");
                             }
                         } else {
-                            Logger.logError(mClient, LOG_TAG, "Invalid device termcap/terminfo name of odd length: " + part);
+                            Logger.logError(mClient, LOG_TAG, "Invalid device termcap/terminfo name of odd length");
                         }
                     }
                 } else {
                     if (LOG_ESCAPE_SEQUENCES)
-                        Logger.logError(mClient, LOG_TAG, "Unrecognized device control string: " + dcs);
+                        Logger.logError(mClient, LOG_TAG, "Unrecognized device control string");
                 }
                 finishSequence();
             }
@@ -2110,7 +2112,8 @@ public final class TerminalEmulator {
                     String clipboardText = new String(Base64.decode(textParameter.substring(startIndex), 0), StandardCharsets.UTF_8);
                     mSession.onCopyTextToClipboard(clipboardText);
                 } catch (Exception e) {
-                    Logger.logError(mClient, LOG_TAG, "OSC Manipulate selection, invalid string '" + textParameter + "");
+                    // Fixed text only: the payload is what the remote host sent and can be a copied secret.
+                    Logger.logError(mClient, LOG_TAG, "OSC Manipulate selection, invalid base64 string");
                 }
                 break;
             case 104:
@@ -2292,12 +2295,13 @@ public final class TerminalEmulator {
     }
 
     private void unimplementedSequence(int b) {
-        logError("Unimplemented sequence char '" + (char) b + "' (U+" + String.format("%04x", b) + ")");
+        // The code point only, never the character itself: it comes from the remote host.
+        logError("Unimplemented sequence char (U+" + String.format("%04x", b) + ")");
         finishSequence();
     }
 
     private void unknownSequence(int b) {
-        logError("Unknown sequence char '" + (char) b + "' (numeric value=" + b + ")");
+        logError("Unknown sequence char (numeric value=" + b + ")");
         finishSequence();
     }
 

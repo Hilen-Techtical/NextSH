@@ -6,6 +6,7 @@ package fr.techtical.nextsh.core.vault
 import android.content.Context
 import android.content.SharedPreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
+import fr.techtical.nextsh.shared.util.LogId
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -60,6 +61,20 @@ class VaultManager internal constructor(
 
     companion object {
         internal const val LEGACY_VAULT_FILE = "nextsh_vault"
+
+        /**
+         * La clé dont [open] et [isAuthRequired] demandent l'existence. Elle n'est jamais écrite : seule
+         * compte l'ouverture du jeu de clés que le test déclenche. Ce n'est pas une clé réservée
+         * d'EncryptedSharedPreferences (qui lèverait une SecurityException) et aucun préfixe de secret
+         * (`pwd_`, `key_`, `keypass_`, `cert_`) ne la désigne.
+         */
+        internal const val OPEN_PROBE_KEY = "nextsh_open_probe"
+
+        /**
+         * Préfixe des deux entrées réservées d'EncryptedSharedPreferences (les jeux de clés Tink des noms
+         * et des valeurs, chiffrés par la clé maître). Elles ne sont jamais effacées : voir [wipeAllEntries].
+         */
+        internal const val RESERVED_KEY_PREFIX = "__androidx_security_crypto_encrypted_prefs_"
     }
 
     /**
@@ -67,11 +82,21 @@ class VaultManager internal constructor(
      * première création d'EncryptedSharedPreferences. Un `lazy` ne garde pas un initialiseur qui a
      * échoué : après une authentification réussie, l'accès suivant relance toute la séquence.
      */
-    private val encryptedPrefs: SharedPreferences by lazy {
+    private val prefsLazy = lazy {
         prefsOpener.ensureMasterKey()
         probeMasterKey()
         openPrefs()
     }
+
+    private val encryptedPrefs: SharedPreferences by prefsLazy
+
+    /**
+     * True once the vault has been opened in this process. Touches neither the Keystore, a file nor
+     * any secret: it only reads the state of the lazy opener, which stays uninitialized when the
+     * opening failed. Background work uses it to avoid opening the vault, which is only allowed in
+     * the foreground (an expired authentication window would otherwise surface as an exception).
+     */
+    fun isOpen(): Boolean = prefsLazy.isInitialized()
 
     /**
      * Crée EncryptedSharedPreferences. La fenêtre peut expirer entre la sonde et la création : si
@@ -114,12 +139,31 @@ class VaultManager internal constructor(
     }
 
     /**
+     * Force l'ouverture du vault maintenant, sans rien lire ni écrire d'autre. Sert au
+     * déverrouillage de l'app : le vault s'ouvre dans la fenêtre de [AUTH_VALIDITY_SECONDS] s qui suit
+     * l'authentification, plutôt qu'au premier usage, parfois bien plus tard et hors fenêtre.
+     * Sans effet si le vault est déjà ouvert dans le processus.
+     *
+     * Le test d'une clé ([OPEN_PROBE_KEY]) suffit à forcer l'ouverture (la création des
+     * EncryptedSharedPreferences, donc le jeu de clés) sans déchiffrer une seule valeur : aucun
+     * secret n'est lu en clair, contrairement à un `all`, qui les déchiffrerait tous en String.
+     *
+     * @throws VaultAuthExpiredException si la fenêtre d'authentification est close : rien n'est ouvert,
+     * l'appel suivant recommence toute la séquence. Une clé invalidée lève
+     * `KeyPermanentlyInvalidatedException`, telle quelle.
+     */
+    fun open() {
+        withVaultAuth { encryptedPrefs.contains(OPEN_PROBE_KEY) }
+    }
+
+    /**
      * Retourne true si une (ré-)authentification est nécessaire avant d'accéder au vault.
      * Une fois le vault ouvert dans le processus, retourne false : il ne se reverrouille pas.
+     * Même sonde légère que [open] : aucun secret n'est déchiffré pour répondre.
      */
     fun isAuthRequired(): Boolean {
         return try {
-            encryptedPrefs.all  // tente un accès léger
+            encryptedPrefs.contains(OPEN_PROBE_KEY)  // tente un accès léger, sans rien déchiffrer
             false
         } catch (e: android.security.keystore.UserNotAuthenticatedException) {
             true
@@ -137,7 +181,7 @@ class VaultManager internal constructor(
             .putString("pwd_$credentialId", String(password))
             .apply()
         password.fill('\u0000') // wipe immédiat
-        Timber.d("Password stored for credential $credentialId")
+        Timber.d("Password stored for credential ${LogId.of(credentialId)}")
     }
 
     /** Récupère un mot de passe. L'appelant DOIT wipe le CharArray après usage. */
@@ -146,9 +190,18 @@ class VaultManager internal constructor(
         value?.toCharArray()
     }
 
+    /**
+     * Dit si un mot de passe est stocké pour [credentialId], sans le lire : `contains` ne chiffre
+     * que le NOM de l'entrée et ne déchiffre aucune valeur, contrairement à `all` ou à `getString`
+     * qui sortent le secret en String. C'est ce qui sert à compter les mots de passe.
+     */
+    fun hasPassword(credentialId: String): Boolean = withVaultAuth {
+        encryptedPrefs.contains("pwd_$credentialId")
+    }
+
     fun deletePassword(credentialId: String) = withVaultAuth {
         encryptedPrefs.edit().remove("pwd_$credentialId").apply()
-        Timber.d("Password deleted for credential $credentialId")
+        Timber.d("Password deleted for credential ${LogId.of(credentialId)}")
     }
 
     // ── Clés privées SSH ─────────────────────────────────────────────────────────
@@ -158,7 +211,15 @@ class VaultManager internal constructor(
         encryptedPrefs.edit()
             .putString("key_$keyId", privateKeyPem)
             .apply()
-        Timber.d("Private key stored for key $keyId")
+        Timber.d("Private key stored for key ${LogId.of(keyId)}")
+    }
+
+    /**
+     * Dit si une clé privée est stockée pour [keyId], sans la lire : `contains` ne déchiffre aucune valeur
+     * (même principe que [hasPassword]).
+     */
+    fun hasPrivateKey(keyId: String): Boolean = withVaultAuth {
+        encryptedPrefs.contains("key_$keyId")
     }
 
     /** Récupère une clé privée PEM */
@@ -168,7 +229,7 @@ class VaultManager internal constructor(
 
     fun deletePrivateKey(keyId: String) = withVaultAuth {
         encryptedPrefs.edit().remove("key_$keyId").apply()
-        Timber.d("Private key deleted for key $keyId")
+        Timber.d("Private key deleted for key ${LogId.of(keyId)}")
     }
 
     // ── Passphrases de clés SSH chiffrées ────────────────────────────────────────
@@ -179,7 +240,7 @@ class VaultManager internal constructor(
             .putString("keypass_$keyId", String(passphrase))
             .apply()
         passphrase.fill('\u0000')
-        Timber.d("Key passphrase stored for key $keyId")
+        Timber.d("Key passphrase stored for key ${LogId.of(keyId)}")
     }
 
     /** Récupère la passphrase. L'appelant DOIT wipe le CharArray après usage. */
@@ -190,7 +251,7 @@ class VaultManager internal constructor(
 
     fun deleteKeyPassphrase(keyId: String) = withVaultAuth {
         encryptedPrefs.edit().remove("keypass_$keyId").apply()
-        Timber.d("Key passphrase deleted for key $keyId")
+        Timber.d("Key passphrase deleted for key ${LogId.of(keyId)}")
     }
 
     fun listStoredKeyPassphraseIds(): List<String> = withVaultAuth {
@@ -222,11 +283,55 @@ class VaultManager internal constructor(
         encryptedPrefs.all.isNotEmpty()
     }
 
-    /** Efface tout le vault : DESTRUCTIF, confirmation requise en amont */
-    fun wipeVault() = withVaultAuth {
-        encryptedPrefs.edit().clear().apply()
-        Timber.w("Vault wiped entirely")
+    /**
+     * Efface tout le vault : DESTRUCTIF, confirmation requise en amont. Sans ouvrir le vault (voir
+     * [wipeAllEntries]) : aucune authentification n'est exigée, et rien n'est déchiffré.
+     *
+     * @throws java.io.IOException si une entrée reste après l'effacement
+     */
+    fun wipeVault() {
+        if (!wipeAllEntries()) throw java.io.IOException("Vault could not be erased")
     }
+
+    /**
+     * Efface toutes les entrées du vault en travaillant sur les PRÉFÉRENCES BRUTES du fichier, la même
+     * instance que celle qu'enveloppe EncryptedSharedPreferences : rien n'est déchiffré. Un `clear()` de
+     * l'enveloppe parcourt `getAll()`, qui déchiffre chaque nom ET chaque valeur en `String` : tous les
+     * mots de passe et toutes les clés PEM sortiraient en clair, exactement ce que l'invariant du
+     * vault interdit. Ne jamais lire `encryptedPrefs.all` ni appeler `clear()` dessus.
+     *
+     * Ni la clé maître du Keystore, ni la sonde, ni l'ouverture du vault ne sont sollicitées : l'effacement
+     * reste possible fenêtre d'authentification close, ou clé maître invalidée. Les deux entrées réservées
+     * d'EncryptedSharedPreferences (les jeux de clés Tink, chiffrés par la clé maître) restent : elles ne
+     * contiennent aucun secret de l'utilisateur et l'instance ouverte en a besoin. L'ancien vault v1 est
+     * supprimé aussi s'il existe.
+     *
+     * L'instance ouverte reste cohérente (même `SharedPreferencesImpl`) : elle voit un vault vide.
+     *
+     * @return vrai si l'écriture est confirmée (`commit`), qu'aucune entrée non réservée ne reste et
+     * que l'ancien vault est parti
+     */
+    fun wipeAllEntries(): Boolean {
+        val raw = prefsOpener.rawPrefs()
+        val editor = raw.edit()
+        for (key in raw.all.keys) {
+            if (!key.startsWith(RESERVED_KEY_PREFIX)) editor.remove(key)
+        }
+        val committed = editor.commit()
+        val legacyGone = prefsOpener.deleteLegacyVault()
+        val clean = holdsNoEntry(raw)
+        Timber.w("Vault wiped entirely")
+        return committed && legacyGone && clean
+    }
+
+    /**
+     * Dit si le vault est vraiment vide : plus aucune entrée non réservée dans son fichier, plus d'ancien
+     * vault v1. Même lecture brute que [wipeAllEntries], aucun secret déchiffré.
+     */
+    fun isWiped(): Boolean = holdsNoEntry(prefsOpener.rawPrefs()) && !prefsOpener.legacyVaultPresent()
+
+    private fun holdsNoEntry(raw: SharedPreferences): Boolean =
+        raw.all.keys.none { !it.startsWith(RESERVED_KEY_PREFIX) }
 
     /** Liste les credentialIds stockés (pour sync avec la DB) */
     fun listStoredCredentialIds(): List<String> = withVaultAuth {

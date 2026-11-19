@@ -4,6 +4,7 @@
 package fr.techtical.nextsh.domain.usecase
 
 import fr.techtical.nextsh.core.ssh.SftpManager
+import fr.techtical.nextsh.core.ssh.isUploadLeftover
 import fr.techtical.nextsh.domain.model.SftpFile
 import fr.techtical.nextsh.domain.model.SortOrder
 import fr.techtical.nextsh.shared.domain.model.SshResult
@@ -13,7 +14,9 @@ import javax.inject.Inject
  * UseCase : lister le contenu d'un répertoire SFTP.
  *
  * Applique les transformations suivantes sur la liste brute :
- * 1. Filtrage des fichiers cachés (commençant par `.`) si [showHidden] est false.
+ * 1. Filtrage des fichiers cachés (commençant par `.`) si [showHidden] est false, sauf les restes
+ *    d envois interrompus (`.nom.nextsh-part-xxxxxxxx`, voir [isUploadLeftover]) : ils restent listés
+ *    pour que l explorateur les signale, cachés ou non. Un dossier ou un lien de ce nom est filtré.
  * 2. Tri : dossiers en premier, puis par [sortOrder].
  *
  * Retourne [SshResult.Success] avec la liste triée/filtrée,
@@ -33,7 +36,7 @@ class ListDirectoryUseCase @Inject constructor(
                 val filtered = if (showHidden) {
                     result.data
                 } else {
-                    result.data.filter { !it.name.startsWith('.') }
+                    result.data.filter { !it.name.startsWith('.') || isUploadLeftover(it) }
                 }
 
                 val sorted = filtered.sortedWith(

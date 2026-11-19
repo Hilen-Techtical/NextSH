@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.techtical.nextsh.core.ssh.KnownHostEntry
 import fr.techtical.nextsh.core.ssh.KnownHostsVerifier
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,7 +34,7 @@ class KnownHostsViewModel @Inject constructor(
             try {
                 _entries.value = knownHostsVerifier.getAllEntries()
             } catch (e: Exception) {
-                Timber.e(e, "Failed to load known hosts entries")
+                Timber.e("Failed to load known hosts entries (${errorClass(e)})")
             }
         }
     }
@@ -44,7 +45,7 @@ class KnownHostsViewModel @Inject constructor(
                 knownHostsVerifier.removeEntry(hostPort)
                 _entries.value = knownHostsVerifier.getAllEntries()
             } catch (e: Exception) {
-                Timber.e(e, "Failed to remove known host entry")
+                Timber.e("Failed to remove known host entry (${errorClass(e)})")
             }
         }
     }
@@ -55,7 +56,7 @@ class KnownHostsViewModel @Inject constructor(
                 knownHostsVerifier.clearAll()
                 _entries.value = emptyList()
             } catch (e: Exception) {
-                Timber.e(e, "Failed to clear known hosts")
+                Timber.e("Failed to clear known hosts (${errorClass(e)})")
             }
         }
     }

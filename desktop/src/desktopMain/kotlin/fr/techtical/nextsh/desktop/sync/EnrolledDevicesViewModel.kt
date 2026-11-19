@@ -7,7 +7,9 @@ import fr.techtical.nextsh.shared.core.sync.EnrolledDevice
 import fr.techtical.nextsh.shared.core.sync.EnrolledDeviceRepository
 import fr.techtical.nextsh.shared.core.sync.EnrolledDeviceSecretStore
 import fr.techtical.nextsh.shared.util.AppScope
+import fr.techtical.nextsh.shared.util.LogId
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -26,9 +28,12 @@ class EnrolledDevicesViewModel(
     val devices: StateFlow<List<EnrolledDevice>> = enrolledDeviceRepository.observeAll()
         .stateIn(appScope.coroutineScope, SharingStarted.Eagerly, emptyList())
 
+    /** Cause of an [Event.Error], translated by the screen. */
+    enum class ErrorReason { RevokeFailed }
+
     sealed class Event {
         data class Revoked(val deviceName: String) : Event()
-        data class Error(val message: String) : Event()
+        data class Error(val reason: ErrorReason) : Event()
     }
 
     private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 1)
@@ -42,8 +47,8 @@ class EnrolledDevicesViewModel(
             }.fold(
                 onSuccess = { _events.tryEmit(Event.Revoked(device.deviceName)) },
                 onFailure = { e ->
-                    Logger.w(TAG, "Failed to revoke device ${device.deviceId}: ${e.message}")
-                    _events.tryEmit(Event.Error("Echec de la révocation"))
+                    Logger.w(TAG, "Failed to revoke device=${LogId.of(device.deviceId)} (${errorClass(e)})")
+                    _events.tryEmit(Event.Error(ErrorReason.RevokeFailed))
                 },
             )
         }

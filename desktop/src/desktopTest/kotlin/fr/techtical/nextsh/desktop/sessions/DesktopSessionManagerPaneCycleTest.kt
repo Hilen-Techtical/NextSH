@@ -145,11 +145,13 @@ class DesktopSessionManagerPaneCycleTest {
             sshSessionId = sshSessionId,
             terminal     = mockk<DesktopSshTerminalSession>(relaxed = true),
         ),
+        host   = makeHost("A"),
     )
 
     private fun sftpPane() = TabContent.Sftp(
         linkedSshSessionId = "linked",
         state              = SftpTabState.Opening,
+        host               = makeHost("A"),
     )
 
     // ── paneLeafPaths (pure) ──────────────────────────────────────────────────
@@ -226,8 +228,8 @@ class DesktopSessionManagerPaneCycleTest {
         // cycle must be able to land on it: unlike broadcast, which needs a
         // live shell and therefore filters on Connected.
         val split = TabContent.Split(
-            first       = TabContent.Terminal(theme, TerminalTabStatus.Connecting),
-            second      = TabContent.Terminal(theme, TerminalTabStatus.Error("boom")),
+            first       = TabContent.Terminal(theme, TerminalTabStatus.Connecting, makeHost("A")),
+            second      = TabContent.Terminal(theme, TerminalTabStatus.Error("boom"), makeHost("B")),
             orientation = SplitOrientation.HORIZONTAL,
             focusedSlot = PaneSlot.LEFT_OR_TOP,
         )

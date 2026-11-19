@@ -22,13 +22,14 @@ import timber.log.Timber
 /**
  * Demande `POST_NOTIFICATIONS` la première fois que [trigger] passe à vrai.
  *
- * Pourquoi c'est nécessaire : les deux services au premier plan de NextSH
- * s'exécutent sans cette permission, mais leur notification n'apparaît alors
- * pas dans le volet, seulement dans le gestionnaire de tâches du système.
- * L'utilisateur perd la progression d'un transfert, l'état de ses tunnels et
- * surtout l'action "Tout arrêter", qui n'existe que dans la notification.
+ * Pourquoi c'est nécessaire : les services au premier plan de NextSH
+ * (tunnels, transferts, sessions de terminal) s'exécutent sans cette
+ * permission, mais leur notification n'apparaît alors pas dans le volet,
+ * seulement dans le gestionnaire de tâches du système. L'utilisateur perd la
+ * progression d'un transfert, l'état de ses tunnels et surtout les actions
+ * "Tout arrêter" et "Tout fermer", qui n'existent que dans la notification.
  *
- * Le refus n'est pas bloquant : tunnels et transferts continuent de
+ * Le refus n'est pas bloquant : tunnels, transferts et sessions continuent de
  * fonctionner, seule leur visibilité est perdue.
  *
  * Sans effet en dessous d'Android 13, où la permission n'existe pas et les
@@ -36,8 +37,8 @@ import timber.log.Timber
  *
  * @param trigger passe à vrai quand l'utilisateur déclenche une action qui
  *                produira une notification (démarrer un tunnel, lancer un
- *                transfert). Demander plus tôt, hors contexte, augmente le
- *                taux de refus définitif.
+ *                transfert, ouvrir un onglet de terminal). Demander plus tôt,
+ *                hors contexte, augmente le taux de refus définitif.
  */
 @Composable
 fun NotificationPermissionEffect(trigger: Boolean) {

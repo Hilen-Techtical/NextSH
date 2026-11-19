@@ -43,7 +43,8 @@ import com.termux.terminal.TerminalSession;
 import com.termux.view.textselection.TextSelectionCursorController;
 
 /** View displaying and interacting with a {@link TerminalSession}. */
-public final class TerminalView extends View {
+// NextSH: not final, PasteSafeTerminalView (app) subclasses it so that a keyboard paste goes through paste().
+public class TerminalView extends View {
 
     /** Log terminal view key and IME events. */
     private static boolean TERMINAL_VIEW_KEY_LOGGING_ENABLED = false;

@@ -17,9 +17,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import fr.techtical.nextsh.domain.model.SessionStatus
 import fr.techtical.nextsh.domain.model.TunnelStatus
 import fr.techtical.nextsh.ui.theme.*
@@ -178,6 +182,7 @@ fun NextShTextField(
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     visualTransformation: VisualTransformation = VisualTransformation.None,
+    supportingText: String? = null,
 ) {
     OutlinedTextField(
         value = value,
@@ -185,6 +190,24 @@ fun NextShTextField(
         readOnly = readOnly,
         label = { Text(label) },
         placeholder = if (placeholder.isNotEmpty()) {{ Text(placeholder, color = TextSecondary) }} else null,
+        // Shown under the field and part of it for accessibility: an error is announced by
+        // TalkBack when it appears (polite live region), not only painted in red.
+        supportingText = if (supportingText != null) {
+            {
+                Text(
+                    text = supportingText,
+                    color = if (isError) ErrorRed else TextSecondary,
+                    fontSize = 11.sp,
+                    modifier = if (isError) {
+                        Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                    } else {
+                        Modifier
+                    },
+                )
+            }
+        } else {
+            null
+        },
         modifier = modifier.fillMaxWidth(),
         singleLine = singleLine,
         isError = isError,

@@ -5,9 +5,14 @@ package fr.techtical.nextsh.shared.core.sync
 
 import fr.techtical.nextsh.shared.domain.vault.VaultManager
 import kotlinx.coroutines.test.runTest
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class EnrolledDeviceSecretStoreTest {
 
@@ -64,6 +69,26 @@ class EnrolledDeviceSecretStoreTest {
         val result = store.retrieve("unknown-device")
 
         assertNull(result)
+    }
+
+    @OptIn(ExperimentalEncodingApi::class)
+    @Test
+    fun `retrieve of an invalid stored value throws a fixed message without the offending text`() = runTest {
+        val vault = FakeVaultManager()
+        val store = EnrolledDeviceSecretStore(vault)
+        // "!" is not in the Base64 alphabet; the rest looks like secret material.
+        val corrupted = "QUJDRA!$LEAK_MARKER"
+        vault.passwords["${LAN_SYNC_SECRET_KEY_PREFIX}device-bad"] = corrupted.toCharArray()
+
+        // Premise: the decoder's own message quotes the offending character of the input.
+        val raw = assertFailsWith<IllegalArgumentException> { Base64.decode(corrupted) }
+        assertTrue(raw.message.orEmpty().contains("'!'"), "premise broken, raw message: ${raw.message}")
+
+        val e = assertFailsWith<IllegalArgumentException> { store.retrieve("device-bad") }
+
+        assertEquals("Stored sync secret is not valid Base64", e.message)
+        assertNull(e.cause)
+        assertNoPayloadLeak(e)
     }
 
     @Test

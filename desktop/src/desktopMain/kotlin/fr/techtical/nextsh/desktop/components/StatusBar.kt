@@ -46,14 +46,11 @@ import fr.techtical.nextsh.desktop.generated.resources.statusbar_label_sessions
 import fr.techtical.nextsh.desktop.generated.resources.statusbar_label_tunnels
 import fr.techtical.nextsh.desktop.generated.resources.statusbar_label_vault
 import fr.techtical.nextsh.desktop.generated.resources.statusbar_label_version
-import fr.techtical.nextsh.desktop.generated.resources.statusbar_relative_days_ago
-import fr.techtical.nextsh.desktop.generated.resources.statusbar_relative_hours_ago
-import fr.techtical.nextsh.desktop.generated.resources.statusbar_relative_minutes_ago
 import fr.techtical.nextsh.desktop.generated.resources.statusbar_relative_never
-import fr.techtical.nextsh.desktop.generated.resources.statusbar_relative_seconds_ago
 import fr.techtical.nextsh.desktop.generated.resources.statusbar_sync_error_prefix
 import fr.techtical.nextsh.desktop.generated.resources.statusbar_sync_lan_prefix
 import fr.techtical.nextsh.desktop.generated.resources.statusbar_sync_offline
+import fr.techtical.nextsh.desktop.generated.resources.statusbar_sync_ok_on
 import fr.techtical.nextsh.desktop.generated.resources.statusbar_sync_ok_prefix
 import fr.techtical.nextsh.desktop.generated.resources.statusbar_sync_pending
 import fr.techtical.nextsh.desktop.generated.resources.statusbar_devices_many
@@ -62,7 +59,6 @@ import fr.techtical.nextsh.desktop.generated.resources.statusbar_sync_syncing
 import fr.techtical.nextsh.desktop.generated.resources.status_locked
 import fr.techtical.nextsh.desktop.generated.resources.status_unlocked
 import fr.techtical.nextsh.shared.core.sync.SyncStatus
-import fr.techtical.nextsh.shared.util.RelativeTime
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -175,13 +171,17 @@ private fun SyncStatusBlock(
     val lanPrefix = stringResource(Res.string.statusbar_sync_lan_prefix)
     val (dotColor, label) = when (status) {
         SyncStatus.SYNCING -> Gold to stringResource(Res.string.statusbar_sync_syncing)
-        SyncStatus.ERROR -> ErrorRed to "${stringResource(Res.string.statusbar_sync_error_prefix)} • $relative"
+        SyncStatus.ERROR -> ErrorRed to "${stringResource(Res.string.statusbar_sync_error_prefix)} • ${relative.text}"
         SyncStatus.OFFLINE -> WarningAmber to stringResource(Res.string.statusbar_sync_offline)
         // IDLE sans aucune sync passée = « en attente » : pastille neutre
         // (grise), pas verte : cohérent avec le statut Android.
         SyncStatus.IDLE ->
             if (lastSyncAt != null)
-                SuccessGreen to "${stringResource(Res.string.statusbar_sync_ok_prefix)} • $relative"
+                SuccessGreen to (if (relative.isDate) {
+                    stringResource(Res.string.statusbar_sync_ok_on, relative.text)
+                } else {
+                    "${stringResource(Res.string.statusbar_sync_ok_prefix)} • ${relative.text}"
+                })
             else
                 TextDisabled to stringResource(Res.string.statusbar_sync_pending)
     }
@@ -200,21 +200,14 @@ private fun SyncStatusBlock(
 }
 
 /**
- * Formate un timestamp (ms epoch) en delta relatif court. Retourne la
- * chaîne `never` quand [ts] est null. Les chaînes de format sont des
- * ressources localisées : FR "il y a 12 s", EN "12 s ago".
- * Délègue à [RelativeTime.bucket] pour la logique de tranches.
+ * Formate un timestamp (ms epoch) en delta relatif court ("il y a 12 min"),
+ * ou en date au-delà de 7 jours (voir [relativeTimeLabel]). Retourne la
+ * chaîne `never` quand [ts] est null.
  */
 @Composable
-private fun formatRelative(ts: Long?, now: Long): String {
-    if (ts == null) return stringResource(Res.string.statusbar_relative_never)
-    val bucket = RelativeTime.bucket(now - ts)
-    return when (bucket.unit) {
-        RelativeTime.Unit.SECONDS -> stringResource(Res.string.statusbar_relative_seconds_ago, bucket.value)
-        RelativeTime.Unit.MINUTES -> stringResource(Res.string.statusbar_relative_minutes_ago, bucket.value)
-        RelativeTime.Unit.HOURS   -> stringResource(Res.string.statusbar_relative_hours_ago, bucket.value)
-        RelativeTime.Unit.DAYS    -> stringResource(Res.string.statusbar_relative_days_ago, bucket.value)
-    }
+private fun formatRelative(ts: Long?, now: Long): RelativeTimeLabel {
+    if (ts == null) return RelativeTimeLabel(stringResource(Res.string.statusbar_relative_never), isDate = false)
+    return relativeTimeLabel(ts, now)
 }
 
 @Composable

@@ -54,7 +54,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,7 +63,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -73,7 +71,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -95,7 +92,6 @@ import fr.techtical.nextsh.R
 import fr.techtical.nextsh.domain.model.AuthType
 import fr.techtical.nextsh.domain.model.CustomTerminalTheme
 import fr.techtical.nextsh.domain.model.Fido2Mode
-import fr.techtical.nextsh.domain.model.SshKeyType
 import fr.techtical.nextsh.ui.components.ConfirmDeleteDialog
 import fr.techtical.nextsh.ui.components.NextShMessage
 import fr.techtical.nextsh.ui.components.NextShTextField
@@ -122,6 +118,7 @@ import fr.techtical.nextsh.ui.theme.TextDisabled
 import fr.techtical.nextsh.ui.theme.TextPrimary
 import fr.techtical.nextsh.ui.theme.TextSecondary
 import fr.techtical.nextsh.ui.theme.White
+import kotlinx.coroutines.flow.combine
 
 /**
  * HostDetailScreen : refonte Phase 3.2 (DA Techtical).
@@ -151,11 +148,6 @@ fun HostDetailScreen(
     val savePhase by viewModel.savePhase.collectAsState()
     val saveError by viewModel.saveError.collectAsState()
     val isEditing = hostId != null
-    // Même motif que VaultUnlockScreen : l'invite système exige une FragmentActivity.
-    val activity = LocalContext.current as? FragmentActivity
-    // Lus ici car stringResource est composable : l'effet de ré-authentification ci-dessous ne l'est pas.
-    val reauthTitle = stringResource(R.string.host_save_confirm_title)
-    val reauthSubtitle = stringResource(R.string.host_save_confirm_subtitle)
     val saveErrorText = when (saveError) {
         HostSaveError.VAULT_LOCKED -> stringResource(R.string.host_save_vault_locked)
         HostSaveError.VAULT_UNAVAILABLE -> stringResource(R.string.host_save_vault_unavailable)
@@ -173,10 +165,17 @@ fun HostDetailScreen(
         else viewModel.resetForm()
     }
 
+    // Error shown above the save bar (the host was deleted while this form was open).
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val hostDeletedMeanwhile = stringResource(R.string.error_host_deleted_meanwhile)
+    val hostDeleteFailed = stringResource(R.string.error_host_delete_failed)
+
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
             when (event) {
                 HostEvent.HostSaved, HostEvent.HostDeleted -> onBack()
+                HostEvent.HostNoLongerExists -> errorMessage = hostDeletedMeanwhile
+                HostEvent.DeleteFailed -> errorMessage = hostDeleteFailed
                 else -> {}
             }
         }
@@ -184,19 +183,18 @@ fun HostDetailScreen(
 
     // Le vault s'est reverrouillé pendant la saisie : le ViewModel attend l'invite système, puis
     // relance l'enregistrement. La demande est un état, lancée seulement écran RESUMED : un
-    // lancement pendant que l'activité est arrêtée serait ignoré par BiometricPrompt sans rappel.
-    // Si l'écran quitte RESUMED avant, la demande reste en attente et repart au retour. Sans
-    // activité FragmentActivity, le ViewModel affiche l'échec.
-    val latestActivity by rememberUpdatedState(activity)
-    val latestReauthTitle by rememberUpdatedState(reauthTitle)
-    val latestReauthSubtitle by rememberUpdatedState(reauthSubtitle)
+    // lancement pendant que l'activité est arrêtée serait refusé par androidx. Si l'écran quitte
+    // RESUMED avant, la demande reste en attente et repart au retour. L'invite elle-même est celle du
+    // coordinateur, que MainActivity héberge : l'écran n'a pas d'activité à lui passer. Pas non plus
+    // sous l'écran de verrou : la demande attend le déverrouillage (l'effet observe aussi le verrou, et
+    // repart quand il tombe), sans quoi l'invite s'ouvrirait par-dessus un écran que personne n'a déverrouillé.
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner, viewModel) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            viewModel.savePhase.collect { phase ->
-                if (phase == HostSavePhase.AWAITING_REAUTH) {
-                    viewModel.confirmIdentityAndSave(latestActivity, latestReauthTitle, latestReauthSubtitle)
-                }
+            combine(viewModel.savePhase, viewModel.appLocked) { phase, locked ->
+                phase == HostSavePhase.AWAITING_REAUTH && !locked
+            }.collect { reauthToAsk ->
+                if (reauthToAsk) viewModel.confirmIdentityAndSave()
             }
         }
     }
@@ -248,12 +246,20 @@ fun HostDetailScreen(
             )
         },
         bottomBar = {
-            BottomSaveBar(
-                label = if (isEditing) stringResource(R.string.action_save) else stringResource(R.string.action_add_host),
-                // Grisé pendant l'enregistrement et l'invite : pas de double appui.
-                enabled = form.isValid && savePhase == HostSavePhase.IDLE,
-                onClick = { viewModel.saveHost() },
-            )
+            Column(modifier = Modifier.background(NearBlack)) {
+                NextShMessage(
+                    message   = errorMessage,
+                    isError   = true,
+                    onDismiss = { errorMessage = null },
+                    modifier  = Modifier.padding(horizontal = Spacing.Md),
+                )
+                BottomSaveBar(
+                    label = if (isEditing) stringResource(R.string.action_save) else stringResource(R.string.action_add_host),
+                    // Grisé pendant l'enregistrement et l'invite : pas de double appui.
+                    enabled = form.isValid && savePhase == HostSavePhase.IDLE,
+                    onClick = { viewModel.saveHost() },
+                )
+            }
         },
         containerColor = NearBlack,
     ) { padding ->
@@ -279,12 +285,18 @@ fun HostDetailScreen(
                     label = stringResource(R.string.label_name),
                     placeholder = stringResource(R.string.placeholder_host_name),
                 )
+                // The reason is shown once something is typed: an empty field of a new host is
+                // only "not filled yet", not an error.
+                val hostnameError = form.hostname.isNotBlank() && !isHostnameValid(form.hostname)
+                val portError = form.port.isNotBlank() && !isPortValid(form.port)
                 Row(horizontalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
                     NextShTextField(
                         value = form.hostname,
                         onValueChange = { v -> viewModel.updateForm { copy(hostname = v) } },
                         label = stringResource(R.string.label_host),
                         placeholder = stringResource(R.string.placeholder_hostname),
+                        isError = hostnameError,
+                        supportingText = if (hostnameError) stringResource(R.string.host_hostname_error) else null,
                         modifier = Modifier.weight(2f),
                     )
                     NextShTextField(
@@ -292,14 +304,20 @@ fun HostDetailScreen(
                         onValueChange = { v -> viewModel.updateForm { copy(port = v) } },
                         label = stringResource(R.string.label_port),
                         placeholder = stringResource(R.string.placeholder_port),
+                        isError = portError,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        supportingText = if (portError) stringResource(R.string.host_port_error) else null,
                         modifier = Modifier.weight(1f),
                     )
                 }
+                val userProblem = usernameProblem(form.username)
                 NextShTextField(
                     value = form.username,
                     onValueChange = { v -> viewModel.updateForm { copy(username = v) } },
                     label = stringResource(R.string.label_username),
                     placeholder = stringResource(R.string.placeholder_username),
+                    isError = userProblem != null,
+                    supportingText = userProblem?.let { stringResource(usernameProblemRes(it)) },
                 )
             }
 
@@ -310,15 +328,13 @@ fun HostDetailScreen(
                     horizontalArrangement = Arrangement.spacedBy(Spacing.Xs),
                     verticalArrangement = Arrangement.spacedBy(Spacing.Xs),
                 ) {
-                    AuthType.entries
-                        .filter { it in listOf(AuthType.PASSWORD, AuthType.SSH_KEY, AuthType.CERTIFICATE, AuthType.FIDO2) }
-                        .forEach { type ->
-                            AuthChip(
-                                type = type,
-                                selected = form.authType == type,
-                                onClick = { viewModel.updateForm { copy(authType = type) } },
-                            )
-                        }
+                    OFFERED_AUTH_TYPES.forEach { type ->
+                        AuthChip(
+                            type = type,
+                            selected = form.authType == type,
+                            onClick = { viewModel.selectAuthType(type) },
+                        )
+                    }
                 }
 
                 when (form.authType) {
@@ -379,8 +395,10 @@ fun HostDetailScreen(
                         )
                     }
                     AuthType.SSH_KEY -> {
+                        // Not the security keys (sk-*) nor the biometric keys: they have no private key
+                        // in the Vault to sign with.
                         SshKeyDropdown(
-                            keys = uiState.sshKeys,
+                            keys = privateKeysFor(uiState.sshKeys),
                             selectedKeyId = form.selectedKeyId,
                             label = stringResource(R.string.label_ssh_key),
                             isError = form.showMissingKeyError,
@@ -390,7 +408,7 @@ fun HostDetailScreen(
                     }
                     AuthType.CERTIFICATE -> {
                         SshKeyDropdown(
-                            keys = uiState.sshKeys,
+                            keys = privateKeysFor(uiState.sshKeys),
                             selectedKeyId = form.selectedKeyId,
                             label = stringResource(R.string.label_associated_private_key),
                             isError = form.showMissingKeyError,
@@ -400,23 +418,22 @@ fun HostDetailScreen(
                         HelperText(stringResource(R.string.certificate_hint))
                     }
                     AuthType.FIDO2 -> {
-                        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.Xs)) {
-                            Fido2Mode.entries.forEach { mode ->
-                                Fido2ModeChip(
-                                    mode = mode,
-                                    selected = form.fido2Mode == mode,
-                                    onClick = { viewModel.updateForm { copy(fido2Mode = mode) } },
-                                )
+                        // The mode is only offered to a host that is already in PASSKEY mode (it
+                        // signs in with an ordinary key and checks nothing on a security key): any
+                        // other host is a security key host, without being asked.
+                        if (form.showFido2ModeChoice) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.Xs)) {
+                                Fido2Mode.entries.forEach { mode ->
+                                    Fido2ModeChip(
+                                        mode = mode,
+                                        selected = form.fido2Mode == mode,
+                                        onClick = { viewModel.selectFido2Mode(mode) },
+                                    )
+                                }
                             }
-                        }
-                        val filteredKeys = when (form.fido2Mode) {
-                            Fido2Mode.HARDWARE_KEY -> uiState.sshKeys.filter {
-                                it.keyType in listOf(SshKeyType.SK_ED25519, SshKeyType.SK_ECDSA_256)
-                            }
-                            Fido2Mode.PASSKEY -> uiState.sshKeys.filter { !it.isBiometric }
                         }
                         SshKeyDropdown(
-                            keys = filteredKeys,
+                            keys = fido2KeysFor(form.fido2Mode, uiState.sshKeys),
                             selectedKeyId = form.selectedKeyId,
                             label = when (form.fido2Mode) {
                                 Fido2Mode.HARDWARE_KEY -> stringResource(R.string.label_fido2_sk_key)
@@ -437,7 +454,28 @@ fun HostDetailScreen(
                             },
                         )
                     }
-                    else -> {}
+                    AuthType.BIOMETRIC_KEY -> {
+                        // Only the keys generated in the Keystore. With none, the list says where to
+                        // create one, and so does a line that stays in sight.
+                        val biometricKeys = biometricKeysFor(uiState.sshKeys)
+                        SshKeyDropdown(
+                            keys = biometricKeys,
+                            selectedKeyId = form.selectedKeyId,
+                            label = stringResource(R.string.label_biometric_key),
+                            emptyMessage = stringResource(R.string.biometric_no_keys),
+                            isError = form.showMissingKeyError,
+                            onSelect = viewModel::selectKey,
+                        )
+                        if (form.showMissingKeyError) KeyMissingText()
+                        if (biometricKeys.isEmpty()) {
+                            Text(
+                                text = stringResource(R.string.biometric_no_keys),
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                            )
+                        }
+                        HelperText(stringResource(R.string.biometric_key_hint))
+                    }
                 }
             }
 
@@ -453,12 +491,18 @@ fun HostDetailScreen(
                     value = form.keepAliveSeconds,
                     onValueChange = { v -> viewModel.updateForm { copy(keepAliveSeconds = v) } },
                     label = stringResource(R.string.label_keepalive),
+                    isError = !isKeepAliveValid(form.keepAliveSeconds),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    supportingText = stringResource(
+                        if (isKeepAliveValid(form.keepAliveSeconds)) R.string.host_keepalive_help else R.string.host_keepalive_error,
+                    ),
                 )
                 ToggleRow(
                     label = stringResource(R.string.label_auto_reconnect),
                     checked = form.autoReconnect,
                     onChange = { v -> viewModel.updateForm { copy(autoReconnect = v) } },
                 )
+                HelperText(stringResource(R.string.host_auto_reconnect_help))
             }
 
             // ── Terminal ─────────────────────────────────────────────────────
@@ -587,16 +631,30 @@ private fun KeyMissingText() {
 
 // ── Auth chips ──────────────────────────────────────────────────────────────
 
+/**
+ * The authentication types the form offers, in the order of the chips. A type added to [AuthType]
+ * stays out of the form until it is listed here.
+ */
+private val OFFERED_AUTH_TYPES = listOf(
+    AuthType.PASSWORD,
+    AuthType.SSH_KEY,
+    AuthType.CERTIFICATE,
+    AuthType.FIDO2,
+    AuthType.BIOMETRIC_KEY,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AuthChip(type: AuthType, selected: Boolean, onClick: () -> Unit) {
-    val (icon: ImageVector, label: String) = when (type) {
-        AuthType.PASSWORD -> Lucide.Lock to stringResource(R.string.auth_type_password)
-        AuthType.SSH_KEY -> Lucide.KeyRound to stringResource(R.string.auth_type_ssh_key)
-        AuthType.CERTIFICATE -> Lucide.FileBadge to stringResource(R.string.auth_type_certificate)
-        AuthType.FIDO2 -> Lucide.Fingerprint to stringResource(R.string.auth_type_fido2)
-        else -> Lucide.Lock to type.name
+    val icon: ImageVector = when (type) {
+        AuthType.PASSWORD -> Lucide.Lock
+        AuthType.SSH_KEY -> Lucide.KeyRound
+        AuthType.CERTIFICATE -> Lucide.FileBadge
+        // The key (USB or NFC) is what sets FIDO2 apart; the fingerprint is the biometric key's.
+        AuthType.FIDO2 -> Lucide.Usb
+        AuthType.BIOMETRIC_KEY -> Lucide.Fingerprint
     }
+    val label = stringResource(authTypeLabelRes(type))
     FilterChip(
         selected = selected,
         onClick = onClick,

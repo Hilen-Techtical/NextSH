@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "exportedAt": 1762500000000,
+  "hosts": "this-section-has-another-structure-in-version-3",
+  "payload": { "format": "not-understood-by-version-2" }
+}

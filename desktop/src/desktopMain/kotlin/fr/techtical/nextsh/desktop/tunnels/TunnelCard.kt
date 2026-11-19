@@ -3,6 +3,8 @@
 
 package fr.techtical.nextsh.desktop.tunnels
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -88,6 +91,20 @@ import org.jetbrains.compose.resources.stringResource
 
 private val TUNNEL_CARD_HEIGHT_DP = 180.dp
 
+/** Tone of the line under the head of the card. */
+internal enum class CardMessageTone { ERROR, PENDING }
+
+/**
+ * The tone of the line under the head of the card, null when there is nothing to show. ACTIVE and
+ * STOPPED never show a text, even if one was left behind.
+ */
+internal fun cardMessageTone(status: TunnelStatus, errorMessage: String?): CardMessageTone? = when {
+    errorMessage.isNullOrBlank() -> null
+    status == TunnelStatus.ERROR -> CardMessageTone.ERROR
+    status == TunnelStatus.RECONNECTING || status == TunnelStatus.STARTING -> CardMessageTone.PENDING
+    else -> null
+}
+
 /**
  * Card densifiée pour un tunnel SSH (hauteur fixe 180dp pour grille 3-2-1).
  *
@@ -96,8 +113,10 @@ private val TUNNEL_CARD_HEIGHT_DP = 180.dp
  *   StatusPill + LatencyChip] } + actions IconActionSm (Globe conditionnel sur
  *   LOCAL_FORWARD ACTIVE, Settings2, Play/Square)
  * - Zone 2 (tunnel-diagram) : 3 nodes + 2 wires (largeur dépendante de `columns`)
- * - Erreur conditionnelle : Text rouge tronqué entre Zone 1 et Zone 2 si ERROR
+ * - Message conditionnel : Text tronqué entre Zone 1 et Zone 2, rouge en ERROR,
+ *   ambre en reconnexion (voir [cardMessageTone])
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TunnelCard(
     tunnel: TunnelConfig,
@@ -152,16 +171,25 @@ fun TunnelCard(
             onOpenBrowser = onOpenBrowser,
         )
 
-        // Error message (just below Zone 1 if ERROR)
-        if (status == TunnelStatus.ERROR && !errorMessage.isNullOrBlank()) {
-            Text(
-                text = errorMessage,
-                color = ErrorRed,
-                fontFamily = JetBrainsMonoFamily,
-                fontSize = 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        // Message (just below Zone 1): red in ERROR, amber while reconnecting
+        val messageTone = cardMessageTone(status, errorMessage)
+        if (messageTone != null && errorMessage != null) {
+            // One truncated line: the full text is shown on hover.
+            TooltipArea(
+                tooltip = { CardMessageTooltip(errorMessage) },
+                delayMillis = 350,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = errorMessage,
+                    color = if (messageTone == CardMessageTone.ERROR) ErrorRed else WarningAmber,
+                    fontFamily = JetBrainsMonoFamily,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
 
         // Zone 2 : tunnel-diagram
@@ -171,6 +199,20 @@ fun TunnelCard(
             active = active,
             latencyMs = latencyMs,
         )
+    }
+}
+
+/** Hover tooltip with the full text of the line under the head of the card (same look as the hosts screen). */
+@Composable
+private fun CardMessageTooltip(text: String) {
+    Row(
+        modifier = Modifier
+            .widthIn(max = 420.dp)
+            .background(Color(0xFF1A1A1A), RoundedCornerShape(4.dp))
+            .border(1.dp, Border1, RoundedCornerShape(4.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(text = text, color = TextPrimary, fontFamily = JetBrainsMonoFamily, fontSize = 11.sp)
     }
 }
 

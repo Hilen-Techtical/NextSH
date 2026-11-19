@@ -7,8 +7,11 @@ import fr.techtical.nextsh.desktop.generated.resources.Res
 import fr.techtical.nextsh.desktop.generated.resources.auth_error_fido2_cancelled
 import fr.techtical.nextsh.desktop.generated.resources.auth_error_fido2_key_invalid
 import fr.techtical.nextsh.desktop.generated.resources.auth_error_fido2_no_key
-import fr.techtical.nextsh.desktop.generated.resources.auth_error_fido2_refused
+import fr.techtical.nextsh.desktop.generated.resources.auth_error_fido2_failed
 import fr.techtical.nextsh.desktop.generated.resources.auth_error_fido2_touch_timeout
+import fr.techtical.nextsh.desktop.generated.resources.auth_error_fido2_transport
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_pcsc_windows_bug
+import fr.techtical.nextsh.desktop.generated.resources.fido2_enroll_windows_hid_locked
 import fr.techtical.nextsh.desktop.generated.resources.auth_error_fido2_unavailable
 import fr.techtical.nextsh.desktop.generated.resources.auth_error_refused
 import fr.techtical.nextsh.desktop.generated.resources.connect_error_generic
@@ -34,12 +37,15 @@ import java.io.IOException
  * le KDoc de `classifySshConnectError`.
  *
  * Ce fichier ne fait plus que résoudre les clés `connect_error_*`
- * (compose-resources) à partir de cette classification. Point d'entrée unique,
- * partagé par les 4 sites qui catchaient jusqu'ici `IOException` :
+ * (compose-resources) à partir de cette classification. Appelants :
  *  - [DesktopSshSessionManager.connectWithPassword]
  *  - [DesktopSshSessionManager.connectWithFido2]
  *  - [DesktopSshSessionManager.connectInternal] (clé / certificat)
- *  - [VaultSshClientFactory.open]
+ *  - [tunnelConnectError], pour l'ouverture du client d'un tunnel
+ *    ([VaultSshClientFactory.open] passe par [tunnelOpenError]) : seulement
+ *    pour un délai, un serveur qui ne répond pas ou un hôte introuvable. Une
+ *    clé d'hôte refusée et le cas fourre-tout y ont leur propre texte, sans le
+ *    détail technique que [connectErrorResult] ajoute à ce dernier.
  *
  * [GENERIC_ERROR_CODE] : Desktop utilisait `HOST_UNREACHABLE` pour TOUTE
  * `IOException` avant ce correctif : préservé comme code de repli pour le
@@ -79,8 +85,8 @@ internal suspend fun fido2UnavailableMessage(): String =
     getString(Res.string.auth_error_fido2_unavailable)
 
 /** SkKeyHandle illisible depuis le vault. */
-internal suspend fun fido2KeyInvalidMessage(detail: String?): String =
-    getString(Res.string.auth_error_fido2_key_invalid, detail ?: "?")
+internal suspend fun fido2KeyInvalidMessage(): String =
+    getString(Res.string.auth_error_fido2_key_invalid)
 
 /**
  * Décode les erreurs FIDO2 encodées dans le message de [UserAuthException]
@@ -88,7 +94,9 @@ internal suspend fun fido2KeyInvalidMessage(detail: String?): String =
  * [SshErrorCode] + message localisé.
  */
 internal suspend fun fido2AuthErrorResult(e: UserAuthException): SshResult.Error {
-    val msg = e.message ?: ""
+    // SSHJ wraps the exception of the method in "Exhausted available authentication methods":
+    // the token is on a cause, so the whole (bounded) chain is read.
+    val msg = generateSequence<Throwable>(e) { it.cause }.take(8).mapNotNull { it.message }.joinToString(" ")
     return when {
         "FIDO2_NO_KEY" in msg ->
             SshResult.Error(SshErrorCode.FIDO2_NO_KEY, getString(Res.string.auth_error_fido2_no_key))
@@ -96,8 +104,16 @@ internal suspend fun fido2AuthErrorResult(e: UserAuthException): SshResult.Error
             SshResult.Error(SshErrorCode.FIDO2_USER_CANCELLED, getString(Res.string.auth_error_fido2_cancelled))
         "FIDO2_TIMEOUT" in msg ->
             SshResult.Error(SshErrorCode.FIDO2_TIMEOUT, getString(Res.string.auth_error_fido2_touch_timeout))
+        "FIDO2_PCSC_BUG" in msg ->
+            SshResult.Error(SshErrorCode.AUTH_FAILED, getString(Res.string.fido2_enroll_pcsc_windows_bug))
+        "FIDO2_HID_LOCKED" in msg ->
+            SshResult.Error(SshErrorCode.AUTH_FAILED, getString(Res.string.fido2_enroll_windows_hid_locked))
+        "FIDO2_TRANSPORT" in msg ->
+            SshResult.Error(SshErrorCode.AUTH_FAILED, getString(Res.string.auth_error_fido2_transport))
+        "FIDO2_ERROR" in msg ->
+            SshResult.Error(SshErrorCode.AUTH_FAILED, getString(Res.string.auth_error_fido2_failed))
         else ->
-            SshResult.Error(SshErrorCode.AUTH_FAILED, getString(Res.string.auth_error_fido2_refused, e.message ?: "?"))
+            SshResult.Error(SshErrorCode.AUTH_FAILED, getString(Res.string.auth_error_fido2_failed))
     }
 }
 

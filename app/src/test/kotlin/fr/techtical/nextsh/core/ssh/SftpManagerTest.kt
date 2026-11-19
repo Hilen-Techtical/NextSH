@@ -6,17 +6,22 @@ package fr.techtical.nextsh.core.ssh
 import fr.techtical.nextsh.domain.model.SftpFile
 import fr.techtical.nextsh.domain.model.SshErrorCode
 import fr.techtical.nextsh.shared.domain.model.SshResult
-import io.mockk.coEvery
 import io.mockk.Runs
+import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
 import io.mockk.just
 import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import kotlinx.coroutines.test.runTest
 import net.schmizz.sshj.SSHClient
+import net.schmizz.sshj.sftp.FileAttributes
 import net.schmizz.sshj.sftp.FileMode
+import net.schmizz.sshj.sftp.OpenMode
+import net.schmizz.sshj.sftp.RemoteFile
 import net.schmizz.sshj.sftp.RemoteResourceInfo
 import net.schmizz.sshj.sftp.SFTPClient
 import net.schmizz.sshj.sftp.SFTPException
@@ -29,7 +34,9 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeoutException
 
 @ExtendWith(MockKExtension::class)
 class SftpManagerTest {
@@ -41,6 +48,7 @@ class SftpManagerTest {
 
     @BeforeEach
     fun setUp() {
+        every { sessionManager.addSessionEndListener(any()) } just Runs
         sftpManager = SftpManager(sessionManager)
     }
 
@@ -580,9 +588,11 @@ class SftpManagerTest {
 
         every { mockSSHClient.newSFTPClient() } returns mockSftpClient
         coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
+        // A relaxed mock would answer the lookup with an attribute object, which reads as "already there".
+        every { mockSftpClient.statExistence(path) } returns null
 
         sftpManager.openSftp(sessionId)
-        val result = sftpManager.createDirectory(sessionId, path)
+        val result = sftpManager.createDirectory(sessionId, "/home/user", "newdir")
 
         assertTrue(result is SshResult.Success)
         coVerify { mockSftpClient.mkdir(path) }
@@ -597,17 +607,18 @@ class SftpManagerTest {
 
         every { mockSSHClient.newSFTPClient() } returns mockSftpClient
         coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
+        every { mockSftpClient.statExistence(path) } returns null
         every { mockSftpClient.mkdir(path) } throws SFTPException("Permission denied")
 
         sftpManager.openSftp(sessionId)
-        val result = sftpManager.createDirectory(sessionId, path)
+        val result = sftpManager.createDirectory(sessionId, "/root", "newdir")
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Permission refusée", (result as SshResult.Error).message)
+        assertEquals(SFTP_PERMISSION_DENIED_MESSAGE, (result as SshResult.Error).message)
     }
 
     @Test
-    fun `createDirectory returns error when directory already exists`() = runTest {
+    fun `createDirectory returns error when the server says the directory already exists`() = runTest {
         val sessionId = "session-1"
         val path = "/home/user/existing"
         val mockSSHClient = mockk<SSHClient>()
@@ -615,19 +626,20 @@ class SftpManagerTest {
 
         every { mockSSHClient.newSFTPClient() } returns mockSftpClient
         coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
+        // Not found by the lookup (a race, a broken link), then refused by the server on mkdir.
+        every { mockSftpClient.statExistence(path) } returns null
         every { mockSftpClient.mkdir(path) } throws SFTPException("File already exists")
 
         sftpManager.openSftp(sessionId)
-        val result = sftpManager.createDirectory(sessionId, path)
+        val result = sftpManager.createDirectory(sessionId, "/home/user", "existing")
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Un dossier portant ce nom existe déjà", (result as SshResult.Error).message)
+        assertEquals(SFTP_FOLDER_EXISTS_MESSAGE, (result as SshResult.Error).message)
     }
 
     @Test
     fun `createDirectory returns error when invalid name`() = runTest {
         val sessionId = "session-1"
-        val path = "/home/user/"  // Empty name
         val mockSSHClient = mockk<SSHClient>()
         val mockSftpClient = mockk<SFTPClient>()
 
@@ -635,16 +647,16 @@ class SftpManagerTest {
         coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
 
         sftpManager.openSftp(sessionId)
-        val result = sftpManager.createDirectory(sessionId, path)
+        // The mock is strict: a request to the server would fail the test.
+        val result = sftpManager.createDirectory(sessionId, "/home/user", "")
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Nom de dossier invalide", (result as SshResult.Error).message)
+        assertEquals(SFTP_FOLDER_NAME_INVALID_MESSAGE, (result as SshResult.Error).message)
     }
 
     @Test
     fun `createDirectory returns error when name contains null-byte`() = runTest {
         val sessionId = "session-1"
-        val path = "/home/user/bad\u0000dir"
         val mockSSHClient = mockk<SSHClient>()
         val mockSftpClient = mockk<SFTPClient>()
 
@@ -652,9 +664,339 @@ class SftpManagerTest {
         coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
 
         sftpManager.openSftp(sessionId)
-        val result = sftpManager.createDirectory(sessionId, path)
+        val result = sftpManager.createDirectory(sessionId, "/home/user", "bad\u0000dir")
 
         assertTrue(result is SshResult.Error)
+        assertEquals(SFTP_FOLDER_NAME_INVALID_MESSAGE, (result as SshResult.Error).message)
+    }
+
+    // ── createFile tests ─────────────────────────────────────────────────────────
+
+    /** A session with its SFTP client open. The client is a strict mock: a call the test did not stub fails. */
+    private suspend fun openedSftp(sessionId: String): SFTPClient {
+        val mockSSHClient = mockk<SSHClient>()
+        val mockSftpClient = mockk<SFTPClient>()
+        every { mockSSHClient.newSFTPClient() } returns mockSftpClient
+        coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
+        sftpManager.openSftp(sessionId)
+        return mockSftpClient
+    }
+
+    @Test
+    fun `createFile creates the file with exactly write, create and exclusive, then closes it`() = runTest {
+        val sessionId = "session-1"
+        val path = "/home/user/new.txt"
+        val mockSftpClient = openedSftp(sessionId)
+        val remote = mockk<RemoteFile>(relaxed = true)
+        val modes = slot<Set<OpenMode>>()
+        every { mockSftpClient.statExistence(path) } returns null
+        every { mockSftpClient.open(path, capture(modes)) } returns remote
+
+        val result = sftpManager.createFile(sessionId, "/home/user", "new.txt")
+
+        assertTrue(result is SshResult.Success)
+        // EXCL, and no TRUNC: a file that appeared in between is refused by the server, never emptied.
+        assertEquals(setOf(OpenMode.WRITE, OpenMode.CREAT, OpenMode.EXCL), modes.captured)
+        assertFalse(OpenMode.TRUNC in modes.captured)
+        verify(exactly = 1) { remote.close() }
+    }
+
+    @Test
+    fun `createFile looks the name up before it opens anything`() = runTest {
+        val sessionId = "session-1"
+        val path = "/home/user/new.txt"
+        val mockSftpClient = openedSftp(sessionId)
+        val remote = mockk<RemoteFile>(relaxed = true)
+        every { mockSftpClient.statExistence(path) } returns null
+        every { mockSftpClient.open(path, any<Set<OpenMode>>()) } returns remote
+
+        sftpManager.createFile(sessionId, "/home/user", "new.txt")
+
+        io.mockk.verifyOrder {
+            mockSftpClient.statExistence(path)
+            mockSftpClient.open(path, any<Set<OpenMode>>())
+        }
+    }
+
+    @Test
+    fun `createFile refuses a name that is already taken and opens nothing`() = runTest {
+        val sessionId = "session-1"
+        val path = "/home/user/existing.txt"
+        val mockSftpClient = openedSftp(sessionId)
+        every { mockSftpClient.statExistence(path) } returns mockk<FileAttributes>()
+
+        val result = sftpManager.createFile(sessionId, "/home/user", "existing.txt")
+
+        assertTrue(result is SshResult.Error)
+        assertEquals(SFTP_NAME_EXISTS_MESSAGE, (result as SshResult.Error).message)
+        // The file that is there is never opened, so never truncated.
+        verify(exactly = 0) { mockSftpClient.open(any<String>(), any<Set<OpenMode>>()) }
+    }
+
+    @Test
+    fun `createFile refuses a folder that has the name too`() = runTest {
+        val sessionId = "session-1"
+        val path = "/home/user/documents"
+        val mockSftpClient = openedSftp(sessionId)
+        // A folder answers the lookup like a file does: the name is taken, whatever it names.
+        every { mockSftpClient.statExistence(path) } returns mockk<FileAttributes>()
+
+        val result = sftpManager.createFile(sessionId, "/home/user", "documents")
+
+        assertEquals(SFTP_NAME_EXISTS_MESSAGE, (result as SshResult.Error).message)
+    }
+
+    @Test
+    fun `createFile reports the file that appeared after the lookup as not created, and never as created`() = runTest {
+        val sessionId = "session-1"
+        val path = "/home/user/race.txt"
+        val mockSftpClient = openedSftp(sessionId)
+        every { mockSftpClient.statExistence(path) } returns null
+        // The server refuses an exclusive open of a file that exists.
+        every { mockSftpClient.open(path, any<Set<OpenMode>>()) } throws SFTPException("Failure")
+
+        val result = sftpManager.createFile(sessionId, "/home/user", "race.txt")
+
+        assertTrue(result is SshResult.Error)
+        assertEquals(SFTP_CREATE_FILE_FAILED_MESSAGE, (result as SshResult.Error).message)
+    }
+
+    @Test
+    fun `createFile returns the permission text when the server refuses the folder`() = runTest {
+        val sessionId = "session-1"
+        val path = "/root/new.txt"
+        val mockSftpClient = openedSftp(sessionId)
+        every { mockSftpClient.statExistence(path) } returns null
+        every { mockSftpClient.open(path, any<Set<OpenMode>>()) } throws SFTPException("Permission denied")
+
+        val result = sftpManager.createFile(sessionId, "/root", "new.txt")
+
+        assertTrue(result is SshResult.Error)
+        assertEquals(SFTP_PERMISSION_DENIED_MESSAGE, (result as SshResult.Error).message)
+    }
+
+    @Test
+    fun `createFile returns the permission text when even the lookup is refused`() = runTest {
+        val sessionId = "session-1"
+        val path = "/root/secret/new.txt"
+        val mockSftpClient = openedSftp(sessionId)
+        every { mockSftpClient.statExistence(path) } throws SFTPException("Permission denied")
+
+        val result = sftpManager.createFile(sessionId, "/root/secret", "new.txt")
+
+        assertEquals(SFTP_PERMISSION_DENIED_MESSAGE, (result as SshResult.Error).message)
+    }
+
+    @Test
+    fun `createFile returns the fixed failure text for any other refusal of the server`() = runTest {
+        val sessionId = "session-1"
+        val path = "/home/user/new.txt"
+        val mockSftpClient = openedSftp(sessionId)
+        every { mockSftpClient.statExistence(path) } returns null
+        every { mockSftpClient.open(path, any<Set<OpenMode>>()) } throws SFTPException("Quota exceeded")
+
+        val result = sftpManager.createFile(sessionId, "/home/user", "new.txt")
+
+        assertEquals(SFTP_CREATE_FILE_FAILED_MESSAGE, (result as SshResult.Error).message)
+    }
+
+    @Test
+    fun `createFile refuses the names dot and dot-dot, which name a folder that exists`() = runTest {
+        val sessionId = "session-1"
+        val mockSftpClient = openedSftp(sessionId)
+
+        listOf(".", "..", " . ", " .. ").forEach { name ->
+            val result = sftpManager.createFile(sessionId, "/home/user", name)
+
+            assertTrue(result is SshResult.Error, name)
+            assertEquals(SFTP_NAME_INVALID_MESSAGE, (result as SshResult.Error).message, name)
+        }
+        // Refused before the server is asked anything.
+        verify(exactly = 0) { mockSftpClient.statExistence(any()) }
+        verify(exactly = 0) { mockSftpClient.open(any<String>(), any<Set<OpenMode>>()) }
+    }
+
+    @Test
+    fun `createFile refuses a name that holds a separator or leads out of the folder, without asking the server`() = runTest {
+        val sessionId = "session-1"
+        val mockSftpClient = openedSftp(sessionId)
+
+        listOf("a/b", "../x", "/etc/passwd", "a\\b", "x/", "/x").forEach { name ->
+            val result = sftpManager.createFile(sessionId, "/home/user", name)
+
+            assertTrue(result is SshResult.Error, name)
+            assertEquals(SFTP_NAME_INVALID_MESSAGE, (result as SshResult.Error).message, name)
+        }
+        verify(exactly = 0) { mockSftpClient.statExistence(any()) }
+        verify(exactly = 0) { mockSftpClient.open(any<String>(), any<Set<OpenMode>>()) }
+    }
+
+    @Test
+    fun `createFile refuses an empty name`() = runTest {
+        val sessionId = "session-1"
+        val mockSftpClient = openedSftp(sessionId)
+
+        val result = sftpManager.createFile(sessionId, "/home/user", "")
+
+        assertTrue(result is SshResult.Error)
+        assertEquals(SFTP_NAME_INVALID_MESSAGE, (result as SshResult.Error).message)
+        verify(exactly = 0) { mockSftpClient.statExistence(any()) }
+    }
+
+    @Test
+    fun `createFile refuses a name that sanitizeFilename would change instead of creating it under another name`() = runTest {
+        val sessionId = "session-1"
+        val mockSftpClient = openedSftp(sessionId)
+
+        // A padded name, a control character, a name cut at 255 characters: none is corrected in silence.
+        listOf(" notes.txt", "notes.txt ", "bad\u0000file", "tab\tname", "a".repeat(256)).forEach { name ->
+            val result = sftpManager.createFile(sessionId, "/home/user", name)
+
+            assertTrue(result is SshResult.Error, name)
+            assertEquals(SFTP_NAME_INVALID_MESSAGE, (result as SshResult.Error).message, name)
+        }
+        verify(exactly = 0) { mockSftpClient.statExistence(any()) }
+        verify(exactly = 0) { mockSftpClient.open(any<String>(), any<Set<OpenMode>>()) }
+    }
+
+    @Test
+    fun `createFile refuses a folder that leads out of the root`() = runTest {
+        val sessionId = "session-1"
+        val mockSftpClient = openedSftp(sessionId)
+
+        val result = sftpManager.createFile(sessionId, "/..", "new.txt")
+
+        assertEquals(SFTP_INVALID_PATH_MESSAGE, (result as SshResult.Error).message)
+        verify(exactly = 0) { mockSftpClient.statExistence(any()) }
+    }
+
+    @Test
+    fun `createFile refuses a folder that holds a null byte`() = runTest {
+        val sessionId = "session-1"
+        val mockSftpClient = openedSftp(sessionId)
+
+        val result = sftpManager.createFile(sessionId, "/home/us\u0000er", "new.txt")
+
+        assertTrue(result is SshResult.Error)
+        assertEquals(SFTP_INVALID_PATH_MESSAGE, (result as SshResult.Error).message)
+        verify(exactly = 0) { mockSftpClient.statExistence(any()) }
+    }
+
+    // ── createFile: the name is a name, never a path to decode ───────────────────
+
+    /** Creates [name] in [parentDir] and returns the path the server was asked for, which is all that matters here. */
+    private suspend fun createdPathOf(parentDir: String, name: String): String {
+        val mockSftpClient = openedSftp("session-1")
+        val remote = mockk<RemoteFile>(relaxed = true)
+        val looked = slot<String>()
+        val opened = slot<String>()
+        every { mockSftpClient.statExistence(capture(looked)) } returns null
+        every { mockSftpClient.open(capture(opened), any<Set<OpenMode>>()) } returns remote
+
+        val result = sftpManager.createFile("session-1", parentDir, name)
+
+        assertTrue(result is SshResult.Success, "$name: $result")
+        // The lookup and the open name the same path: no other file is looked at, none is opened.
+        assertEquals(looked.captured, opened.captured)
+        return opened.captured
+    }
+
+    @Test
+    fun `createFile keeps a plus sign of the name, which is not a space`() = runTest {
+        assertEquals("/home/user/a+b.txt", createdPathOf("/home/user", "a+b.txt"))
+    }
+
+    @Test
+    fun `createFile keeps a percent sign of the name, which is not an escape`() = runTest {
+        assertEquals("/home/user/50%.txt", createdPathOf("/home/user", "50%.txt"))
+    }
+
+    @Test
+    fun `createFile creates a name that looks percent-encoded under that very name, in the folder`() = runTest {
+        // %2F is not a slash here: it is three characters of a file name, and the file stays in the folder.
+        assertEquals("/home/user/a%2Fb", createdPathOf("/home/user", "a%2Fb"))
+    }
+
+    @Test
+    fun `createFile cannot leave the folder with an encoded traversal in the name`() = runTest {
+        assertEquals("/home/user/..%2F..%2Ftmp%2Fx", createdPathOf("/home/user", "..%2F..%2Ftmp%2Fx"))
+    }
+
+    @Test
+    fun `createFile joins the name to the root with a single slash`() = runTest {
+        assertEquals("/new.txt", createdPathOf("/", "new.txt"))
+    }
+
+    @Test
+    fun `createFile resolves the folder it is given, and only that`() = runTest {
+        assertEquals("/home/other/new.txt", createdPathOf("/home/user//../other/", "new.txt"))
+    }
+
+    @Test
+    fun `createFile returns the lost connection text when the lookup drops`() = runTest {
+        val sessionId = "session-1"
+        val path = "/home/user/new.txt"
+        val mockSftpClient = openedSftp(sessionId)
+        every { mockSftpClient.statExistence(path) } throws IOException("Broken pipe")
+
+        val result = sftpManager.createFile(sessionId, "/home/user", "new.txt")
+
+        assertTrue(result is SshResult.Error)
+        assertEquals(SFTP_CONNECTION_LOST_MESSAGE, (result as SshResult.Error).message)
+    }
+
+    @Test
+    fun `createFile returns the lost connection text when the lookup loses the channel, and opens nothing`() = runTest {
+        val sessionId = "session-1"
+        val path = "/home/user/new.txt"
+        // Opened once: the manager keeps its client, the loop only stubs it again.
+        val mockSftpClient = openedSftp(sessionId)
+        for (lost in listOf(SFTPException("EOF while reading packet"), SFTPException(TimeoutException()))) {
+            every { mockSftpClient.statExistence(path) } throws lost
+
+            val result = sftpManager.createFile(sessionId, "/home/user", "new.txt")
+
+            assertEquals(SFTP_CONNECTION_LOST_MESSAGE, (result as SshResult.Error).message, lost.toString())
+            verify(exactly = 0) { mockSftpClient.open(any<String>(), any<Set<OpenMode>>()) }
+        }
+    }
+
+    @Test
+    fun `createFile returns the lost connection text when the open drops`() = runTest {
+        val sessionId = "session-1"
+        val path = "/home/user/new.txt"
+        val mockSftpClient = openedSftp(sessionId)
+        every { mockSftpClient.statExistence(path) } returns null
+        every { mockSftpClient.open(path, any<Set<OpenMode>>()) } throws IOException("Broken pipe")
+
+        val result = sftpManager.createFile(sessionId, "/home/user", "new.txt")
+
+        assertEquals(SFTP_CONNECTION_LOST_MESSAGE, (result as SshResult.Error).message)
+    }
+
+    @Test
+    fun `createFile succeeds even when closing the new file fails`() = runTest {
+        val sessionId = "session-1"
+        val path = "/home/user/new.txt"
+        val mockSftpClient = openedSftp(sessionId)
+        val remote = mockk<RemoteFile>()
+        every { mockSftpClient.statExistence(path) } returns null
+        every { mockSftpClient.open(path, any<Set<OpenMode>>()) } returns remote
+        every { remote.close() } throws IOException("channel is closed")
+
+        val result = sftpManager.createFile(sessionId, "/home/user", "new.txt")
+
+        // The file is created: a failure to close the handle of an empty file takes nothing back.
+        assertTrue(result is SshResult.Success)
+        verify(exactly = 1) { remote.close() }
+    }
+
+    @Test
+    fun `createFile returns an error when no SFTP client is open`() = runTest {
+        val result = sftpManager.createFile("session-1", "/home/user", "new.txt")
+
+        assertTrue(result is SshResult.Error)
+        assertEquals(SFTP_NO_SESSION_MESSAGE, (result as SshResult.Error).message)
     }
 
     @Test
@@ -667,11 +1009,16 @@ class SftpManagerTest {
 
         every { mockSSHClient.newSFTPClient() } returns mockSftpClient
         coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
+        every { mockSftpClient.statExistence(any()) } returns null
         every { mockSftpClient.mkdir(capture(created)) } just Runs
 
         sftpManager.openSftp(sessionId)
         for (path in paths) {
-            val result = sftpManager.createDirectory(sessionId, path)
+            val result = sftpManager.createDirectory(
+                sessionId,
+                path.substringBeforeLast('/'),
+                path.substringAfterLast('/'),
+            )
             assertTrue(result is SshResult.Success, "createDirectory($path) doit réussir")
         }
 
@@ -712,7 +1059,7 @@ class SftpManagerTest {
         val result = sftpManager.delete(sessionId, path)
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Permission refusée", (result as SshResult.Error).message)
+        assertEquals(SFTP_PERMISSION_DENIED_MESSAGE, (result as SshResult.Error).message)
     }
 
     @Test
@@ -730,7 +1077,8 @@ class SftpManagerTest {
         val result = sftpManager.delete(sessionId, path)
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Impossible de supprimer un dossier avec cette opération", (result as SshResult.Error).message)
+        // One text for every deletion the server did not do, a folder included.
+        assertEquals(SFTP_DELETE_FAILED_MESSAGE, (result as SshResult.Error).message)
     }
 
     @Test
@@ -817,7 +1165,7 @@ class SftpManagerTest {
         val result = sftpManager.deleteRecursive(sessionId, path)
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Permission refusée", (result as SshResult.Error).message)
+        assertEquals(SFTP_PERMISSION_DENIED_MESSAGE, (result as SshResult.Error).message)
     }
 
     @Test
@@ -872,6 +1220,9 @@ class SftpManagerTest {
 
         every { mockSSHClient.newSFTPClient() } returns mockSftpClient
         coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
+        // A relaxed mock would answer the lookup with an attribute object, which reads as "already there".
+        every { mockSftpClient.lstat(newPath) } throws
+            SFTPException(net.schmizz.sshj.sftp.Response.StatusCode.NO_SUCH_FILE, "No such file")
 
         sftpManager.openSftp(sessionId)
         val result = sftpManager.rename(sessionId, oldPath, newName)
@@ -881,11 +1232,10 @@ class SftpManagerTest {
     }
 
     @Test
-    fun `rename removes slashes from new name`() = runTest {
+    fun `rename refuses a new name with slashes instead of removing them`() = runTest {
         val sessionId = "session-1"
         val oldPath = "/home/user/file.txt"
-        val nameWithSlashes = "path/to/file.txt"  // Slashes will be removed to "pathtofile.txt"
-        val expectedNewPath = "/home/user/pathtofile.txt"  // Expected sanitized result
+        val nameWithSlashes = "path/to/file.txt"  // Used to become "pathtofile.txt" without a word
         val mockSSHClient = mockk<SSHClient>()
         val mockSftpClient = mockk<SFTPClient>(relaxed = true)
 
@@ -895,15 +1245,16 @@ class SftpManagerTest {
         sftpManager.openSftp(sessionId)
         val result = sftpManager.rename(sessionId, oldPath, nameWithSlashes)
 
-        assertTrue(result is SshResult.Success)
-        coVerify { mockSftpClient.rename(oldPath, expectedNewPath) }
+        assertTrue(result is SshResult.Error)
+        assertEquals(SFTP_ENTRY_NAME_INVALID_MESSAGE, (result as SshResult.Error).message)
+        verify(exactly = 0) { mockSftpClient.rename(any(), any()) }
     }
 
     @Test
-    fun `rename sanitizes filename correctly`() = runTest {
+    fun `rename refuses a new name with a backslash instead of removing it`() = runTest {
         val sessionId = "session-1"
         val oldPath = "/home/user/file.txt"
-        val nameWithSlash = "new\\file.txt"  // Backslash should be removed
+        val nameWithBackslash = "new\\file.txt"  // Used to become "newfile.txt" without a word
         val mockSSHClient = mockk<SSHClient>()
         val mockSftpClient = mockk<SFTPClient>(relaxed = true)
 
@@ -911,15 +1262,15 @@ class SftpManagerTest {
         coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
 
         sftpManager.openSftp(sessionId)
-        val result = sftpManager.rename(sessionId, oldPath, nameWithSlash)
+        val result = sftpManager.rename(sessionId, oldPath, nameWithBackslash)
 
-        assertTrue(result is SshResult.Success)
-        // Backslash removed, resulting in "newfile.txt"
-        coVerify { mockSftpClient.rename(oldPath, "/home/user/newfile.txt") }
+        assertTrue(result is SshResult.Error)
+        assertEquals(SFTP_ENTRY_NAME_INVALID_MESSAGE, (result as SshResult.Error).message)
+        verify(exactly = 0) { mockSftpClient.rename(any(), any()) }
     }
 
     @Test
-    fun `rename returns error when file already exists`() = runTest {
+    fun `rename returns error when the server says the file already exists`() = runTest {
         val sessionId = "session-1"
         val oldPath = "/home/user/oldname.txt"
         val newName = "existing.txt"
@@ -929,13 +1280,16 @@ class SftpManagerTest {
 
         every { mockSSHClient.newSFTPClient() } returns mockSftpClient
         coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
+        // Not found by the lookup (a race), then refused by the server on rename.
+        every { mockSftpClient.lstat(newPath) } throws
+            SFTPException(net.schmizz.sshj.sftp.Response.StatusCode.NO_SUCH_FILE, "No such file")
         every { mockSftpClient.rename(oldPath, newPath) } throws SFTPException("File already exists")
 
         sftpManager.openSftp(sessionId)
         val result = sftpManager.rename(sessionId, oldPath, newName)
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Un fichier portant ce nom existe déjà", (result as SshResult.Error).message)
+        assertEquals(SFTP_NAME_EXISTS_MESSAGE, (result as SshResult.Error).message)
     }
 
     @Test
@@ -948,6 +1302,8 @@ class SftpManagerTest {
 
         every { mockSSHClient.newSFTPClient() } returns mockSftpClient
         coEvery { sessionManager.getClient(sessionId) } returns mockSSHClient
+        every { mockSftpClient.lstat(any()) } throws
+            SFTPException(net.schmizz.sshj.sftp.Response.StatusCode.NO_SUCH_FILE, "No such file")
         every { mockSftpClient.rename(capture(oldPaths), capture(newPaths)) } just Runs
 
         sftpManager.openSftp(sessionId)
@@ -992,7 +1348,7 @@ class SftpManagerTest {
         val result = sftpManager.chmod(sessionId, path, -1)
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Valeur de permissions invalide (attendu 0–511)", (result as SshResult.Error).message)
+        assertEquals(SFTP_PERMISSIONS_INVALID_MESSAGE, (result as SshResult.Error).message)
     }
 
     @Test
@@ -1009,7 +1365,7 @@ class SftpManagerTest {
         val result = sftpManager.chmod(sessionId, path, 512)
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Valeur de permissions invalide (attendu 0–511)", (result as SshResult.Error).message)
+        assertEquals(SFTP_PERMISSIONS_INVALID_MESSAGE, (result as SshResult.Error).message)
     }
 
     @Test
@@ -1061,6 +1417,6 @@ class SftpManagerTest {
         val result = sftpManager.chmod(sessionId, path, 493)
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Permission refusée", (result as SshResult.Error).message)
+        assertEquals(SFTP_PERMISSION_DENIED_MESSAGE, (result as SshResult.Error).message)
     }
 }

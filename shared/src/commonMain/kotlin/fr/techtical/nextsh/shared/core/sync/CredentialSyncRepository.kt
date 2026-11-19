@@ -77,6 +77,48 @@ interface CredentialSyncRepository {
         entry: SyncEntry<CredentialEntry>,
         sharedSecret: ByteArray,
     ): Boolean
+
+    /**
+     * Resolves a conflict in favor of the **local** credential: counterpart of
+     * [applyRemoteCredentialForced] for the "keep local" choice.
+     *
+     * Deleting the pending-conflict marker alone would leave the local and remote
+     * clocks concurrent, so the next sync would recreate the same conflict on both
+     * devices. This stamps the local sync metadata with a clock that strictly
+     * dominates both versions ([VectorClock.supersede] with the local device id, same
+     * rule as [CrdtEngine.keepLocal]) and refreshes `updatedAt`, then removes the
+     * pending conflict for this credential. The next export therefore sends the local
+     * version (or the local tombstone, if the local side had deleted it) as a clean
+     * win, and the peer applies it without conflict.
+     *
+     * Only the metadata changes: the vault content and the hash are untouched, and
+     * no secret is read, decrypted or logged, so no shared secret is needed.
+     *
+     * [remote] is the remote version of the conflict, i.e. the entry decoded from
+     * `PendingConflict.remoteJson` with `ConflictSerializer.decodeCredential`; its
+     * [SyncEntry.id] is the conflict's `entityId` (the composite `type:localId`).
+     * Only its clock is used. The CURRENT local metadata is used as the local side,
+     * not the snapshot stored in the conflict, so a local change made since the
+     * conflict was detected is never lost. Calling it again for the same conflict is
+     * safe: each call moves the clock strictly forward.
+     *
+     * Returns true when the metadata was updated and the pending conflict removed.
+     * Returns false, without touching the metadata or the pending conflict, when there
+     * is nothing to re-assert: no local metadata for this credential, or a
+     * device-local LAN secret that never syncs. Does not throw in those cases. The
+     * caller must then delete the marker itself by id
+     * (`PendingConflictRepository.deleteById(conflict.id)`). Without local metadata
+     * the next export creates a fresh one, whose clock can be concurrent with the
+     * remote clock: the conflict may then be detected again at the next sync, and the
+     * user is asked once more.
+     *
+     * There is no lock between this method and the sync path
+     * ([exportEncryptedEntries], [applyRemoteEntries]). A sync running at the same time
+     * is harmless: this call is idempotent and only moves the clock forward, and the
+     * next export recomputes the content hash from the vault. The worst case is a
+     * transient re-detection of the conflict, resolved the same way again.
+     */
+    suspend fun reassertLocalCredential(remote: SyncEntry<CredentialEntry>): Boolean
 }
 
 data class CredentialApplyResult(

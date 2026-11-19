@@ -7,7 +7,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -41,9 +43,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -61,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
@@ -81,6 +81,8 @@ import fr.techtical.nextsh.R
 import fr.techtical.nextsh.domain.model.AuthType
 import fr.techtical.nextsh.shared.core.`import`.ImportFormatDetector
 import fr.techtical.nextsh.shared.core.`import`.NEXTSH_IMPORT_FORMAT_EXAMPLE
+import fr.techtical.nextsh.shared.util.errorClass
+import fr.techtical.nextsh.ui.components.NextShMessage
 import fr.techtical.nextsh.ui.theme.BioViolet
 import fr.techtical.nextsh.ui.theme.Border1
 import fr.techtical.nextsh.ui.theme.Border2
@@ -114,7 +116,7 @@ import java.io.ByteArrayOutputStream
  * → lecture du texte via `contentResolver` → auto-détection du format via
  * [ImportFormatDetector] → écran de prévisualisation/sélection (cases à
  * cocher ; une entrée porteuse d'un secret démarre décochée) → import via
- * [HostImportViewModel] → snackbar de résultat puis retour à la liste (qui
+ * [HostImportViewModel] → message de résultat puis retour à la liste (qui
  * observe le repo et se rafraîchit).
  *
  * SÉCURITÉ : la preview n'affiche QUE des champs non-sensibles (label,
@@ -128,10 +130,9 @@ fun HostImportScreen(
     viewModel: HostImportViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     var showFormatInfoDialog by remember { mutableStateOf(false) }
-    var exampleCopiedTrigger by remember { mutableStateOf(0) }
+    var exampleCopied by remember { mutableStateOf(false) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -144,32 +145,38 @@ fun HostImportScreen(
                     DocumentReadOutcome.ReadError -> viewModel.reportReadError()
                 }
             } catch (e: Exception) {
-                Timber.w("Host import file read failed: ${e.message}")
+                Timber.w("Host import file read failed (${errorClass(e)})")
                 viewModel.reportReadError()
             }
         }
     }
 
-    // Résultat : snackbar puis retour à la liste (qui se rafraîchit via le repo).
+    // Résultat : message de 3 s puis retour à la liste (qui se rafraîchit via le repo). La fin du
+    // message, automatique ou fermée à la main, ramène à la liste : le délai suit ainsi le réglage
+    // d accessibilité « Délai de réaction ».
+    val importedCount = uiState.result?.imported ?: 0
+    val skippedCount = uiState.result?.skipped ?: 0
     val resultImported = stringResource(
         R.string.host_import_result,
-        uiState.result?.imported ?: 0,
-        uiState.result?.skipped ?: 0,
+        pluralStringResource(R.plurals.host_import_imported_count, importedCount, importedCount),
+        pluralStringResource(R.plurals.host_import_skipped_count, skippedCount, skippedCount),
     )
-    LaunchedEffect(uiState.result) {
-        if (uiState.result != null) {
-            snackbarHostState.showSnackbar(message = resultImported, duration = SnackbarDuration.Short)
-            viewModel.clear()
+
+    // Un seul retour : la flèche pressée pendant que le message s affiche, puis la fin de son délai,
+    // feraient deux `popBackStack()` et retireraient aussi la liste d hôtes.
+    var leaving by remember { mutableStateOf(false) }
+    val leave = {
+        if (!leaving) {
+            leaving = true
             onBack()
         }
     }
+    // Le retour système et le geste prédictif passent par le même retour gardé : sinon le NavHost
+    // dépilerait seul, l écran resterait composé le temps de l animation de sortie, et la fin du
+    // message ferait un second `popBackStack()`. Toujours actif (jamais derrière un `if`).
+    BackHandler(enabled = true) { leave() }
 
     val exampleCopiedMessage = stringResource(R.string.host_import_format_info_copied)
-    LaunchedEffect(exampleCopiedTrigger) {
-        if (exampleCopiedTrigger > 0) {
-            snackbarHostState.showSnackbar(message = exampleCopiedMessage, duration = SnackbarDuration.Short)
-        }
-    }
 
     val maxImportSizeMiB = (ImportFormatDetector.MAX_IMPORT_FILE_BYTES / (1024 * 1024)).toInt()
     val errorMessage = uiState.error?.let {
@@ -186,7 +193,8 @@ fun HostImportScreen(
             onCopyExample = {
                 val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 clipboardManager.setPrimaryClip(ClipData.newPlainText("nextsh import example", NEXTSH_IMPORT_FORMAT_EXAMPLE))
-                exampleCopiedTrigger++
+                // Android 13 et plus affiche déjà sa propre confirmation de copie.
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) exampleCopied = true
             },
         )
     }
@@ -204,7 +212,7 @@ fun HostImportScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = leave) {
                         Icon(
                             Lucide.ArrowLeft,
                             contentDescription = stringResource(R.string.action_back),
@@ -226,7 +234,23 @@ fun HostImportScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = NearBlack),
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        // Le slot du Scaffold dessine le message juste au-dessus de la barre Importer, sans décaler
+        // l aperçu.
+        snackbarHost = {
+            NextShMessage(
+                message   = if (uiState.result != null) resultImported else if (exampleCopied) exampleCopiedMessage else null,
+                isError   = false,
+                onDismiss = {
+                    if (uiState.result != null) {
+                        viewModel.clear()
+                        leave()
+                    } else {
+                        exampleCopied = false
+                    }
+                },
+                modifier  = Modifier.padding(horizontal = Spacing.Md, vertical = Spacing.Sm),
+            )
+        },
         bottomBar = {
             if (uiState.hasPreview) {
                 ImportBottomBar(
@@ -748,7 +772,7 @@ private fun readImportDocument(context: Context, uri: Uri): DocumentReadOutcome 
         val text = try {
             context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
         } catch (e: Exception) {
-            Timber.w("Host import: read failed for a document with known size (${e.message})")
+            Timber.w("Host import: read failed for a document with known size (${errorClass(e)})")
             null
         }
         return text?.let { DocumentReadOutcome.Content(it) } ?: DocumentReadOutcome.ReadError
@@ -767,7 +791,7 @@ private fun resolveDocumentSize(context: Context, uri: Uri): Long? = try {
         }
     }
 } catch (e: Exception) {
-    Timber.w("Host import: failed to resolve document size (${e.message})")
+    Timber.w("Host import: failed to resolve document size (${errorClass(e)})")
     null
 }
 
@@ -796,7 +820,7 @@ private fun readBoundedDocument(context: Context, uri: Uri, maxBytes: Long): Doc
         outcome ?: DocumentReadOutcome.Content(buffer.toString(Charsets.UTF_8.name()))
     } ?: DocumentReadOutcome.ReadError
 } catch (e: Exception) {
-    Timber.w("Host import: bounded read failed (${e.message})")
+    Timber.w("Host import: bounded read failed (${errorClass(e)})")
     DocumentReadOutcome.ReadError
 }
 

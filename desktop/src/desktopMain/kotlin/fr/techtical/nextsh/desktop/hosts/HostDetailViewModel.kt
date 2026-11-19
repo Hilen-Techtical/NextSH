@@ -4,6 +4,11 @@
 package fr.techtical.nextsh.desktop.hosts
 
 import fr.techtical.nextsh.desktop.data.di.DesktopContainer
+import fr.techtical.nextsh.desktop.scope.ScreenViewModel
+import fr.techtical.nextsh.desktop.service.DesktopTunnelService
+import fr.techtical.nextsh.shared.core.backup.BackupFieldProblem
+import fr.techtical.nextsh.shared.core.backup.BackupLimits
+import fr.techtical.nextsh.shared.core.backup.BackupValidator
 import fr.techtical.nextsh.shared.domain.model.AuthType
 import fr.techtical.nextsh.shared.domain.model.CustomTerminalTheme
 import fr.techtical.nextsh.shared.domain.model.Fido2Mode
@@ -15,7 +20,10 @@ import fr.techtical.nextsh.shared.domain.repository.HostRepository
 import fr.techtical.nextsh.shared.domain.repository.SshKeyRepository
 import fr.techtical.nextsh.shared.domain.vault.VaultManager
 import fr.techtical.nextsh.shared.util.AppScope
+import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import fr.techtical.nextsh.shared.util.randomUuid
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -63,12 +71,73 @@ data class HostDetailFormState(
     val certAlreadyStored: Boolean = false,
     val isLoading: Boolean = false,
     val isSaving: Boolean = false,
-    val error: String? = null,
+    val error: HostFormError? = null,
+    /**
+     * Why the last save was refused by the data layer, or null. Typed so that the screen localizes it
+     * ([error] is the form validation, typed the same way); cleared when the user edits the form.
+     */
+    val saveError: HostSaveError? = null,
 ) {
+    /**
+     * True when the typed host name could not be restored from a backup (inner space, control or invisible
+     * character, over 255 chars). Judged after trimming, like the saved value. An empty field is not flagged
+     * here: the required-field check covers it.
+     */
+    val hostnameInvalid: Boolean
+        get() = hostname.isNotBlank() && !BackupValidator.isValidHostName(hostname.trim())
+
+    /**
+     * Why the typed user name is refused, or null. Judged after trimming, like the saved value. A user name
+     * with a control character could never connect, and a restore cleans it: the editor refuses it so that
+     * what is saved is what a backup gives back. An empty field is not flagged: the required-field check
+     * covers it.
+     */
+    val usernameProblem: BackupFieldProblem?
+        get() {
+            val trimmed = username.trim()
+            return when {
+                trimmed.length > BackupLimits.MAX_FREE_TEXT_LENGTH -> BackupFieldProblem.TOO_LONG
+                trimmed.any { it.isISOControl() } -> BackupFieldProblem.CONTROL_CHARACTER
+                else -> null
+            }
+        }
+
     val isExisting: Boolean get() = hostId != null
     val usesKeyAuth: Boolean get() = authType == AuthType.SSH_KEY || authType == AuthType.CERTIFICATE
 }
 
+/** Why the form was refused before any write. Typed so that the screen localizes it. */
+enum class HostFormError {
+    HOST_NOT_FOUND,
+    HOST_DELETED,
+    LABEL_REQUIRED,
+    HOSTNAME_REQUIRED,
+    PORT_OUT_OF_RANGE,
+    USERNAME_REQUIRED,
+    KEY_REQUIRED,
+    KEY_MISSING,
+    CERT_REQUIRED,
+    FIDO2_KEY_REQUIRED,
+    FIDO2_KEY_MISSING,
+    BIOMETRIC_UNSUPPORTED,
+}
+
+/** A save that passed the form validation but could not be written. */
+enum class HostSaveError {
+    /** The host could not be written. Nothing was saved. */
+    SAVE_FAILED,
+
+    /** The host row was written, but its password or certificate could not be stored in the vault. */
+    VAULT_FAILED,
+}
+
+private const val TAG = "HostDetailViewModel"
+
+/**
+ * ViewModel du formulaire d'un hôte. Le chargement du formulaire et l'observation des thèmes vivent dans le
+ * scope de l'écran ; l'enregistrement, la suppression et la gestion des thèmes restent dans le scope de
+ * l'app pour aller au bout même si l'écran est quitté juste après.
+ */
 class HostDetailViewModel(
     private val repository: HostRepository = DesktopContainer.hostRepository,
     private val sshKeyRepository: SshKeyRepository = DesktopContainer.sshKeyRepository,
@@ -76,18 +145,19 @@ class HostDetailViewModel(
         DesktopContainer.hostFolderRepository,
     private val vaultManager: VaultManager = DesktopContainer.vaultManager,
     private val customThemeRepository: CustomTerminalThemeRepository = DesktopContainer.customThemeRepository,
-    private val appScope: AppScope = DesktopContainer.appScope,
-) {
+    appScope: AppScope = DesktopContainer.appScope,
+    private val tunnelService: DesktopTunnelService = DesktopContainer.tunnelService,
+) : ScreenViewModel(appScope) {
     private val _state = MutableStateFlow(HostDetailFormState(credentialId = randomUuid()))
     val state: StateFlow<HostDetailFormState> = _state.asStateFlow()
 
     /** User-defined terminal themes, observed for the per-host theme selector. */
     val customThemes: StateFlow<List<CustomTerminalTheme>> =
         customThemeRepository.observeAll()
-            .stateIn(appScope.coroutineScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            .stateIn(screenScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun load(hostId: String?) {
-        appScope.coroutineScope.launch {
+        screenScope.launch {
             val allKeys = sshKeyRepository.observeAll().first()
             // Exportable keys: exclude biometric TEE (Android-only) and FIDO2 hardware keys.
             // Both have `null` PEM in the vault, so auth would fail anyway: hiding them
@@ -109,7 +179,7 @@ class HostDetailViewModel(
                 )
                 return@launch
             }
-            _state.value = _state.value.copy(isLoading = true, error = null)
+            _state.value = _state.value.copy(isLoading = true, error = null, saveError = null)
             val host = repository.getById(hostId)
             _state.value = if (host != null) {
                 val certStored = host.authType == AuthType.CERTIFICATE &&
@@ -135,19 +205,19 @@ class HostDetailViewModel(
                     availableKeys = keys,
                     availableFido2Keys = fido2Keys,
                     availableGroups = groups,
-                    error = "Hôte introuvable",
+                    error = HostFormError.HOST_NOT_FOUND,
                 )
             }
         }
     }
 
-    fun onLabel(v: String) { _state.value = _state.value.copy(label = v, error = null) }
-    fun onHostname(v: String) { _state.value = _state.value.copy(hostname = v, error = null) }
+    fun onLabel(v: String) { _state.value = _state.value.copy(label = v, error = null, saveError = null) }
+    fun onHostname(v: String) { _state.value = _state.value.copy(hostname = v, error = null, saveError = null) }
     fun onPort(v: String) {
-        if (v.all { it.isDigit() } && v.length <= 5) _state.value = _state.value.copy(port = v, error = null)
+        if (v.all { it.isDigit() } && v.length <= 5) _state.value = _state.value.copy(port = v, error = null, saveError = null)
     }
-    fun onUsername(v: String) { _state.value = _state.value.copy(username = v, error = null) }
-    fun onGroup(v: String) { _state.value = _state.value.copy(group = v, error = null) }
+    fun onUsername(v: String) { _state.value = _state.value.copy(username = v, error = null, saveError = null) }
+    fun onGroup(v: String) { _state.value = _state.value.copy(group = v, error = null, saveError = null) }
 
     fun onAuthType(v: AuthType) {
         val cur = _state.value
@@ -167,25 +237,31 @@ class HostDetailViewModel(
         _state.value = cur.copy(
             authType = v,
             credentialId = newCredentialId,
-            error = null,
+            error = null, saveError = null,
             pendingCertPem = if (v == AuthType.CERTIFICATE) cur.pendingCertPem else null,
             pendingCertFileName = if (v == AuthType.CERTIFICATE) cur.pendingCertFileName else null,
         )
     }
 
     fun onSelectKey(keyId: String) {
-        _state.value = _state.value.copy(credentialId = keyId, error = null)
+        _state.value = _state.value.copy(credentialId = keyId, error = null, saveError = null)
     }
 
     fun onCertLoaded(pem: String, fileName: String) {
         _state.value = _state.value.copy(
             pendingCertPem = pem,
             pendingCertFileName = fileName,
-            error = null,
+            error = null, saveError = null,
         )
     }
 
-    fun onTerminalTheme(v: String) { _state.value = _state.value.copy(terminalTheme = v, error = null) }
+    fun onTerminalTheme(v: String) { _state.value = _state.value.copy(terminalTheme = v, error = null, saveError = null) }
+
+    /**
+     * The password text lives in the screen, not in [state] (never keep a secret in a state that can be
+     * logged or copied). The screen calls this on every keystroke so the stale error banner goes away.
+     */
+    fun onPasswordEdited() { _state.value = _state.value.copy(error = null, saveError = null) }
 
     /**
      * Create or update a custom terminal theme from the Host detail screen, no
@@ -212,6 +288,23 @@ class HostDetailViewModel(
         }
     }
 
+    /**
+     * Save entry point of the screen. [typedPassword] is the text of the password field: it is copied into
+     * a fresh CharArray for each attempt (which [save] wipes), and the field itself must be cleared by
+     * [onSaved] only, that is once the save went through. If the save is refused the screen still holds
+     * what the user typed, so a retry stores the password too: after a vault failure on a NEW host the
+     * form has turned into an existing-host form, and an empty field would mean "keep the stored password",
+     * that is no password at all.
+     */
+    fun saveForm(typedPassword: String, onSaved: () -> Unit) {
+        val chars = if (_state.value.authType == AuthType.PASSWORD && typedPassword.isNotEmpty()) {
+            typedPassword.toCharArray()
+        } else {
+            null
+        }
+        save(chars, onSaved)
+    }
+
     fun save(password: CharArray?, onDone: () -> Unit) {
         val s = _state.value
         val validation = validate(s)
@@ -220,8 +313,14 @@ class HostDetailViewModel(
             password?.let { Arrays.fill(it, '\u0000') }
             return
         }
-        _state.value = s.copy(isSaving = true, error = null)
+        if (s.hostnameInvalid || s.usernameProblem != null) {
+            // The reason is already under the field: nothing is written.
+            password?.let { Arrays.fill(it, '\u0000') }
+            return
+        }
+        _state.value = s.copy(isSaving = true, error = null, saveError = null)
         appScope.coroutineScope.launch {
+            var hostWritten = false
             try {
                 // Re-read the stored host so fields the form does not own are current.
                 // Null means it was deleted meanwhile: write nothing (host or vault);
@@ -231,7 +330,7 @@ class HostDetailViewModel(
                     repository.getById(storedId) ?: run {
                         _state.value = _state.value.copy(
                             isSaving = false,
-                            error = "Cet hôte a été supprimé entre-temps, rien n'a été enregistré.",
+                            error = HostFormError.HOST_DELETED,
                         )
                         return@launch
                     }
@@ -239,7 +338,15 @@ class HostDetailViewModel(
                     null
                 }
                 val host = buildHost(s, stored, randomUuid())
-                if (stored != null) repository.update(host) else repository.save(host)
+                if (stored != null) {
+                    repository.update(host)
+                } else {
+                    repository.save(host)
+                    // The host exists from now on. Remember its id so that a retry (after a vault failure
+                    // below, say) goes through update instead of creating a second, duplicate host.
+                    _state.value = _state.value.copy(hostId = host.id)
+                }
+                hostWritten = true
 
                 when (s.authType) {
                     AuthType.PASSWORD -> {
@@ -258,6 +365,18 @@ class HostDetailViewModel(
                 }
                 _state.value = _state.value.copy(isSaving = false)
                 onDone()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A refused write used to leave isSaving stuck on true, with the Save button disabled for
+                // good. The two cases are told apart: the host row may already be written when the vault
+                // write is the one that failed. Class name only in the log: an exception message can quote
+                // row values.
+                Logger.e(TAG, "save: failed (${errorClass(e)}, hostWritten=$hostWritten)")
+                _state.value = _state.value.copy(
+                    isSaving = false,
+                    saveError = if (hostWritten) HostSaveError.VAULT_FAILED else HostSaveError.SAVE_FAILED,
+                )
             } finally {
                 password?.let { Arrays.fill(it, '\u0000') }
             }
@@ -268,6 +387,16 @@ class HostDetailViewModel(
         val s = _state.value
         val id = s.hostId ?: return
         appScope.coroutineScope.launch {
+            // The host's tunnels go with it: stop the running ones first (the delete only touches the
+            // database and would leave them forwarding, with no row in the list).
+            try {
+                tunnelService.stopTunnelsOfHost(id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Stopping is best effort: the delete goes on. Class name only in the log.
+                Logger.e(TAG, "delete: stopping the host tunnels failed (${errorClass(e)})")
+            }
             repository.delete(id)
             // SECURITY: only purge what this host *owns*, and only that type. A PASSWORD
             // host owns its password slot, and nothing else: its credentialId may be the
@@ -284,27 +413,27 @@ class HostDetailViewModel(
         }
     }
 
-    private fun validate(s: HostDetailFormState): String? {
-        if (s.label.isBlank()) return "Le label est requis"
-        if (s.hostname.isBlank()) return "Le hostname est requis"
+    private fun validate(s: HostDetailFormState): HostFormError? {
+        if (s.label.isBlank()) return HostFormError.LABEL_REQUIRED
+        if (s.hostname.isBlank()) return HostFormError.HOSTNAME_REQUIRED
         val port = s.port.toIntOrNull()
-        if (port == null || port !in 1..65535) return "Le port doit être entre 1 et 65535"
-        if (s.username.isBlank()) return "Le nom d'utilisateur est requis"
+        if (port == null || port !in 1..65535) return HostFormError.PORT_OUT_OF_RANGE
+        if (s.username.isBlank()) return HostFormError.USERNAME_REQUIRED
         return when (s.authType) {
             AuthType.SSH_KEY, AuthType.CERTIFICATE -> when {
-                s.credentialId.isBlank() -> "Sélectionnez une clé SSH dans le vault"
-                s.availableKeys.none { it.id == s.credentialId } -> "La clé sélectionnée n'est plus dans le vault"
+                s.credentialId.isBlank() -> HostFormError.KEY_REQUIRED
+                s.availableKeys.none { it.id == s.credentialId } -> HostFormError.KEY_MISSING
                 s.authType == AuthType.CERTIFICATE && s.pendingCertPem == null && !s.certAlreadyStored ->
-                    "Sélectionnez le fichier -cert.pub du certificat"
+                    HostFormError.CERT_REQUIRED
                 else -> null
             }
             AuthType.FIDO2 -> when {
-                s.credentialId.isBlank() -> "Sélectionnez une clé FIDO2 (sk-*) dans le vault"
-                s.availableFido2Keys.none { it.id == s.credentialId } -> "La clé FIDO2 sélectionnée n'est plus dans le vault"
+                s.credentialId.isBlank() -> HostFormError.FIDO2_KEY_REQUIRED
+                s.availableFido2Keys.none { it.id == s.credentialId } -> HostFormError.FIDO2_KEY_MISSING
                 else -> null
             }
             AuthType.BIOMETRIC_KEY ->
-                "Auth biométrique non disponible côté Desktop (Android uniquement)"
+                HostFormError.BIOMETRIC_UNSUPPORTED
             AuthType.PASSWORD -> null
         }
     }

@@ -74,11 +74,13 @@ import fr.techtical.nextsh.desktop.theme.TextSecondary
 import fr.techtical.nextsh.shared.core.sync.EnrolledDevice
 import fr.techtical.nextsh.shared.core.sync.Platform
 import fr.techtical.nextsh.desktop.generated.resources.Res
+import fr.techtical.nextsh.desktop.generated.resources.action_ok
 import fr.techtical.nextsh.desktop.generated.resources.action_cancel
 import fr.techtical.nextsh.desktop.generated.resources.enrolled_devices_action_back
 import fr.techtical.nextsh.desktop.generated.resources.enrolled_devices_action_revoke_short
 import fr.techtical.nextsh.desktop.generated.resources.enrolled_devices_empty_hint
 import fr.techtical.nextsh.desktop.generated.resources.enrolled_devices_empty_title
+import fr.techtical.nextsh.desktop.generated.resources.enrolled_devices_error_revoke_failed
 import fr.techtical.nextsh.desktop.generated.resources.enrolled_devices_event_error
 import fr.techtical.nextsh.desktop.generated.resources.enrolled_devices_event_revoked
 import fr.techtical.nextsh.desktop.generated.resources.enrolled_devices_meta_enrolled
@@ -113,11 +115,17 @@ fun EnrolledDevicesScreen(onBack: () -> Unit) {
 
     val revokedTemplate = stringResource(Res.string.enrolled_devices_event_revoked, "%1\$s")
     val errorTemplate = stringResource(Res.string.enrolled_devices_event_error, "%1\$s")
+    val revokeFailedText = stringResource(Res.string.enrolled_devices_error_revoke_failed)
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
             transientMessage = when (event) {
                 is EnrolledDevicesViewModel.Event.Revoked -> revokedTemplate.replace("%1\$s", event.deviceName)
-                is EnrolledDevicesViewModel.Event.Error -> errorTemplate.replace("%1\$s", event.message)
+                is EnrolledDevicesViewModel.Event.Error -> errorTemplate.replace(
+                    "%1\$s",
+                    when (event.reason) {
+                        EnrolledDevicesViewModel.ErrorReason.RevokeFailed -> revokeFailedText
+                    },
+                )
             }
         }
     }
@@ -198,7 +206,7 @@ fun EnrolledDevicesScreen(onBack: () -> Unit) {
             text = { Text(toastMsg, color = TextSecondary) },
             confirmButton = {
                 TextButton(onClick = { transientMessage = null }) {
-                    Text("OK", color = Gold)
+                    Text(stringResource(Res.string.action_ok), color = Gold)
                 }
             },
             containerColor = Surface,
@@ -298,10 +306,10 @@ private fun DeviceCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            MetaLine(label = stringResource(Res.string.enrolled_devices_meta_enrolled), value = relativeTime(device.enrolledAt))
+            MetaLine(label = stringResource(Res.string.enrolled_devices_meta_enrolled), value = relativeTime(device.enrolledAt).text)
             MetaLine(
                 label = stringResource(Res.string.enrolled_devices_meta_last_sync),
-                value = device.lastSyncAt?.let { relativeTime(it) } ?: stringResource(Res.string.enrolled_devices_meta_never),
+                value = device.lastSyncAt?.let { relativeTime(it).text } ?: stringResource(Res.string.enrolled_devices_meta_never),
                 valueColor = if (device.lastSyncAt != null) SuccessGreen else TextDisabled,
             )
         }

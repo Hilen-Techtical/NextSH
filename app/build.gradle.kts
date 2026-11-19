@@ -66,8 +66,8 @@ android {
         applicationId = "fr.techtical.nextsh"
         minSdk = 29
         targetSdk = 36
-        versionCode = 9
-        versionName = "1.0.1"
+        versionCode = 10
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -177,10 +177,6 @@ dependencies {
     // Security / Vault
     implementation(libs.bundles.security)
 
-    // Credentials (FIDO2 / Passkey, expérimental)
-    implementation(libs.androidx.credentials)
-    implementation(libs.androidx.credentials.play.services)
-
     // FIDO2 Hardware Key (YubiKit)
     implementation(libs.bundles.fido2)
 
@@ -247,18 +243,20 @@ tasks.withType<Test> {
         .withPathSensitivity(PathSensitivity.RELATIVE)
     systemProperty("proguardRules", file("proguard-rules.pro").absolutePath)
 
-    // Les gardes de source des champs secrets (HostDetailPasswordFieldGuardTest,
-    // SecretFieldsKeyboardGuardTest) lisent les sources de l ecran et les strings.xml a l
-    // execution. Sans les declarer comme entrees, une modification qui ne change pas les classes
-    // compilees (ressource, ou retrait d une option deja sans effet sur le bytecode) laisserait la
-    // tache Test UP-TO-DATE ou FROM-CACHE (org.gradle.caching=true) et le garde ne tournerait pas.
+    // Les gardes de source (champs secrets, textes en dur de l interface, messages SFTP) lisent
+    // les sources Kotlin (ui, mais aussi core/ssh et domain/usecase) et les strings.xml a
+    // l execution. Sans les declarer comme entrees, une modification qui ne change pas les classes
+    // compilees (ressource, retrait d une option sans effet sur le bytecode, const val remplace
+    // par son litteral : bytecode identique) laisserait la tache Test UP-TO-DATE ou FROM-CACHE
+    // (org.gradle.caching=true) et le garde ne tournerait pas. Toute l arborescence nextsh est
+    // declaree, pas seulement ui : une nouvelle garde sur un autre paquet n a rien a oublier.
     inputs.file("src/main/res/values/strings.xml")
         .withPropertyName("guardStringsFr")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file("src/main/res/values-en/strings.xml")
         .withPropertyName("guardStringsEn")
         .withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.dir("src/main/kotlin/fr/techtical/nextsh/ui")
-        .withPropertyName("guardUiSources")
+    inputs.dir("src/main/kotlin/fr/techtical/nextsh")
+        .withPropertyName("guardMainSources")
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }

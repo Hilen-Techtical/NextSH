@@ -7,6 +7,7 @@ import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.ptr.IntByReference
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
@@ -187,7 +188,7 @@ internal fun applyCloak(
         }
     } catch (e: Throwable) {
         // JNA load failure, bad handle: never let it reach the UI.
-        Logger.w(TAG, "DWMWA_CLOAK=$cloaked failed: ${e.message}")
+        Logger.w(TAG, "DWMWA_CLOAK=$cloaked failed (${errorClass(e)})")
         false
     }
 }
@@ -237,13 +238,13 @@ internal suspend fun awaitFirstFrameThenReveal(
     } catch (e: CancellationException) {
         throw e
     } catch (e: Throwable) {
-        Logger.w(TAG, "waiting for the first frame failed: ${e.message}")
+        Logger.w(TAG, "waiting for the first frame failed (${errorClass(e)})")
         trace("first frame wait failed, uncloaking")
     } finally {
         try {
             uncloak()
         } catch (e: Throwable) {
-            Logger.w(TAG, "uncloak failed: ${e.message}")
+            Logger.w(TAG, "uncloak failed (${errorClass(e)})")
         } finally {
             onRevealed()
         }

@@ -9,12 +9,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 @Composable
 fun SessionTabsScreen(
     hostId: String? = null,
+    sessionId: String? = null,
     onBack: () -> Unit,
     onNavigateToSftp: (sessionId: String, hostLabel: String) -> Unit = { _, _ -> },
     viewModel: SessionViewModel = hiltViewModel(),
 ) {
     TerminalScreen(
         hostId           = hostId,
+        sessionId        = sessionId,
         onBack           = onBack,
         onNavigateToSftp = onNavigateToSftp,
         viewModel        = viewModel,

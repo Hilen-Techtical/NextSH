@@ -190,7 +190,7 @@ fun SessionTabsScreen(
                 }
             },
             onOpenSftp = if (activeTab != null && focusedConnectedSshSessionId != null) {
-                { sessionManager.openSftpTab(activeTab.host, focusedConnectedSshSessionId) }
+                { sessionManager.openSftpTab(focusedPaneHost(activeTab.content), focusedConnectedSshSessionId) }
             } else null,
             onSplitAsSftp = if (activeTab != null && focusedConnectedSshSessionId != null) {
                 {
@@ -357,15 +357,9 @@ private fun PaneHost(
                 connected?.terminal?.latencyMs?.collectAsState()
                     ?: remember(connected?.terminal) { mutableStateOf<Long?>(null) }
                 )
-            // For split panes the second pane connects to a different host
-            // than `tab.host` (the tab-level host belongs to the first pane).
-            // Resolve the actual host via the SSH session id when available,
-            // fall back to `tab.host` for the AwaitingPassword/Connecting/
-            // root-pane case where there's no SSH session yet.
-            val paneHost = connected?.let {
-                sessionManager.hostForSshSession(it.sshSessionId)
-            } ?: (content.status as? TerminalTabStatus.AwaitingPassword)?.host
-                ?: tab.host
+            // Each pane carries its own host (a split pane may target another
+            // server than `tab.host`), valid in every status.
+            val paneHost = content.host
             PaneHeader(
                 icon = PaneIcon.Terminal,
                 hostName = paneHost.label.takeUnless { it.isBlank() } ?: paneHost.hostname,
@@ -392,6 +386,7 @@ private fun PaneHost(
                 sessionManager = sessionManager,
                 onSubmitPassword = { pwd -> sessionManager.submitPasswordAt(tab.tabId, path, pwd) },
                 onReconnect = { sessionManager.reconnectAt(tab.tabId, path) },
+                onClose = { onClosePaneAt(tab.tabId, path) },
                 modifier = Modifier.fillMaxSize().weight(1f),
             )
         }
@@ -405,10 +400,9 @@ private fun PaneHost(
                 linkedSession?.latencyMs?.collectAsState()
                     ?: remember(linkedSession) { mutableStateOf<Long?>(null) }
                 )
-            // SFTP pane reuses the SSH session of an attached terminal: its
-            // host identity is the host of that linked SSH session, NOT
-            // `tab.host` (which is only the tab-level primary host).
-            val paneHost = sessionManager.hostForSshSession(content.linkedSshSessionId) ?: tab.host
+            // The SFTP pane carries the host of the pane it was opened from, NOT
+            // `tab.host` (which is only the tab-level host).
+            val paneHost = content.host
             PaneHeader(
                 icon = PaneIcon.Sftp,
                 hostName = paneHost.label.takeUnless { it.isBlank() } ?: paneHost.hostname,
@@ -436,12 +430,11 @@ private fun PaneHost(
                 is SftpTabState.Open -> SftpBrowserScreen(
                     sessionId = content.linkedSshSessionId,
                     tabId = tab.tabId,
+                    // The identity of THIS browser, stable wherever it sits in the tree:
+                    // A position in the tree is not one (see TabContent.Sftp.paneId); the
+                    // current folder is remembered under this id too.
+                    paneId = content.paneId,
                     initialCwd = state.cwd,
-                    // SftpBrowserScreen still takes a single PaneSlot for cwd
-                    // routing: pass the last segment of the path (good enough
-                    // for one level of nesting; deeper SFTP panes don't have
-                    // their cwd persisted across tab switches yet).
-                    paneSlot = path.lastOrNull(),
                     modifier = Modifier.fillMaxSize().weight(1f),
                 )
                 is SftpTabState.Error -> Column(

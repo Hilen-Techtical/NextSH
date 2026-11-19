@@ -37,6 +37,7 @@ import fr.techtical.nextsh.desktop.components.SidebarTab
 import fr.techtical.nextsh.desktop.core.diagnostics.StartupTrace
 import fr.techtical.nextsh.desktop.core.security.WindowSecurityState
 import fr.techtical.nextsh.desktop.data.di.DesktopContainer
+import fr.techtical.nextsh.desktop.data.di.VaultWipeState
 import fr.techtical.nextsh.desktop.data.preferences.DesktopSettingsStore
 import fr.techtical.nextsh.desktop.data.preferences.LanguagePref
 import fr.techtical.nextsh.desktop.generated.resources.Res
@@ -54,6 +55,7 @@ import fr.techtical.nextsh.desktop.window.screenFor
 import fr.techtical.nextsh.desktop.window.usableScreenBounds
 import fr.techtical.nextsh.shared.domain.model.TunnelStatus
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import net.i2p.crypto.eddsa.EdDSASecurityProvider
@@ -379,6 +381,9 @@ fun main() {
                 // on the main window behind it while it's open (e.g.
                 // Ctrl+Shift+W silently closing a tab underneath it).
                 if (DesktopContainer.shortcutsWindowVisible.value) return@KeyEventDispatcher false
+                // The vault wipe (running or failed, awaiting a retry) holds a modal: no global shortcut
+                // may leave the screen or open anything meanwhile.
+                if (DesktopContainer.vaultWipeState.value != VaultWipeState.IDLE) return@KeyEventDispatcher false
                 val ctrl = (ev.modifiersEx and KeyEvent.CTRL_DOWN_MASK) != 0
                 val shift = (ev.modifiersEx and KeyEvent.SHIFT_DOWN_MASK) != 0
                 when {
@@ -843,8 +848,10 @@ fun main() {
             // open + session manager init happen once on first picker open
             // (~100-500 ms), then are cached for subsequent opens.
             if (snippetPickerOpen) {
-                val snippets by DesktopContainer.snippetRepository.observeAll()
-                    .collectAsState(initial = emptyList())
+                // Remembered: a flow rebuilt on every recomposition makes collectAsState resubscribe and the
+                // database re-run its SELECT.
+                val snippetsFlow = remember { DesktopContainer.snippetRepository.observeAll() }
+                val snippets by snippetsFlow.collectAsState(initial = emptyList())
                 val sessionManager = remember { DesktopContainer.sessionManager }
                 SnippetPickerDialog(
                     snippets = snippets,
@@ -884,8 +891,8 @@ fun main() {
             // (SessionTabsScreen). Hoisted here so the keyboard shortcut works
             // regardless of which Compose subtree has focus.
             if (newTabPickerOpen) {
-                val hosts by DesktopContainer.hostRepository.observeAll()
-                    .collectAsState(initial = emptyList())
+                val hostsFlow = remember { DesktopContainer.hostRepository.observeAll() }
+                val hosts by hostsFlow.collectAsState(initial = emptyList())
                 val sessionManager = remember { DesktopContainer.sessionManager }
                 HostPickerDialog(
                     hosts = hosts,
@@ -1366,7 +1373,7 @@ internal fun runExitSequence(hide: () -> Unit, shutdown: () -> Unit, exit: () ->
     try {
         hide()
     } catch (e: Exception) {
-        Logger.w("ExitSequence", "hiding the window before exit failed: ${e.javaClass.simpleName}")
+        Logger.w("ExitSequence", "hiding the window before exit failed: ${errorClass(e)}")
     }
     try {
         shutdown()

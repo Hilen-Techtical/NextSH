@@ -40,6 +40,22 @@ data class VectorClock(val entries: Map<String, Long>) {
         return VectorClock(merged)
     }
 
+    /**
+     * Clock of a version that replaces both this one and [other]: [mergedWith] then [tick]
+     * of [deviceId]. The result strictly dominates both clocks, whether they were
+     * concurrent or one already dominated the other.
+     *
+     * The tick is mandatory. A plain merge equals the dominating clock when one side
+     * already dominates, and two devices resolving the same conflict with a plain merge
+     * would end on EQUAL clocks holding DIFFERENT payloads. `CrdtEngine.merge` treats
+     * equal clocks as Clean(local), so each side would keep its own payload forever.
+     * The tick adds a counter that only [deviceId] owns, so the peer applies the version
+     * as a clean update and two simultaneous resolutions stay concurrent (a visible
+     * conflict instead of a silent divergence).
+     */
+    fun supersede(other: VectorClock, deviceId: String, nowMs: Long): VectorClock =
+        mergedWith(other).tick(deviceId, nowMs)
+
     companion object {
         val EMPTY = VectorClock(emptyMap())
     }

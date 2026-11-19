@@ -32,7 +32,7 @@ import fr.techtical.nextsh.data.db.entity.TunnelEntity
         PendingConflictEntity::class,
         CustomTerminalThemeEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -163,6 +163,16 @@ abstract class AppDatabase : RoomDatabase() {
                         updatedAt INTEGER NOT NULL DEFAULT 0
                     )
                 """.trimIndent())
+            }
+        }
+
+        // Per-tunnel start path of the in-app browser. Every migration MUST be registered
+        // in DatabaseModule.addMigrations: the builder falls back to a destructive
+        // migration, so a missing one silently wipes the user's database
+        // (AppDatabaseMigrationGuardTest guards this).
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tunnels ADD COLUMN browserPath TEXT NOT NULL DEFAULT '/'")
             }
         }
     }

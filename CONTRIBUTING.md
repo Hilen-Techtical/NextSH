@@ -123,8 +123,24 @@ sure these checks pass locally before opening a PR.
 
 - **Zero credentials in source code.** Use environment variables or vault
   storage.
-- **Zero sensitive data in logs.** Passwords, tokens, private keys must
-  never appear in Timber output (release `ReleaseTree` filters these).
+- **No user value in logs, at any level (debug included).** A log line
+  carries fixed text, operation and state names, counts, sizes, durations,
+  numeric codes, algorithm names and exception class names. Never a secret,
+  a host name, label, user name, path, file name, URI, key alias,
+  fingerprint, device name, text sent by a peer or a server, or an
+  exception message.
+  - Ids (entities, devices, sessions) go through `LogId.of(id)`, exceptions
+    through `errorClass(e)` or as the throwable argument (`Timber.w(e,
+    "text")`): the Timber trees (`ReleaseLogTree`, `DebugLogTree`) keep only
+    its class chain, or a stack trace without messages.
+  - Write `Timber.tag(TAG).d("text")`, never `Timber.d(TAG, "text")`: Timber
+    takes the first argument as the message.
+  - `LogScrubber` and the trees mask what slips through by shape, they are
+    a safety net and not a substitute for the rule above.
+  - `LogHygieneGuardTest` reads the sources and fails the build on a log
+    call that breaks the rule. A justified exception carries a
+    `log-guard:allow <reason>` comment on the line of the call or on the
+    line before it.
 - Use `CharArray` instead of `String` for credentials, and wipe with
   `Arrays.fill(buffer, '\0')` after use.
 - Validate and sanitize all input at trust boundaries (UI, SSH responses,

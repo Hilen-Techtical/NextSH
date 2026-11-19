@@ -4,7 +4,10 @@
 package fr.techtical.nextsh.desktop.core.ssh
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import fr.techtical.nextsh.desktop.assertNothingScrubbed
+import fr.techtical.nextsh.desktop.captureLogs
 import fr.techtical.nextsh.desktop.db.NextShDatabase
+import fr.techtical.nextsh.desktop.taggedBy
 import kotlinx.coroutines.test.runTest
 import java.security.PublicKey
 import kotlin.test.AfterTest
@@ -145,6 +148,43 @@ class DesktopKnownHostsVerifierTest {
         assertTrue(first)
         assertTrue(second)
         assertEquals(1, callCount, "second connect must skip the prompt: callback only fires once")
+    }
+
+    // ── Log content ───────────────────────────────────────────────────────────
+
+    @Test
+    fun `verify logs name the key algorithm and never the host or a fingerprint`() = runTest {
+        // A single label host cannot be recognised by the scrubber: only the call site keeps it out.
+        val host = "bastion-prod"
+        store.upsert("$host:2222", "ssh-ed25519", byteArrayOf(1, 2, 3))
+        val received = fakeKey("ssh-ed25519", byteArrayOf(9, 9, 9))
+        val mismatch = verifier.checkKey(host, 2222, received)
+        assertIs<HostKeyVerifyResult.Mismatch>(mismatch)
+
+        val captured = captureLogs {
+            // Mismatch.
+            verifier.verify(host, 2222, received)
+            // Unknown host, no callback.
+            verifier.verify("other-host", 2222, fakeKey("ssh-ed25519", byteArrayOf(5)))
+            // Unknown host, rejected then accepted.
+            verifier.unknownHostCallback = { _ -> false }
+            verifier.verify("third-host", 2222, fakeKey("ssh-ed25519", byteArrayOf(6)))
+            verifier.unknownHostCallback = { _ -> true }
+            verifier.verify("third-host", 2222, fakeKey("ssh-ed25519", byteArrayOf(6)))
+        }
+
+        // The sink is global: count only what the verifier wrote, but look for leaks in every line.
+        val lines = captured.taggedBy("DesktopKnownHostsVerifier")
+        assertTrue(lines.any { it.contains("HOST KEY MISMATCH, algorithm=ssh-ed25519") }, "got $captured")
+        assertEquals(4, lines.size, "expected one line per outcome, got $captured")
+        assertTrue(
+            captured.none { line ->
+                listOf("bastion-prod", "other-host", "third-host", "2222", mismatch.storedFingerprint, mismatch.receivedFingerprint)
+                    .any { line.contains(it) }
+            },
+            "a host, a port or a fingerprint leaked: $captured",
+        )
+        assertNothingScrubbed(lines)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -26,7 +26,6 @@ package fr.techtical.nextsh.desktop.sessions
 // compose-session cache headlessly (jediterm-core only, no Swing).
 // ──────────────────────────────────────────────────────────────────────────────
 
-import com.jediterm.terminal.TtyConnector
 import fr.techtical.nextsh.desktop.core.ssh.DesktopKnownHostsVerifier
 import fr.techtical.nextsh.desktop.core.ssh.DesktopSftpManager
 import fr.techtical.nextsh.desktop.core.ssh.DesktopSshSessionManager
@@ -108,11 +107,13 @@ class DesktopSessionManagerFocusTest {
             sshSessionId = sshSessionId,
             terminal     = mockk<DesktopSshTerminalSession>(relaxed = true),
         ),
+        host   = makeHost("A"),
     )
 
     private fun sftpPane() = TabContent.Sftp(
         linkedSshSessionId = "linked",
         state              = SftpTabState.Opening,
+        host               = makeHost("A"),
     )
 
     // ── terminalFocusEpoch ────────────────────────────────────────────────────
@@ -146,13 +147,13 @@ class DesktopSessionManagerFocusTest {
     fun `non-connected terminal states resolve to null`() {
         val host = makeHost("A")
         assertNull(focusedConnectedTerminalId(
-            TabContent.Terminal(theme, TerminalTabStatus.Connecting)))
+            TabContent.Terminal(theme, TerminalTabStatus.Connecting, host)))
         assertNull(focusedConnectedTerminalId(
-            TabContent.Terminal(theme, TerminalTabStatus.AwaitingPassword(host))))
+            TabContent.Terminal(theme, TerminalTabStatus.AwaitingPassword(host), host)))
         assertNull(focusedConnectedTerminalId(
-            TabContent.Terminal(theme, TerminalTabStatus.Disconnected("gone"))))
+            TabContent.Terminal(theme, TerminalTabStatus.Disconnected("gone"), host)))
         assertNull(focusedConnectedTerminalId(
-            TabContent.Terminal(theme, TerminalTabStatus.Error("boom"))))
+            TabContent.Terminal(theme, TerminalTabStatus.Error("boom"), host)))
     }
 
     @Test
@@ -260,7 +261,7 @@ class DesktopSessionManagerFocusTest {
             // only, no Swing). The relaxed connector's read() returns 0 → the
             // parse loop hits EOF and its daemon thread exits; sendString
             // forwards user text through TtyConnector.write(String).
-            val connector = mockk<TtyConnector>(relaxed = true)
+            val connector = liveShellConnector()
             mgr.getOrCreateComposeSession(
                 "ssh-1",
                 connector,

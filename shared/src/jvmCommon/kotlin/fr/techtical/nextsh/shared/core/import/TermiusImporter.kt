@@ -5,6 +5,7 @@ package fr.techtical.nextsh.shared.core.import
 
 import fr.techtical.nextsh.shared.domain.model.AuthType
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -96,7 +97,7 @@ object TermiusImporter {
             // SECURITY: never interpolate e.message here: for a
             // JsonDecodingException it embeds a raw excerpt of the offending
             // input, which may carry a password/PEM straight from the file.
-            Logger.w(TAG, "Termius export is not valid JSON, aborting parse (${e::class.simpleName})")
+            Logger.w(TAG, "Termius export is not valid JSON, aborting parse (${errorClass(e)})")
             return emptyList()
         }
 

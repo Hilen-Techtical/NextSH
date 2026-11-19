@@ -18,7 +18,12 @@ import fr.techtical.nextsh.shared.domain.repository.HostRepository
 import fr.techtical.nextsh.shared.domain.repository.SnippetRepository
 import fr.techtical.nextsh.shared.domain.repository.SshKeyRepository
 import fr.techtical.nextsh.shared.domain.repository.TunnelRepository
+import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import fr.techtical.nextsh.shared.util.randomUuid
+import kotlinx.coroutines.CancellationException
+
+private const val TAG = "DesktopSyncRepository"
 
 class DesktopSyncRepository(
     private val hostRepo: HostRepository,
@@ -27,6 +32,13 @@ class DesktopSyncRepository(
     private val snippetRepo: SnippetRepository,
     private val customThemeRepo: CustomTerminalThemeRepository,
     private val pendingConflictRepository: PendingConflictRepository,
+    /**
+     * Called once the hosts and the tunnels of a bundle are applied. The container wires the orphan tunnel
+     * repair here: a bundle can leave a live tunnel under a host that is tombstoned on this device (the
+     * peer is an Android 1.0.x that does not cascade, or created the tunnel concurrently with the host
+     * deletion). No-op by default so the merge itself stays testable on its own.
+     */
+    private val afterHostsAndTunnelsApplied: suspend () -> Unit = {},
 ) : SyncRepository {
 
     override suspend fun getAllLocalAsBundle(): SyncBundle = SyncBundle(
@@ -57,8 +69,19 @@ class DesktopSyncRepository(
             }
         }
 
+        // Tombstoned hosts count as present: they still have a row, so a live tunnel can point at them.
+        val knownHostIds = hostRepo.getAllSyncEntries().mapTo(HashSet()) { it.id }
+        var skippedTunnels = 0
         val localTunnels = tunnelRepo.getAllSyncEntries().associateBy { it.id }
         for (remote in bundle.tunnels) {
+            // A live tunnel whose host this device has never heard of cannot be stored (foreign key on
+            // tunnels.hostId): one such entry used to abort the whole bundle with an HTTP 500. Skip it, the
+            // rest of the bundle still applies.
+            val remoteHostId = remote.payload?.hostId
+            if (remoteHostId != null && remoteHostId !in knownHostIds) {
+                skippedTunnels++
+                continue
+            }
             when (val merged = CrdtEngine.merge(localTunnels[remote.id], remote)) {
                 is MergeResult.Clean -> {
                     tunnelRepo.upsertSyncEntry(merged.entry)
@@ -72,6 +95,13 @@ class DesktopSyncRepository(
                 null -> Unit
             }
         }
+
+        if (skippedTunnels > 0) {
+            // Count only: labels, hostnames and ids stay out of the logs.
+            Logger.w(TAG, "applyRemoteBundle: $skippedTunnels tunnel(s) skipped, host unknown on this device")
+        }
+
+        if (bundle.hosts.isNotEmpty() || bundle.tunnels.isNotEmpty()) runAfterHostsAndTunnelsApplied()
 
         val localKeys = sshKeyRepo.getAllSyncEntries().associateBy { it.id }
         for (remote in bundle.sshKeys) {
@@ -125,6 +155,17 @@ class DesktopSyncRepository(
     }
 
     override fun deviceId(): String = DeviceIdentity.deviceId()
+
+    /** A failing cleanup must not fail the sync that triggered it: log the class name and carry on. */
+    private suspend fun runAfterHostsAndTunnelsApplied() {
+        try {
+            afterHostsAndTunnelsApplied()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.e(TAG, "applyRemoteBundle: post-apply step failed (${errorClass(e)})")
+        }
+    }
 
     private suspend fun mergeAndPersist(
         entityType: SyncableEntityType,

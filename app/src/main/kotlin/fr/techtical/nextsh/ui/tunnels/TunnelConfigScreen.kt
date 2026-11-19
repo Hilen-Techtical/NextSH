@@ -21,9 +21,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -69,6 +69,7 @@ import fr.techtical.nextsh.R
 import fr.techtical.nextsh.domain.model.TunnelPortProblem
 import fr.techtical.nextsh.domain.model.TunnelType
 import fr.techtical.nextsh.ui.components.ConfirmDeleteDialog
+import fr.techtical.nextsh.ui.components.NextShMessage
 import fr.techtical.nextsh.ui.components.NextShTextField
 import fr.techtical.nextsh.ui.theme.Border1
 import fr.techtical.nextsh.ui.theme.Border2
@@ -116,10 +117,17 @@ fun TunnelConfigScreen(
         if (tunnelId != null) viewModel.loadTunnelForEdit(tunnelId) else viewModel.resetForm()
     }
 
+    // Error shown above the save bar (the tunnel or its host was deleted while this form was open).
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val tunnelDeletedMeanwhile = stringResource(R.string.error_tunnel_deleted_meanwhile)
+    val tunnelHostDeletedMeanwhile = stringResource(R.string.error_tunnel_host_deleted_meanwhile)
+
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
             when (event) {
                 is TunnelEvent.TunnelSaved -> onBack()
+                is TunnelEvent.TunnelNoLongerExists -> errorMessage = tunnelDeletedMeanwhile
+                is TunnelEvent.TunnelHostNoLongerExists -> errorMessage = tunnelHostDeletedMeanwhile
                 else -> {}
             }
         }
@@ -162,11 +170,19 @@ fun TunnelConfigScreen(
             )
         },
         bottomBar = {
-            BottomSaveBar(
-                label = if (isEditing) stringResource(R.string.action_save) else stringResource(R.string.action_create_tunnel),
-                enabled = form.isValid,
-                onClick = { viewModel.saveTunnel() },
-            )
+            Column(modifier = Modifier.background(NearBlack)) {
+                NextShMessage(
+                    message   = errorMessage,
+                    isError   = true,
+                    onDismiss = { errorMessage = null },
+                    modifier  = Modifier.padding(horizontal = Spacing.Md),
+                )
+                BottomSaveBar(
+                    label = if (isEditing) stringResource(R.string.action_save) else stringResource(R.string.action_create_tunnel),
+                    enabled = form.isValid,
+                    onClick = { viewModel.saveTunnel() },
+                )
+            }
         },
         containerColor = NearBlack,
     ) { padding ->
@@ -205,7 +221,7 @@ fun TunnelConfigScreen(
                         )
                     }
                 }
-                HelperText(text = form.type.helperText())
+                HelperText(text = stringResource(tunnelTypeHelperRes(form.type)))
             }
 
             // ── Hôte SSH ──────────────────────────────────────────────────────
@@ -292,6 +308,7 @@ fun TunnelConfigScreen(
                                     onValueChange = { v -> viewModel.updateForm { copy(remoteHost = v) } },
                                     label = stringResource(R.string.label_remote_host),
                                     placeholder = stringResource(R.string.placeholder_remote_host),
+                                    isError = form.remoteHostInvalid,
                                     modifier = Modifier.weight(2f),
                                 )
                                 PortTextField(
@@ -305,6 +322,9 @@ fun TunnelConfigScreen(
                                 )
                             }
                         }
+                        if (form.remoteHostInvalid) {
+                            HelperText(text = stringResource(R.string.host_hostname_error), color = ErrorRed)
+                        }
                     }
                     TunnelType.REMOTE_FORWARD -> {
                         PortField(problem = form.remotePortProblemToShow(remotePortFocused)) { isError ->
@@ -313,7 +333,8 @@ fun TunnelConfigScreen(
                                     value = form.remoteHost,
                                     onValueChange = { v -> viewModel.updateForm { copy(remoteHost = v) } },
                                     label = stringResource(R.string.label_remote_host),
-                                    placeholder = "0.0.0.0",
+                                    placeholder = stringResource(R.string.placeholder_remote_bind_host),
+                                    isError = form.remoteHostInvalid,
                                     modifier = Modifier.weight(2f),
                                 )
                                 PortTextField(
@@ -332,10 +353,13 @@ fun TunnelConfigScreen(
                                 value = form.localPort,
                                 onValueChange = { v -> viewModel.updateForm { copy(localPort = v) } },
                                 label = stringResource(R.string.label_local_port),
-                                placeholder = "3000",
+                                placeholder = stringResource(R.string.placeholder_remote_forward_local_port),
                                 isError = isError,
                                 onFocusChange = { localPortFocused = it },
                             )
+                        }
+                        if (form.remoteHostInvalid) {
+                            HelperText(text = stringResource(R.string.host_hostname_error), color = ErrorRed)
                         }
                     }
                     TunnelType.DYNAMIC_SOCKS5 -> {
@@ -350,7 +374,10 @@ fun TunnelConfigScreen(
                             )
                         }
                         HelperText(
-                            text = "Proxy SOCKS5 exposé sur localhost:${form.localPort.ifBlank { "?" }}.",
+                            text = stringResource(
+                                R.string.helper_tunnel_socks5_exposed,
+                                form.localPort.ifBlank { "?" },
+                            ),
                         )
                     }
                 }
@@ -373,6 +400,26 @@ fun TunnelConfigScreen(
                         label = stringResource(R.string.label_keep_alive_after_browser_close),
                         checked = form.keepAliveAfterBrowserClose,
                         onChange = { v -> viewModel.updateForm { copy(keepAliveAfterBrowserClose = v) } },
+                    )
+
+                    // Chemin ouvert par le navigateur intégré. Vide = racine du site.
+                    // Sous le champ : l'erreur quand il y en a une, sinon l'aide qui rappelle
+                    // de ne pas y mettre de secret (le chemin est synchronisé).
+                    val pathError = form.browserPathError
+                    NextShTextField(
+                        value = form.browserPath,
+                        onValueChange = { v -> viewModel.updateForm { copy(browserPath = v) } },
+                        label = stringResource(R.string.label_tunnel_browser_path),
+                        placeholder = stringResource(R.string.placeholder_tunnel_browser_path),
+                        isError = pathError != null,
+                        supportingText = stringResource(
+                            pathError?.messageRes() ?: R.string.helper_tunnel_browser_path,
+                        ),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Uri,
+                            autoCorrect = false,
+                            imeAction = ImeAction.Done,
+                        ),
                     )
                 }
             }
@@ -487,11 +534,7 @@ private fun PortField(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TypeChip(type: TunnelType, selected: Boolean, onClick: () -> Unit) {
-    val label = when (type) {
-        TunnelType.LOCAL_FORWARD -> "Local"
-        TunnelType.REMOTE_FORWARD -> "Remote"
-        TunnelType.DYNAMIC_SOCKS5 -> "SOCKS5"
-    }
+    val label = stringResource(tunnelTypeLabelRes(type))
     FilterChip(
         selected = selected,
         onClick = onClick,
@@ -566,12 +609,4 @@ private fun BottomSaveBar(label: String, enabled: Boolean, onClick: () -> Unit) 
             }
         }
     }
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-private fun TunnelType.helperText(): String = when (this) {
-    TunnelType.LOCAL_FORWARD -> "Expose un service distant sur localhost via SSH."
-    TunnelType.REMOTE_FORWARD -> "Expose un service local sur le bind distant via SSH."
-    TunnelType.DYNAMIC_SOCKS5 -> "Crée un proxy SOCKS5 pour router le trafic via SSH."
 }

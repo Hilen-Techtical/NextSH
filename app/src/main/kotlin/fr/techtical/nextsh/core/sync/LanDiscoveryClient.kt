@@ -6,6 +6,8 @@ package fr.techtical.nextsh.core.sync
 import fr.techtical.nextsh.shared.core.sync.DiscoveryProtocol
 import fr.techtical.nextsh.shared.core.sync.EnrolledDevice
 import fr.techtical.nextsh.shared.core.sync.EnrolledDeviceSecretStore
+import fr.techtical.nextsh.shared.util.LogId
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -49,10 +51,9 @@ internal const val MAX_DISCOVERY_CANDIDATES = 5
  * Security posture:
  * - The probe is signed with the device's own ECDH-derived shared secret (the same secret
  *   used for HTTPS sync HMACs). If the secret cannot be retrieved for any reason, device
- *   not enrolled, or the vault is locked (`VaultAuthExpiredException`, which comes in two
- *   distinct classes on Android depending on which `VaultManager` interface is in scope),
- *   [discover] returns an empty list without ever touching the network. An unsigned probe
- *   is never sent.
+ *   not enrolled, or the vault is locked (the shared `VaultAuthExpiredException`, which is
+ *   what the vault adapter throws through the shared `VaultManager` interface), [discover]
+ *   returns an empty list without ever touching the network. An unsigned probe is never sent.
  * - A response is only accepted as a candidate after [DiscoveryProtocol.verifyResponseTag]
  *   passes (correct echoed nonce + valid HMAC tag). The candidate address is always the
  *   UDP packet's actual source IP: never a value taken from the response payload, which
@@ -82,10 +83,10 @@ class LanDiscoveryClient @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            // Covers both the app-side and shared-side VaultAuthExpiredException classes
-            // (two distinct types with the same name, see class doc) plus any other vault
-            // I/O failure: none of them are recoverable here, all mean "cannot sign a probe".
-            Timber.d(TAG, "discover: secret unavailable for ${device.deviceId} (vault locked?), skipping probe")
+            // The locked vault (the shared VaultAuthExpiredException, see class doc) and any
+            // other vault I/O failure: none of them are recoverable here, all mean "cannot
+            // sign a probe".
+            Timber.tag(TAG).d("discover: secret unavailable for device=${LogId.of(device.deviceId)} (vault locked?), skipping probe")
             null
         } ?: return emptyList()
 
@@ -94,7 +95,7 @@ class LanDiscoveryClient @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Timber.w(e, "discover: probe failed for ${device.deviceId}")
+            Timber.tag(TAG).w("discover: probe failed for device=${LogId.of(device.deviceId)} (${errorClass(e)})")
             emptyList()
         } finally {
             secret.fill(0)
@@ -187,7 +188,7 @@ class LanDiscoveryClient @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            Timber.d(TAG, "broadcastTargets, interface enumeration failed: ${e.message}")
+            Timber.tag(TAG).d("broadcastTargets, interface enumeration failed (${errorClass(e)})")
         }
         return targets.toList()
     }

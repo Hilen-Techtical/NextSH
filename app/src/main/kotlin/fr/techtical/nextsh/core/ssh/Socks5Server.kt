@@ -46,30 +46,28 @@ class Socks5Server(
     fun start() {
         running = true
         serverSocket = ServerSocket(localPort, 50, InetAddress.getByName("127.0.0.1"))
-        thread(name = "Socks5-Accept-$localPort", isDaemon = true) {
-            var failure: String? = null
+        thread(name = "Socks5-Accept", isDaemon = true) {
             while (running) {
                 try {
                     val socket = serverSocket?.accept() ?: break
-                    thread(name = "Socks5-Handler-$localPort", isDaemon = true) {
+                    thread(name = "Socks5-Handler", isDaemon = true) {
                         try {
                             handleConnection(socket)
                         } catch (e: Exception) {
-                            Timber.w("SOCKS5 handler error: ${e.message}")
+                            Timber.w("SOCKS5 handler error (${e::class.java.simpleName})")
                         } finally {
                             try { socket.close() } catch (_: Exception) {}
                         }
                     }
                 } catch (e: IOException) {
-                    if (running) {
-                        Timber.w("SOCKS5 accept error: ${e.message}")
-                        failure = e.message ?: "Erreur d'écoute SOCKS5"
-                    }
+                    // Le message de l'exception n'est ni journalisé ni montré : texte du système, en
+                    // anglais, qui peut citer une adresse.
+                    if (running) Timber.w("SOCKS5 accept error (${e::class.java.simpleName})")
                     break
                 }
             }
             // `running` encore vrai : la boucle est sortie sur panne, pas sur stop().
-            if (running) onUnexpectedStop?.invoke(failure ?: "Proxy SOCKS5 arrêté")
+            if (running) onUnexpectedStop?.invoke(TUNNEL_SOCKS_STOPPED_MESSAGE)
         }
     }
 
@@ -158,7 +156,8 @@ class Socks5Server(
         val directConnection = try {
             client.newDirectConnection(targetHost, targetPort)
         } catch (e: Exception) {
-            Timber.w("SOCKS5: impossible d'ouvrir canal SSH vers $targetHost:$targetPort, ${e.message}")
+            // Never the destination: it is the host and port the user's own client asked for.
+            Timber.w("SOCKS5: impossible d'ouvrir canal SSH (${e::class.java.simpleName})")
             sendSocksError(output, 0x05) // Connection refused
             return
         }

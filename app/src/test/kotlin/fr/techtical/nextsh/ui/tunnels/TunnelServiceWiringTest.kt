@@ -3,6 +3,7 @@
 
 package fr.techtical.nextsh.ui.tunnels
 
+import fr.techtical.nextsh.core.PendingAuthResume
 import fr.techtical.nextsh.core.ssh.SshTunnelManager
 import fr.techtical.nextsh.domain.model.SshErrorCode
 import fr.techtical.nextsh.domain.model.TunnelConfig
@@ -10,7 +11,10 @@ import fr.techtical.nextsh.domain.model.TunnelState
 import fr.techtical.nextsh.domain.model.TunnelType
 import fr.techtical.nextsh.domain.repository.HostRepository
 import fr.techtical.nextsh.domain.repository.TunnelRepository
+import fr.techtical.nextsh.domain.usecase.AutoStartTunnelsGate
 import fr.techtical.nextsh.domain.usecase.AutoStartTunnelsUseCase
+import fr.techtical.nextsh.domain.usecase.LiveTunnelLookup
+import fr.techtical.nextsh.domain.usecase.ResumeTunnelsUseCase
 import fr.techtical.nextsh.domain.usecase.StartTunnelUseCase
 import fr.techtical.nextsh.domain.usecase.StopTunnelUseCase
 import fr.techtical.nextsh.service.TunnelServiceController
@@ -55,6 +59,8 @@ class TunnelServiceWiringTest {
     private val autoStartTunnelsUseCase: AutoStartTunnelsUseCase = mockk()
     private val browserSessionHolder: BrowserSessionHolder = mockk(relaxed = true)
     private val tunnelService: TunnelServiceController = mockk()
+    private val liveTunnels: LiveTunnelLookup = mockk()
+    private val resumeTunnelsUseCase: ResumeTunnelsUseCase = mockk()
 
     private val config = TunnelConfig(
         id = "t1",
@@ -70,7 +76,14 @@ class TunnelServiceWiringTest {
         every { tunnelRepository.observeAll() } returns flowOf(emptyList())
         every { hostRepository.observeAll() } returns flowOf(emptyList())
         every { tunnelManager.tunnelStates } returns MutableStateFlow<Map<String, TunnelState>>(emptyMap())
+        every { tunnelManager.getTunnelState(any()) } returns null
+        // The ports of the tunnel can be used (a relaxed mock would answer with a refusal), and no
+        // start was stopped meanwhile.
+        every { tunnelManager.refuseInvalidPorts(any()) } returns null
+        every { tunnelManager.isStartAbandoned(any()) } returns false
         every { browserSessionHolder.activeTunnelId } returns MutableStateFlow(null)
+        // The tunnel and its host are live, as the start guard requires.
+        coEvery { liveTunnels.find(config.id) } returns config
         return TunnelViewModel(
             tunnelRepository = tunnelRepository,
             hostRepository = hostRepository,
@@ -78,8 +91,12 @@ class TunnelServiceWiringTest {
             startTunnel = startTunnel,
             stopTunnel = stopTunnel,
             autoStartTunnelsUseCase = autoStartTunnelsUseCase,
+            autoStartGate = AutoStartTunnelsGate(),
             browserSessionHolder = browserSessionHolder,
             tunnelService = tunnelService,
+            liveTunnels = liveTunnels,
+            resumeTunnelsUseCase = resumeTunnelsUseCase,
+            pendingAuthResume = PendingAuthResume(),
         )
     }
 

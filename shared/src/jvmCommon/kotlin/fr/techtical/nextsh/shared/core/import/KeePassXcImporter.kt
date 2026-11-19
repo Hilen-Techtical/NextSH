@@ -5,6 +5,7 @@ package fr.techtical.nextsh.shared.core.import
 
 import fr.techtical.nextsh.shared.domain.model.AuthType
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import org.w3c.dom.Element
 import org.w3c.dom.Node
 import java.io.ByteArrayInputStream
@@ -61,7 +62,7 @@ object KeePassXcImporter {
 
     /** Parses [content], auto-detecting CSV vs KeePass 2 XML. */
     fun parse(content: String): List<ParsedHost> {
-        val trimmedStart = content.trimStart('﻿', ' ', '\t', '\r', '\n')
+        val trimmedStart = content.trimStart('\uFEFF', ' ', '\t', '\r', '\n')
         return if (isXml(trimmedStart)) {
             parseXml(content)
         } else {
@@ -80,7 +81,7 @@ object KeePassXcImporter {
         val rows = CsvParser.parse(content)
         if (rows.isEmpty()) return emptyList()
 
-        val header = rows.first().map { it.trim().lowercase().trimStart('﻿') }
+        val header = rows.first().map { it.trim().lowercase().trimStart('\uFEFF') }
         val colGroup = header.indexOf(H_GROUP)
         val colTitle = header.indexOf(H_TITLE)
         val colUsername = header.indexOf(H_USERNAME)
@@ -146,7 +147,7 @@ object KeePassXcImporter {
             // SECURITY: never interpolate e.message here: a SAX/parser
             // exception can embed a raw excerpt of the offending input, which
             // may carry a password straight from the file.
-            Logger.w(TAG, "KeePassXC XML is not well-formed, aborting parse (${e::class.simpleName})")
+            Logger.w(TAG, "KeePassXC XML is not well-formed, aborting parse (${errorClass(e)})")
             return emptyList()
         }
 

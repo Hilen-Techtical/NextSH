@@ -35,8 +35,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -74,17 +76,19 @@ import fr.techtical.nextsh.desktop.theme.TextPrimary
 import fr.techtical.nextsh.desktop.theme.TextSecondary
 import fr.techtical.nextsh.desktop.theme.White
 import fr.techtical.nextsh.shared.core.sync.PendingConflict
-import fr.techtical.nextsh.shared.ui.conflict.DecodedEntity
-import fr.techtical.nextsh.shared.ui.conflict.decodeEntity
-import fr.techtical.nextsh.shared.ui.conflict.diffFields
-import fr.techtical.nextsh.shared.ui.conflict.displayName
+import fr.techtical.nextsh.shared.ui.conflict.ConflictField
+import fr.techtical.nextsh.shared.ui.conflict.TypedEntity
+import fr.techtical.nextsh.shared.ui.conflict.decodeTypedEntity
+import fr.techtical.nextsh.shared.ui.conflict.diffTypedFields
 import kotlinx.coroutines.launch
 import fr.techtical.nextsh.desktop.generated.resources.Res
 import fr.techtical.nextsh.desktop.generated.resources.action_cancel
 import fr.techtical.nextsh.desktop.generated.resources.conflicts_action_ignore
+import fr.techtical.nextsh.desktop.generated.resources.conflicts_apply_failed
 import fr.techtical.nextsh.desktop.generated.resources.conflicts_apply_with_count
 import fr.techtical.nextsh.desktop.generated.resources.conflicts_corrupted
 import fr.techtical.nextsh.desktop.generated.resources.conflicts_detected_at
+import fr.techtical.nextsh.desktop.generated.resources.conflicts_detected_on
 import fr.techtical.nextsh.desktop.generated.resources.conflicts_empty_hint
 import fr.techtical.nextsh.desktop.generated.resources.conflicts_empty_subtitle
 import fr.techtical.nextsh.desktop.generated.resources.conflicts_empty_title
@@ -92,6 +96,8 @@ import fr.techtical.nextsh.desktop.generated.resources.conflicts_keep_local
 import fr.techtical.nextsh.desktop.generated.resources.conflicts_keep_remote
 import fr.techtical.nextsh.desktop.generated.resources.conflicts_section_local
 import fr.techtical.nextsh.desktop.generated.resources.conflicts_section_remote
+import fr.techtical.nextsh.desktop.generated.resources.conflicts_subtitle_many
+import fr.techtical.nextsh.desktop.generated.resources.conflicts_subtitle_one
 import fr.techtical.nextsh.desktop.generated.resources.conflicts_title
 import org.jetbrains.compose.resources.stringResource
 
@@ -106,17 +112,24 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 fun ConflictResolutionScreen(onBack: () -> Unit) {
     val viewModel = remember { DesktopContainer.conflictResolutionViewModel }
-    val conflicts by viewModel.conflicts.collectAsState()
+    val allConflicts by viewModel.conflicts.collectAsState()
     val resolution by viewModel.resolution.collectAsState()
+    val applying by viewModel.applying.collectAsState()
     val scope = rememberCoroutineScope()
+    var applyFailed by remember { mutableStateOf(false) }
 
-    val resolvedCount = resolution.size
+    // One card per element: the grid key is the element, and the table does not enforce one row per
+    // element. The list is ordered most recent first, so the most recent detection is kept.
+    val conflicts = remember(allConflicts) { allConflicts.distinctBy { it.choiceKey } }
+
+    // A choice only counts for the versions it was made on (see ConflictChoice).
+    val resolvedCount = conflicts.count { resolution.choiceFor(it) != null }
     val hasAnyResolution = resolvedCount > 0
 
     val subtitle = when {
         conflicts.isEmpty() -> stringResource(Res.string.conflicts_empty_subtitle)
-        conflicts.size == 1 -> "1 conflit à résoudre"
-        else -> "${conflicts.size} conflits à résoudre"
+        conflicts.size == 1 -> stringResource(Res.string.conflicts_subtitle_one)
+        else -> stringResource(Res.string.conflicts_subtitle_many, conflicts.size)
     }
 
     Column(modifier = Modifier.fillMaxSize().background(NearBlack)) {
@@ -157,10 +170,12 @@ fun ConflictResolutionScreen(onBack: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(Spacing.Md),
                     verticalArrangement = Arrangement.spacedBy(Spacing.Md),
                 ) {
-                    items(conflicts, key = { it.id }) { conflict ->
+                    // Keyed by element: the conflict id changes at every re-detection, which would
+                    // recreate the card each time the peer pushes.
+                    items(conflicts, key = { it.choiceKey }) { conflict ->
                         ConflictCard(
                             conflict = conflict,
-                            choice = resolution[conflict.id],
+                            choice = resolution.choiceFor(conflict),
                             onKeepLocal = { viewModel.keepLocal(conflict) },
                             onKeepRemote = { viewModel.keepRemote(conflict) },
                             onIgnore = { viewModel.ignoreConflict(conflict) },
@@ -174,15 +189,20 @@ fun ConflictResolutionScreen(onBack: () -> Unit) {
                 resolvedCount = resolvedCount,
                 onApply = {
                     scope.launch {
-                        val applied = viewModel.applyAll()
-                        if (applied > 0) {
-                            viewModel.forceSyncAfterResolve()
+                        applyFailed = false
+                        val outcome = viewModel.applyAll()
+                        if (outcome.resolved > 0) viewModel.forceSyncAfterResolve()
+                        if (outcome.failed > 0) {
+                            // Stay on the screen: the conflicts that failed are still listed.
+                            applyFailed = true
+                        } else if (outcome.resolved > 0) {
                             onBack()
                         }
                     }
                 },
                 onCancel = onBack,
-                applyEnabled = hasAnyResolution,
+                applyEnabled = hasAnyResolution && !applying,
+                showError = applyFailed,
             )
         }
     }
@@ -196,9 +216,32 @@ private fun BottomActionBar(
     onApply: () -> Unit,
     onCancel: () -> Unit,
     applyEnabled: Boolean,
+    showError: Boolean,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Border1))
+        if (showError) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(ErrorRed.copy(alpha = 0.08f))
+                    .padding(horizontal = Spacing.Xxl, vertical = Spacing.Sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Lucide.TriangleAlert,
+                    contentDescription = null,
+                    tint = ErrorRed,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(Spacing.Xs))
+                Text(
+                    text = stringResource(Res.string.conflicts_apply_failed),
+                    color = ErrorRed,
+                    fontSize = 12.sp,
+                )
+            }
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -265,17 +308,18 @@ private fun ConflictCard(
     onKeepRemote: () -> Unit,
     onIgnore: () -> Unit,
 ) {
-    val localDecoded: DecodedEntity? = decodeEntity(conflict.entityType, conflict.localJson)
-    val remoteDecoded: DecodedEntity? = decodeEntity(conflict.entityType, conflict.remoteJson)
-    val isCorrupt = localDecoded == null && remoteDecoded == null
+    val localDecoded: TypedEntity? = decodeTypedEntity(conflict.entityType, conflict.localJson)
+    val remoteDecoded: TypedEntity? = decodeTypedEntity(conflict.entityType, conflict.remoteJson)
+    // Either side unreadable: no version can be compared or trusted, only Ignore is offered.
+    val isCorrupt = localDecoded == null || remoteDecoded == null
 
-    val differingFields: Set<String> = if (localDecoded != null && remoteDecoded != null) {
-        diffFields(localDecoded, remoteDecoded)
+    val differingFields: Set<ConflictField> = if (localDecoded != null && remoteDecoded != null) {
+        diffTypedFields(localDecoded, remoteDecoded)
     } else emptySet()
 
-    val entityName = localDecoded?.primaryLabel
-        ?: remoteDecoded?.primaryLabel
-        ?: conflict.entityId.take(12)
+    // The title is text typed by the user, or a name translated here (credential type, deleted, kind
+    // of element when neither version can be read). The id of the entity is never shown.
+    val entityName = conflictCardTitle(localDecoded?.title, remoteDecoded?.title, conflict.entityType).asString()
     val relTime = relativeTime(conflict.detectedAt)
 
     Column(
@@ -288,7 +332,7 @@ private fun ConflictCard(
     ) {
         // ── Header ──────────────────────────────────────────────────────────
         Row(verticalAlignment = Alignment.CenterVertically) {
-            EntityTypeBadge(label = conflict.entityType.displayName)
+            EntityTypeBadge(label = stringResource(conflict.entityType.conflictLabelRes()))
             Spacer(Modifier.width(Spacing.Sm))
             Text(
                 text = entityName,
@@ -301,7 +345,10 @@ private fun ConflictCard(
                 modifier = Modifier.weight(1f),
             )
             Text(
-                text = stringResource(Res.string.conflicts_detected_at, relTime),
+                text = stringResource(
+                    if (relTime.isDate) Res.string.conflicts_detected_on else Res.string.conflicts_detected_at,
+                    relTime.text,
+                ),
                 color = TextDisabled,
                 fontSize = 11.sp,
             )
@@ -451,8 +498,8 @@ private fun BtnDanger(onClick: () -> Unit, label: String) {
 @Composable
 private fun EntitySummary(
     title: String,
-    entity: DecodedEntity?,
-    differingFields: Set<String>,
+    entity: TypedEntity?,
+    differingFields: Set<ConflictField>,
     isSelected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -481,12 +528,11 @@ private fun EntitySummary(
         if (entity == null) {
             Text("-", color = TextSecondary, fontSize = 12.sp)
         } else {
-            entity.fields.forEach { (fieldName, value) ->
-                val isDiffering = fieldName in differingFields
+            entity.fields.forEach { row ->
                 FieldRow(
-                    fieldName = fieldName,
-                    value = value,
-                    highlight = isDiffering,
+                    fieldName = stringResource(row.field.conflictLabelRes()),
+                    value = row.value.toConflictText().asString(),
+                    highlight = row.field in differingFields,
                 )
             }
         }

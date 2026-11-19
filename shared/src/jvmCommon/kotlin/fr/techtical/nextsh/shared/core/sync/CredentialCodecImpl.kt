@@ -57,7 +57,10 @@ actual object CredentialCodec {
             cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(innerKey, "AES"), GCMParameterSpec(TAG_BITS, iv))
             cipher.doFinal(ciphertextWithTag)
         } catch (e: Exception) {
-            throw SyncCodecException("Credential decrypt failed: ${e.message}", e)
+            // Fixed text + class name only. The cause is kept: a java.util.Base64 message may quote
+            // one on-wire byte in hex (public wire data), the AES-GCM messages are fixed text, and
+            // no plaintext is parsed here.
+            throw SyncCodecException("Credential decrypt failed (${e.safeTypeName()})", e)
         }
     }
 }

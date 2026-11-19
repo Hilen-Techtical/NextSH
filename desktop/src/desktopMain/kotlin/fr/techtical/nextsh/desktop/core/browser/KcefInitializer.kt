@@ -23,13 +23,20 @@ import kotlin.coroutines.resume
 import kotlin.math.roundToInt
 
 sealed interface KcefState {
-    data class Initializing(val progressPercent: Int? = null, val message: String) : KcefState
+    data class Initializing(val progressPercent: Int? = null, val phase: KcefPhase) : KcefState
     data object Ready : KcefState
     data class Failed(
-        val reason: String,
-        val title: String = "Impossible d'initialiser Chromium",
+        val failure: KcefFailure,
+        /** Message of the engine exception, only for [KcefFailure.EngineError]. */
+        val detail: String? = null,
     ) : KcefState
 }
+
+/** Step of the Chromium start, translated by the screen that shows it. */
+enum class KcefPhase { Preparing, Locating, Downloading, Extracting, Installing, Initializing }
+
+/** Why Chromium did not start, translated by the screen that shows it. */
+enum class KcefFailure { ProfileUnknown, ProfileBusy, RestartRequired, Timeout, EngineError }
 
 /**
  * Starts the Chromium engine. Exists only as a test seam: tests plug a fake so that
@@ -126,7 +133,7 @@ class KcefInitializer internal constructor(
     private val TAG = "KcefInitializer"
 
     private val _state = MutableStateFlow<KcefState>(
-        KcefState.Initializing(progressPercent = null, message = "Préparation de Chromium…")
+        KcefState.Initializing(progressPercent = null, phase = KcefPhase.Preparing)
     )
     val state: StateFlow<KcefState> = _state.asStateFlow()
 
@@ -138,14 +145,14 @@ class KcefInitializer internal constructor(
         coroutineScope.launch(Dispatchers.IO) {
             // A previous attempt may have ended on a busy profile: show the neutral
             // state again while this one runs.
-            _state.value = KcefState.Initializing(progressPercent = null, message = "Préparation de Chromium…")
+            _state.value = KcefState.Initializing(progressPercent = null, phase = KcefPhase.Preparing)
             try {
                 // Chromium needs a profile directory owned by NextSH, and only one
                 // process may use it at a time: see BrowserProfile.kt for the why.
                 val profile = profileDir
                 if (profile == null) {
                     Logger.e(TAG, "Browser profile directory could not be resolved")
-                    _state.value = KcefState.Failed("Le dossier du profil du navigateur n'a pas pu être déterminé.")
+                    _state.value = KcefState.Failed(KcefFailure.ProfileUnknown)
                     return@launch
                 }
                 when (val lockResult = lockProfile(profile)) {
@@ -155,12 +162,7 @@ class KcefInitializer internal constructor(
                         // Re-armed before the state is published: the user can close the
                         // other instance and reopen the browser without restarting NextSH.
                         started.set(false)
-                        _state.value = KcefState.Failed(
-                            reason = "Le navigateur intégré est déjà utilisé par une autre instance de NextSH, " +
-                                "peut-être réduite dans la zone de notification. " +
-                                "Quittez-la, puis rouvrez le navigateur.",
-                            title = "Navigateur intégré indisponible",
-                        )
+                        _state.value = KcefState.Failed(KcefFailure.ProfileBusy)
                         return@launch
                     }
                     // Best effort: a lock failure must not disable the browser.
@@ -217,47 +219,46 @@ class KcefInitializer internal constructor(
                             onLocating {
                                 _state.value = KcefState.Initializing(
                                     progressPercent = null,
-                                    message = "Localisation de Chromium…"
+                                    phase = KcefPhase.Locating
                                 )
                             }
                             onDownloading { percent ->
                                 _state.value = KcefState.Initializing(
                                     progressPercent = (percent * 100f).roundToInt().coerceIn(0, 100),
-                                    message = "Téléchargement de Chromium…"
+                                    phase = KcefPhase.Downloading
                                 )
                             }
                             onExtracting {
                                 _state.value = KcefState.Initializing(
                                     progressPercent = null,
-                                    message = "Extraction de Chromium…"
+                                    phase = KcefPhase.Extracting
                                 )
                             }
                             onInstall {
                                 _state.value = KcefState.Initializing(
                                     progressPercent = null,
-                                    message = "Installation de Chromium…"
+                                    phase = KcefPhase.Installing
                                 )
                             }
                             onInitializing {
                                 _state.value = KcefState.Initializing(
                                     progressPercent = null,
-                                    message = "Initialisation de Chromium…"
+                                    phase = KcefPhase.Initializing
                                 )
                             }
                         }
                     },
                     onError = { throwable ->
                         engineFailed.set(true)
-                        val reason = throwable?.message ?: "Erreur inconnue"
-                        Logger.e(TAG, "KCEF init failed: $reason")
-                        _state.value = KcefState.Failed(reason)
+                        val reason = throwable?.message
+                        // The reason reaches the UI state; the log keeps the exception class chain only.
+                        Logger.e(TAG, "KCEF init failed", throwable)
+                        _state.value = KcefState.Failed(KcefFailure.EngineError, reason)
                     },
                     onRestartRequired = {
                         engineFailed.set(true)
                         Logger.w(TAG, "KCEF requires app restart to complete Chromium setup")
-                        _state.value = KcefState.Failed(
-                            "Un redémarrage de l'application est nécessaire pour finaliser l'initialisation de Chromium."
-                        )
+                        _state.value = KcefState.Failed(KcefFailure.RestartRequired)
                     }
                 )
                 if (engineFailed.get()) return@launch
@@ -267,17 +268,15 @@ class KcefInitializer internal constructor(
                 // CefApp is still NEW.
                 if (!awaitEngineReady()) {
                     Logger.e(TAG, "Chromium did not finish initializing within ${CEF_INIT_TIMEOUT_MS / 1000} s")
-                    _state.value = KcefState.Failed(
-                        "Chromium n'a pas terminé son initialisation. Réessayez ou redémarrez NextSH."
-                    )
+                    _state.value = KcefState.Failed(KcefFailure.Timeout)
                     return@launch
                 }
                 _state.value = KcefState.Ready
                 Logger.d(TAG, "KCEF ready")
             } catch (e: Exception) {
                 val reason = e.message ?: e.javaClass.simpleName
-                Logger.e(TAG, "KCEF init exception: $reason")
-                _state.value = KcefState.Failed(reason)
+                Logger.e(TAG, "KCEF init exception", e)
+                _state.value = KcefState.Failed(KcefFailure.EngineError, reason)
             }
         }
     }

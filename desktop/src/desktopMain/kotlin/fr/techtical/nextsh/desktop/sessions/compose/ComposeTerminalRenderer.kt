@@ -1146,15 +1146,9 @@ private fun handleKeyEvent(
     if (isCtrl && isShift && event.key == Key.V) {
         val pasted = runCatching { clipboardPaste() }.getOrNull()
         if (!pasted.isNullOrEmpty()) {
-            // Bracketed paste support: when the shell has enabled bracketed
-            // paste mode (set by setBracketedPasteMode) we wrap the content
-            // in the magic markers so the shell can distinguish "pasted"
-            // text from "typed" text and avoid auto-execution of multi-line
-            // commands.
-            val payload = if (session.display.bracketedPaste) {
-                "[200~$pasted[201~"
-            } else pasted
-            session.sendString(payload, userInput = true)
+            // Cleaned (no ESC, no C1, line ends as CR) and, when the shell enabled bracketed paste
+            // (set by setBracketedPasteMode), wrapped in the markers: see pastePayload.
+            session.sendString(pastePayload(pasted, session.display.bracketedPaste), userInput = true)
         }
         return true
     }

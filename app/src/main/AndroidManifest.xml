@@ -11,16 +11,18 @@
 
     <!-- Foreground Service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- dataSync : transferts SFTP, finis et déclenchés par l'utilisateur.
+    <!-- dataSync : transferts SFTP, finis et déclenchés par l'utilisateur, et le choix du
+         fichier dans le sélecteur du système qui les précède (maintien borné à 10 min).
          Soumis au quota de 6 h par 24 h en arrière-plan depuis targetSdk 35. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <!-- specialUse : tunnels SSH persistants. Aucun autre type ne convient,
-         voir docs/play-foreground-service-justification.md. -->
+    <!-- specialUse : tunnels SSH persistants et sessions de terminal ouvertes.
+         Aucun autre type ne convient, voir docs/play-foreground-service-justification.md. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <!-- Notifications des services au premier plan (Android 13+). Sans elle,
-         la notification de tunnel et celle de transfert n'apparaissent pas
-         dans le volet, donc leurs actions sont inatteignables. -->
+         la notification de tunnel, celle de transfert et celle des sessions
+         de terminal n'apparaissent pas dans le volet, donc leurs actions sont
+         inatteignables. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Import fichiers (SAF) -->
@@ -58,8 +60,17 @@
              Android 16 ignore cette valeur au-delà de 600 dp, où la rotation
              redevient libre : c'est le comportement voulu, la contrainte ne
              vise que le téléphone. -->
+
+        <!-- Clavier et navigation exclus de la recréation : une YubiKey se
+             déclare aussi comme clavier USB, et son branchement change la
+             configuration keyboard / keyboardHidden (Android 10 à 15). Sans
+             cette déclaration, l'activité est recréée au branchement de la
+             clé, en pleine demande de signature FIDO2. Android 16 avec
+             targetSdk 36 ne la recrée plus pour ce motif. Aucune ressource
+             n'a de qualificatif de clavier ou de navigation. -->
         <activity
             android:name=".MainActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation"
             android:exported="true"
             android:launchMode="singleTop"
             android:screenOrientation="portrait"
@@ -72,9 +83,9 @@
         </activity>
 
         <!-- Trampoline invisible pour USB_DEVICE_ATTACHED. Ne lance pas
-             MainActivity en cold-start ; le device est forwardé au
-             Fido2EnrollManager UNIQUEMENT si l'app est déjà ouverte sur
-             l'écran d'enrôlement FIDO2 (yubiKitManager actif). -->
+             MainActivity en cold-start ; le device est forwardé à
+             SecurityKeyDiscovery UNIQUEMENT si quelqu'un cherche une clé
+             (demande de signature FIDO2 ou écran d'enrôlement : un bail est pris). -->
         <activity
             android:name=".ui.vault.Fido2UsbHandlerActivity"
             android:exported="true"
@@ -102,6 +113,21 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Maintains user-initiated SSH port-forwarding tunnels for as long as the user keeps them open" />
+        </service>
+
+        <!-- Foreground Service pour les sessions de terminal SSH ouvertes.
+             Type specialUse pour la meme raison que les tunnels : une session
+             n'est pas un transfert fini, elle reste ouverte tant que
+             l'utilisateur ne la ferme pas. Sans lui, Android coupe les sockets
+             de l'app peu apres son passage en arriere-plan. Justification pour
+             la revue Play : docs/play-foreground-service-justification.md -->
+        <service
+            android:name=".service.TerminalSessionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the SSH terminal sessions the user opened connected while the user switches to another app, until the user closes them" />
         </service>
 
         <!-- Foreground Service pour les transferts SFTP (upload / download) -->

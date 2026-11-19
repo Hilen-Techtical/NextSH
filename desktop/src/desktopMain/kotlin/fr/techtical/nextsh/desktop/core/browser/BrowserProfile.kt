@@ -79,6 +79,9 @@ internal sealed interface LockResult {
      * The lock could not be taken for a technical reason. [reason] is a diagnostic
      * made of fixed text and an exception class name: it never carries a path or an
      * exception message (those would leak the Windows user name into logs).
+     *
+     * Contract: [KcefInitializer] writes [reason] to the log as is, so every producer of
+     * an [Error] must keep to it. The log hygiene guard test lists that one use on purpose.
      */
     data class Error(val reason: String) : LockResult
 }

@@ -11,6 +11,8 @@ import fr.techtical.nextsh.shared.core.sync.EnrolledDeviceRepository
 import fr.techtical.nextsh.shared.core.sync.EnrolledDeviceSecretStore
 import fr.techtical.nextsh.shared.core.sync.SyncProtocol
 import fr.techtical.nextsh.shared.core.sync.SyncResult
+import fr.techtical.nextsh.shared.util.LogId
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -64,7 +66,7 @@ class EnrolledDevicesViewModel @Inject constructor(
                 enrolledDeviceRepository.delete(device.deviceId)
                 _events.tryEmit(Event.Revoked(device.deviceName))
             } catch (e: Exception) {
-                Timber.w(e, "Failed to revoke device ${device.deviceId}")
+                Timber.w("Failed to revoke device=${LogId.of(device.deviceId)} (${errorClass(e)})")
                 _events.tryEmit(Event.Error("Revocation failed"))
             }
         }
@@ -92,11 +94,13 @@ class EnrolledDevicesViewModel @Inject constructor(
                 if (result is SyncResult.Success) {
                     _events.tryEmit(Event.SearchFound(device.deviceName))
                 } else {
-                    Timber.d("searchOnNetwork: ${device.deviceId} not found: $result")
+                    // SyncResult.Error carries a developer message: log the kind only.
+                    val outcome = (result as? SyncResult.Error)?.reason?.name ?: result::class.simpleName
+                    Timber.d("searchOnNetwork: device=${LogId.of(device.deviceId)} not found ($outcome)")
                     _events.tryEmit(Event.SearchNotFound(device.deviceName))
                 }
             } catch (e: Exception) {
-                Timber.w(e, "searchOnNetwork failed for ${device.deviceId}")
+                Timber.w("searchOnNetwork failed for device=${LogId.of(device.deviceId)} (${errorClass(e)})")
                 _events.tryEmit(Event.SearchNotFound(device.deviceName))
             } finally {
                 _searchingDeviceId.value = null

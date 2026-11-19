@@ -8,6 +8,8 @@ import fr.techtical.nextsh.shared.domain.model.Host
 import fr.techtical.nextsh.shared.domain.model.Snippet
 import fr.techtical.nextsh.shared.domain.model.SshKey
 import fr.techtical.nextsh.shared.domain.model.TunnelConfig
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
 /**
@@ -60,20 +62,33 @@ object ConflictSerializer {
         }
 
     fun decodeHost(jsonStr: String): SyncEntry<Host> =
-        json.decodeFromString(SyncEntry.serializer(Host.serializer()), jsonStr)
+        decode(Host.serializer(), jsonStr)
 
     fun decodeTunnel(jsonStr: String): SyncEntry<TunnelConfig> =
-        json.decodeFromString(SyncEntry.serializer(TunnelConfig.serializer()), jsonStr)
+        decode(TunnelConfig.serializer(), jsonStr)
 
     fun decodeSshKey(jsonStr: String): SyncEntry<SshKey> =
-        json.decodeFromString(SyncEntry.serializer(SshKey.serializer()), jsonStr)
+        decode(SshKey.serializer(), jsonStr)
 
     fun decodeSnippet(jsonStr: String): SyncEntry<Snippet> =
-        json.decodeFromString(SyncEntry.serializer(Snippet.serializer()), jsonStr)
+        decode(Snippet.serializer(), jsonStr)
 
     fun decodeCredential(jsonStr: String): SyncEntry<CredentialEntry> =
-        json.decodeFromString(SyncEntry.serializer(CredentialEntry.serializer()), jsonStr)
+        decode(CredentialEntry.serializer(), jsonStr)
 
     fun decodeCustomTerminalTheme(jsonStr: String): SyncEntry<CustomTerminalTheme> =
-        json.decodeFromString(SyncEntry.serializer(CustomTerminalTheme.serializer()), jsonStr)
+        decode(CustomTerminalTheme.serializer(), jsonStr)
+
+    /**
+     * SECURITY: a kotlinx.serialization error message embeds an excerpt of the JSON it failed
+     * on (host labels, hostnames, usernames, tunnel paths), and callers log `e.message`. The
+     * failure is rethrown as a [SerializationException] (still an [IllegalArgumentException],
+     * so existing catch sites keep working) carrying only the cause's class name, with no cause.
+     */
+    private fun <T> decode(payloadSerializer: KSerializer<T>, jsonStr: String): SyncEntry<T> =
+        try {
+            json.decodeFromString(SyncEntry.serializer(payloadSerializer), jsonStr)
+        } catch (e: Exception) {
+            throw SerializationException("Conflict entry decoding failed (${e.safeTypeName()})")
+        }
 }

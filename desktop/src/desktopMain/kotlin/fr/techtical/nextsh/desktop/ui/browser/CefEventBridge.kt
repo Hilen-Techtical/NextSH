@@ -18,7 +18,7 @@ import java.awt.Cursor
  * but we translated it as the `else` fallback (DEFAULT), and Chromium's W_RESIZE
  * (AWT id 10) was shown as S_RESIZE.
  *
- * AWT defines 14 predefined cursors numbered 0–13 ([Cursor.DEFAULT_CURSOR] …
+ * AWT defines 14 predefined cursors numbered 0 to 13 ([Cursor.DEFAULT_CURSOR] …
  * [Cursor.MOVE_CURSOR]). Values outside that range fall back to the default
  * cursor rather than throwing, so any future Chromium cursor type that JCEF
  * forwards without a mapping degrades gracefully.

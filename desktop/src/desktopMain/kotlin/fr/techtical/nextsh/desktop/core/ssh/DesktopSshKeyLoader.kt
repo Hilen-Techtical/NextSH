@@ -91,7 +91,13 @@ object DesktopSshKeyLoader {
         val certBase64 = parts[1]
 
         val certBytes = java.util.Base64.getDecoder().decode(certBase64)
-        val certPublicKey = Buffer.PlainBuffer(certBytes).readPublicKey()
+        // SSHJ allocates the length announced in the blob without bounding it: a certificate coming from a
+        // backup can make it throw OutOfMemoryError. Treated as an unreadable certificate (no content in the error).
+        val certPublicKey = try {
+            Buffer.PlainBuffer(certBytes).readPublicKey()
+        } catch (e: OutOfMemoryError) {
+            throw IllegalArgumentException("Certificat illisible")
+        }
 
         return object : KeyProvider {
             override fun getPublic(): java.security.PublicKey = certPublicKey
@@ -117,13 +123,13 @@ object DesktopSshKeyLoader {
             "loadSkKeyHandle: keyType must be SK_ED25519 or SK_ECDSA_256, got ${key.keyType}"
         }
         require(key.fido2CredentialId != null) {
-            "loadSkKeyHandle: fido2CredentialId must not be null for FIDO2 key ${key.id}"
+            "loadSkKeyHandle: fido2CredentialId must not be null"
         }
 
         // Parser la clé publique depuis la ligne authorized_keys (format OpenSSH)
         val skPublicKey = SkSshPublicKey.fromAuthorizedKeysLine(key.publicKey)
             ?: throw IllegalArgumentException(
-                "loadSkKeyHandle: cannot parse SK public key for key ${key.id} (publicKey='${key.publicKey.take(60)}...')"
+                "loadSkKeyHandle: unreadable SK public key"
             )
 
         // Décoder le credentialId (stocké en Base64 dans la BDD)
@@ -131,7 +137,7 @@ object DesktopSshKeyLoader {
             Base64.getDecoder().decode(key.fido2CredentialId)
         } catch (e: IllegalArgumentException) {
             throw IllegalArgumentException(
-                "loadSkKeyHandle: fido2CredentialId is not valid Base64 for key ${key.id}", e
+                "loadSkKeyHandle: fido2CredentialId is not valid Base64"
             )
         }
 
@@ -156,7 +162,8 @@ object DesktopSshKeyLoader {
         val chain = generateSequence<Throwable>(e) { it.cause }.toList()
         return chain.any { t ->
             val msg = t.message?.lowercase() ?: ""
-            t is javax.crypto.BadPaddingException ||
+            t is com.hierynomus.sshj.common.KeyDecryptionFailedException ||
+                t is javax.crypto.BadPaddingException ||
                 t is java.security.InvalidKeyException ||
                 "password" in msg || "passphrase" in msg ||
                 "decrypt" in msg || "tag mismatch" in msg

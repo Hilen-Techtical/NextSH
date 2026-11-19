@@ -4,10 +4,10 @@
 package fr.techtical.nextsh.desktop.core.auth.fido2
 
 /**
- * Interface de signature FIDO2 : permet l'injection d'un test double dans
- * [fr.techtical.nextsh.desktop.core.ssh.fido2.SkFido2Signature] et
- * [fr.techtical.nextsh.desktop.core.ssh.fido2.SkFido2PrivateKey] sans
- * dépendre de [YubiKitFidoManager] concret (qui requiert PC/SC physique).
+ * Interface de signature FIDO2 : permet à
+ * [fr.techtical.nextsh.desktop.core.ssh.DesktopSshSessionManager.connectWithFido2]
+ * (via [fr.techtical.nextsh.shared.core.ssh.fido2.SkAuthMethod]) de recevoir un test
+ * double sans dépendre de [YubiKitFidoManager] concret (qui requiert PC/SC physique).
  *
  * Implementation de production : [YubiKitFidoManager] (adapté via
  * [YubiKitFido2Signer] dans le DesktopContainer).

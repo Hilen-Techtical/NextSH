@@ -10,6 +10,7 @@ import com.sun.jna.PointerType
 import com.sun.jna.WString
 import com.sun.jna.ptr.PointerByReference
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 
 private const val TAG = "WinWebAuthn"
 
@@ -169,7 +170,7 @@ interface WebAuthnLibrary : Library {
             return runCatching {
                 Native.load(DLL_NAME, WebAuthnLibrary::class.java) as WebAuthnLibrary
             }.onFailure { e ->
-                Logger.w(TAG, "loadOrNull: failed to load $DLL_NAME.dll, ${e.javaClass.simpleName}: ${e.message}")
+                Logger.w(TAG, "loadOrNull: failed to load $DLL_NAME.dll (${errorClass(e)})")
             }.getOrNull()
         }
     }

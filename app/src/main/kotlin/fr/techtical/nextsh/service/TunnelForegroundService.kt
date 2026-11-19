@@ -4,7 +4,6 @@
 package fr.techtical.nextsh.service
 
 import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
@@ -19,6 +18,7 @@ import fr.techtical.nextsh.MainActivity
 import fr.techtical.nextsh.R
 import fr.techtical.nextsh.core.network.NetworkMonitor
 import fr.techtical.nextsh.core.ssh.SshTunnelManager
+import fr.techtical.nextsh.core.ssh.TunnelLivenessWatchdog
 import fr.techtical.nextsh.domain.model.TunnelState
 import fr.techtical.nextsh.domain.model.TunnelStatus
 import fr.techtical.nextsh.domain.usecase.ReconnectTunnelsUseCase
@@ -30,13 +30,30 @@ import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
 
-private const val CHANNEL_ID        = "tunnel_channel"
 private const val NOTIFICATION_ID   = 1001
 internal const val ACTION_STOP_ALL  = "fr.techtical.nextsh.STOP_ALL_TUNNELS"
 
 /**
+ * Vrai quand le service n'a plus rien à servir : des tunnels ont existé ([hadTunnels]) et il n'en
+ * reste aucun état. La carte d'un tunnel en ERREUR ou en RECONNEXION est un état comme un autre :
+ * tant qu'elle est là, le service reste, et avec lui la boucle de reconnexion automatique, qui
+ * attend ses tentatives (jusqu'à plus d'une minute de back-off) ou le prochain événement réseau.
+ * Elle ne part que lorsque l'utilisateur la retire (arrêt d'un tunnel en erreur, « tout arrêter »)
+ * ou lorsqu'un tunnel supprimé ailleurs est arrêté.
+ *
+ * `hadTunnels` : la table est vide juste avant l'enregistrement du premier tunnel, ce qui ne doit
+ * pas faire s'arrêter un service qui vient de démarrer.
+ */
+internal fun shouldStopForegroundService(states: Map<String, TunnelState>, hadTunnels: Boolean): Boolean =
+    hadTunnels && states.isEmpty()
+
+/**
  * Service au premier plan qui maintient les tunnels SSH vivants quand l'app
- * passe en arrière-plan, et qui héberge la boucle de reconnexion automatique.
+ * passe en arrière-plan, et qui héberge la boucle de reconnexion automatique
+ * (au retour du réseau, et dès qu'un tunnel se coupe, voir
+ * `ReconnectTunnelsUseCase.observe`). Il reste tant qu'un état de tunnel existe,
+ * un tunnel en erreur ou en reconnexion compris : voir
+ * [shouldStopForegroundService].
  *
  * Type de service : `specialUse` et non `dataSync`. Un tunnel SSH n'est pas un
  * transfert de données fini : il reste ouvert tant que l'utilisateur le veut,
@@ -68,8 +85,15 @@ class TunnelForegroundService : Service() {
     @Inject
     lateinit var reconnectTunnels: ReconnectTunnelsUseCase
 
+    @Inject
+    lateinit var livenessWatchdog: TunnelLivenessWatchdog
+
+    @Inject
+    lateinit var authRequiredNotifier: AuthRequiredNotifier
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var reconnectStarted = false
+    private var livenessStarted = false
     private var observeStarted = false
 
     /**
@@ -84,7 +108,7 @@ class TunnelForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        ensureTunnelNotificationChannel(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -107,23 +131,34 @@ class TunnelForegroundService : Service() {
         } else {
             startInForeground(buildNotification(tunnelLabel))
         }
-        Timber.i("TunnelForegroundService démarré : ${tunnelLabel ?: "tunnels"}")
+        // Texte fixe : le libelle du tunnel est une donnee privee.
+        Timber.i("TunnelForegroundService démarré")
 
         if (!reconnectStarted) {
             reconnectStarted = true
             serviceScope.launch { reconnectTunnels.observe() }
         }
+        if (!livenessStarted) {
+            livenessStarted = true
+            serviceScope.launch { livenessWatchdog.observe() }
+        }
         if (!observeStarted) {
             observeStarted = true
             serviceScope.launch {
                 tunnelManager.tunnelStates.collect { states ->
-                    if (states.isEmpty()) {
-                        // Ne s'arrêter que si des tunnels ont réellement existé :
-                        // la map est vide juste avant l'enregistrement du premier.
-                        if (hadTunnels) stopForegroundAndSelf()
-                    } else {
-                        hadTunnels = true
-                        updateNotification(states)
+                    // A tunnel reported as waiting for the user that is not in error any more
+                    // (started again by any path, stopped, deleted, or all stopped at once) is not
+                    // waiting: it leaves the "authentication required" notification, which goes
+                    // when none is left. Before the empty case below, which ends this service.
+                    authRequiredNotifier.retainWaiting(
+                        states.filterValues { it.status == TunnelStatus.ERROR }.keys,
+                    )
+                    when {
+                        shouldStopForegroundService(states, hadTunnels) -> stopForegroundAndSelf()
+                        states.isNotEmpty() -> {
+                            hadTunnels = true
+                            updateNotification(states)
+                        }
                     }
                 }
             }
@@ -200,7 +235,7 @@ class TunnelForegroundService : Service() {
     )
 
     private fun baseNotification(): NotificationCompat.Builder =
-        NotificationCompat.Builder(this, CHANNEL_ID)
+        NotificationCompat.Builder(this, TUNNEL_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_tunnel)
             .setContentIntent(contentIntent())
             .setOngoing(true)
@@ -259,19 +294,6 @@ class TunnelForegroundService : Service() {
             .setStyle(style)
             .addAction(R.drawable.ic_stop, getString(R.string.tunnel_notification_stop_all), stopAllIntent())
             .build()
-    }
-
-    private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            getString(R.string.tunnel_channel_name),
-            NotificationManager.IMPORTANCE_LOW,
-        ).apply {
-            description = getString(R.string.tunnel_channel_description)
-            setShowBadge(false)
-        }
-        getSystemService(NotificationManager::class.java)
-            .createNotificationChannel(channel)
     }
 
     companion object {

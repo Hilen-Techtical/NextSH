@@ -12,6 +12,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import fr.techtical.nextsh.core.sync.AndroidSyncScheduler
 import fr.techtical.nextsh.core.sync.LanSyncClient
+import fr.techtical.nextsh.core.vault.CREDENTIAL_META_FILE_NAME
 import fr.techtical.nextsh.shared.core.sync.CredentialMetaStore
 import fr.techtical.nextsh.shared.core.sync.CredentialSyncRepository
 import fr.techtical.nextsh.shared.core.sync.DeviceIdentity
@@ -58,7 +59,7 @@ abstract class SyncModule {
         fun provideCredentialMetaStore(
             @ApplicationContext context: Context,
         ): CredentialMetaStore =
-            FileCredentialMetaStore(File(context.filesDir, "credential-meta.json"))
+            FileCredentialMetaStore(File(context.filesDir, CREDENTIAL_META_FILE_NAME))
 
         @Provides
         @Singleton

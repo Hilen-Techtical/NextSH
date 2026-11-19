@@ -17,9 +17,11 @@ import kotlin.random.Random
  */
 class SftpUploadNameTest {
 
-    // sanitizeFilename et sanitizePath ne lisent aucun état : le gestionnaire de sessions
-    // n'est jamais appelé.
-    private val sftpManager = SftpManager(mockk())
+    // sanitizeFilename et sanitizePath ne lisent aucun état. Le gestionnaire de sessions est
+    // relâché parce que le constructeur de SftpManager s'abonne à la fin des sessions.
+    private fun cp(vararg codePoints: Int): String = String(codePoints, 0, codePoints.size)
+
+    private val sftpManager = SftpManager(mockk(relaxed = true))
 
     // ── Traversée de chemin ──────────────────────────────────────────────────────
 
@@ -82,6 +84,50 @@ class SftpUploadNameTest {
     fun `trailing control character is replaced and not trimmed`() {
         // Remplacement d'abord, rognage ensuite : le contrôle final devient un `_` conservé.
         assertEquals("a_", uploadEntryName("a\n"))
+    }
+
+    // ── Caractères de format invisibles ──────────────────────────────────────────
+
+    @Test
+    fun `right to left override is replaced and shows the real extension`() {
+        assertEquals("photo_gpj.exe", uploadEntryName("photo\u202Egpj.exe"))
+    }
+
+    @Test
+    fun `every invisible format character is replaced`() {
+        val all = listOf('\u00AD', '\u061C', '\u200B', '\u200E', '\u200F', '\u2028', '\u2029', '\uFEFF') +
+            ('\u202A'..'\u202E') + ('\u2060'..'\u206F') + ('\uFFF9'..'\uFFFB')
+        all.forEach { c ->
+            assertEquals("a_b", uploadEntryName("a${c}b"), "U+%04X".format(c.code))
+        }
+    }
+
+    @Test
+    fun `leading byte order mark is replaced and not removed`() {
+        assertEquals("_report.pdf", uploadEntryName("\uFEFFreport.pdf"))
+    }
+
+    @Test
+    fun `line separator inside the name is replaced`() {
+        assertEquals("a.pdf_.exe", uploadEntryName("a.pdf\u2028.exe"))
+    }
+
+    @Test
+    fun `a name made of invisible characters only is kept as underscores`() {
+        assertEquals("__", uploadEntryName("\u200B\u200B"))
+    }
+
+    @Test
+    fun `Khmer inherent vowels are replaced`() {
+        assertEquals("a_b_c", uploadEntryName(cp(0x61, 0x17B4, 0x62, 0x17B5, 0x63)))
+    }
+
+    @Test
+    fun `joiners of a script are kept`() {
+        val persian = cp(0x0645, 0x06CC, 0x200C, 0x062E, 0x0648, 0x0627, 0x0647, 0x0645)
+        val family = cp(0x1F468, 0x200D, 0x1F469, 0x200D, 0x1F467)
+        assertEquals(persian, uploadEntryName(persian))
+        assertEquals(family, uploadEntryName(family))
     }
 
     // ── Espaces en bordure ───────────────────────────────────────────────────────
@@ -164,6 +210,9 @@ class SftpUploadNameTest {
             "a\u0000b",
             "\u0001\u0002\u0003",
             "a\u0085b\u009Fc",
+            "photo\u202Egpj.exe",
+            "\u200B\u200B",
+            "\uFEFFreport.pdf",
             "  x  ",
             " .. ",
             "...",
@@ -189,10 +238,11 @@ class SftpUploadNameTest {
     fun `result passes the file name and path rules on pseudo random input`() {
         // Graine fixe : le test reste déterministe.
         val random = Random(57)
-        val pool = listOf(
+        val basePool = listOf(
             "a", "b", "Z", "0", ".", "..", "/", "\\", " ", "  ", "\u0000", "\n", "\t", "\u007F",
             "\u0085", "%2F", "+", "é", "日", "\u00A0", "\uD83D\uDE00", "-", "_", "~",
         )
+        val pool = basePool + listOf("\u202E", "\u200B", "\u200D", "\u2028")
         val total = 3000
         var accepted = 0
         repeat(total) {
@@ -256,6 +306,7 @@ class SftpUploadNameTest {
         assertTrue(result.isNotEmpty(), "résultat vide pour ${raw.escaped()}")
         assertTrue(result != "." && result != "..", "résultat '.' ou '..' pour ${raw.escaped()}")
         assertTrue(result.length <= 255, "résultat trop long pour ${raw.escaped()}")
+        assertTrue(result.none { it.isInvisibleFormat() }, "caractère de format invisible pour ${raw.escaped()}")
         assertSanitizeKeepsName(result)
         // Le nom reste un segment unique : ni remontée ni aplatissement.
         val path = "/home/user/$result"

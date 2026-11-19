@@ -22,6 +22,9 @@ SELECT * FROM custom_terminal_themes ORDER BY name;
 selectById:
 SELECT * FROM custom_terminal_themes WHERE id = ? AND deleted = 0;
 
+selectByIdIncludingDeleted:
+SELECT * FROM custom_terminal_themes WHERE id = ?;
+
 insert:
 INSERT OR REPLACE INTO custom_terminal_themes(id, name, background, foreground, cursor, selectionBg, ansi, createdAt, vectorClock, deleted, deletedAt, updatedAt)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
@@ -31,3 +34,7 @@ UPDATE custom_terminal_themes SET deleted = 1, deletedAt = ?, updatedAt = ?, vec
 
 delete:
 DELETE FROM custom_terminal_themes WHERE id = ?;
+
+-- Vault wipe: every row, tombstones included. Generated, so that the listeners of the table are notified.
+deleteAll:
+DELETE FROM custom_terminal_themes;

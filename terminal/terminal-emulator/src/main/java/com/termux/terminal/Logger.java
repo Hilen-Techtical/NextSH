@@ -43,8 +43,19 @@ public class Logger {
             Log.v(logTag, message);
     }
 
+    /**
+     * Logs {@code message} followed by the simple class name of {@code throwable}, nothing else.
+     * The stack trace text is not logged: it prints the exception messages, which can quote what
+     * the remote host sent. {@link #getMessageAndStackTraceString} stays for callers that really
+     * need the full text.
+     */
     public static void logStackTraceWithMessage(TerminalSessionClient client, String tag, String message, Throwable throwable) {
-        logError(client, tag, getMessageAndStackTraceString(message, throwable));
+        String className = throwable == null ? null : throwable.getClass().getSimpleName();
+        String text;
+        if (message == null) text = className;
+        else if (className == null) text = message;
+        else text = message + " (" + className + ")";
+        logError(client, tag, text);
     }
 
     public static String getMessageAndStackTraceString(String message, Throwable throwable) {

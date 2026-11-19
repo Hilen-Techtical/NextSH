@@ -46,8 +46,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -60,6 +62,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.composables.icons.lucide.Check
 import com.composables.icons.lucide.ChevronDown
 import com.composables.icons.lucide.Copy
 import com.composables.icons.lucide.Download
@@ -74,6 +77,7 @@ import com.composables.icons.lucide.Usb
 import fr.techtical.nextsh.desktop.components.ConfirmDeleteDialog
 import fr.techtical.nextsh.desktop.components.PageHeader
 import fr.techtical.nextsh.desktop.components.TechticalDialogCard
+import fr.techtical.nextsh.desktop.scope.rememberScreenViewModel
 import fr.techtical.nextsh.desktop.theme.Border1
 import fr.techtical.nextsh.desktop.theme.Border2
 import fr.techtical.nextsh.desktop.theme.Burgundy
@@ -87,12 +91,17 @@ import fr.techtical.nextsh.desktop.theme.Radii
 import fr.techtical.nextsh.desktop.theme.SpaceGroteskFamily
 import fr.techtical.nextsh.desktop.theme.Spacing
 import fr.techtical.nextsh.desktop.theme.SuccessGreen
+import fr.techtical.nextsh.desktop.theme.WarningAmber
 import fr.techtical.nextsh.desktop.theme.Surface
 import fr.techtical.nextsh.desktop.theme.SurfaceVariant
 import fr.techtical.nextsh.desktop.theme.TextDisabled
 import fr.techtical.nextsh.desktop.theme.TextPrimary
 import fr.techtical.nextsh.desktop.theme.TextSecondary
 import fr.techtical.nextsh.desktop.theme.White
+import fr.techtical.nextsh.shared.core.backup.BackupImportReport
+import fr.techtical.nextsh.shared.core.backup.BackupReportRow
+import fr.techtical.nextsh.shared.core.backup.BackupRestoreStep
+import fr.techtical.nextsh.shared.core.backup.BackupReportWarning
 import fr.techtical.nextsh.shared.domain.model.SshKey
 import fr.techtical.nextsh.shared.domain.model.SshKeyType
 import java.awt.FileDialog
@@ -105,6 +114,66 @@ import javax.swing.JFileChooser
 import javax.swing.filechooser.FileNameExtensionFilter
 import fr.techtical.nextsh.desktop.generated.resources.Res
 import fr.techtical.nextsh.desktop.generated.resources.action_cancel
+import fr.techtical.nextsh.desktop.generated.resources.action_close
+import fr.techtical.nextsh.desktop.generated.resources.vault_backup_open_dialog_title
+import fr.techtical.nextsh.desktop.generated.resources.vault_backup_save_dialog_title
+import fr.techtical.nextsh.desktop.generated.resources.vault_backup_save_filter_label
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_empty
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_none_restored
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_step_known_hosts
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_step_settings
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_step_vault_secrets
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_warning_known_host_held
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_warning_partial_restore
+import fr.techtical.nextsh.desktop.generated.resources.vault_key_hosts_count
+import fr.techtical.nextsh.desktop.generated.resources.vault_key_save_dialog_title
+import fr.techtical.nextsh.desktop.generated.resources.vault_key_save_filter_label
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_backup_not_restorable
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_names_more
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_row_certificates
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_row_custom_themes
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_row_format
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_row_hosts
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_row_key_passphrases
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_row_known_hosts_added
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_row_known_hosts_already_known
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_row_passwords
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_row_private_keys
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_row_settings_applied
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_row_snippets
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_row_ssh_keys
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_row_tunnels
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_subtitle
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_title
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_warning_invalid_ignored
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_warning_known_host_conflicts
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_warning_language
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_warning_local_keys_kept
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_warning_newer_data
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_report_warning_public_keys_recomputed
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_backup_export_failed
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_backup_exported
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_backup_import_failed
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_backup_malformed
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_backup_too_large
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_backup_unsupported_version
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_backup_wrong_passphrase
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_fido2_enrolled
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_key_generated
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_key_generation_failed
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_key_import_failed
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_key_imported
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_key_passphrase_required
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_key_passphrase_wrong
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_key_encryption_unsupported
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_key_inconsistent
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_key_too_costly
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_key_too_large
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_key_unreadable
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_label_required
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_public_key_corrected
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_public_key_unavailable
+import fr.techtical.nextsh.desktop.generated.resources.vault_notice_public_key_unverified
 import fr.techtical.nextsh.desktop.generated.resources.vault_action_enroll_fido2
 import fr.techtical.nextsh.desktop.generated.resources.vault_action_export
 import fr.techtical.nextsh.desktop.generated.resources.vault_action_generate
@@ -136,6 +205,7 @@ import fr.techtical.nextsh.desktop.generated.resources.vault_import_confirm_subt
 import fr.techtical.nextsh.desktop.generated.resources.vault_import_confirm_title
 import fr.techtical.nextsh.desktop.generated.resources.vault_import_dialog_choose_title
 import fr.techtical.nextsh.desktop.generated.resources.vault_import_key_action
+import fr.techtical.nextsh.desktop.generated.resources.vault_import_skipped_tunnels
 import fr.techtical.nextsh.desktop.generated.resources.vault_import_key_dialog_title
 import fr.techtical.nextsh.desktop.generated.resources.vault_import_key_label_field
 import fr.techtical.nextsh.desktop.generated.resources.vault_import_key_label_placeholder
@@ -178,14 +248,17 @@ import org.jetbrains.compose.resources.stringResource
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun VaultScreen(onBack: () -> Unit) {
-    val viewModel = remember { VaultScreenViewModel() }
+    val viewModel = rememberScreenViewModel { VaultScreenViewModel() }
     val keys by viewModel.keys.collectAsState()
     val status by viewModel.status.collectAsState()
     val hostsUsingKey by viewModel.hostsUsingKey.collectAsState()
+    val uiScope = rememberCoroutineScope()
 
-    // Auto-dismiss success messages after 2.5 s, errors stay until user acts
-    LaunchedEffect(status.message, status.isError) {
-        if (status.message != null && !status.isError) {
+    // Auto-dismiss success notices after 2.5 s. Errors stay until the user acts: the next operation replaces
+    // the status. A backup import summary is a dialog and never auto-dismisses.
+    val notice = status.notice
+    LaunchedEffect(notice) {
+        if (notice != null && notice.autoDismiss) {
             delay(2500)
             viewModel.clearStatus()
         }
@@ -200,6 +273,11 @@ fun VaultScreen(onBack: () -> Unit) {
     var pendingImportFile by remember { mutableStateOf<File?>(null) }
 
     val importDialogTitle = stringResource(Res.string.vault_import_dialog_choose_title)
+    val backupSaveTitle = stringResource(Res.string.vault_backup_save_dialog_title)
+    val backupOpenTitle = stringResource(Res.string.vault_backup_open_dialog_title)
+    val backupFilterLabel = stringResource(Res.string.vault_backup_save_filter_label)
+    val publicKeySaveTitle = stringResource(Res.string.vault_key_save_dialog_title)
+    val publicKeyFilterLabel = stringResource(Res.string.vault_key_save_filter_label)
 
     val subtitle = stringResource(Res.string.vault_subtitle)
 
@@ -207,9 +285,15 @@ fun VaultScreen(onBack: () -> Unit) {
         PageHeader(title = stringResource(Res.string.vault_title), subtitle = subtitle)
 
         // ── Status banner (succès / erreur) ──────────────────────────────────
-        val statusMsg = status.message
-        if (statusMsg != null) {
-            StatusBanner(text = statusMsg, isError = status.isError)
+        if (notice != null) {
+            StatusBanner(text = noticeText(notice), isError = notice.isError)
+            if (notice is VaultNotice.BackupExported && notice.notRestorable > 0) {
+                StatusBanner(
+                    text = stringResource(Res.string.vault_notice_backup_not_restorable, notice.notRestorable),
+                    isError = false,
+                    isWarning = true,
+                )
+            }
         }
 
         Column(
@@ -273,11 +357,23 @@ fun VaultScreen(onBack: () -> Unit) {
                             KeyCard(
                                 key = key,
                                 hostsUsing = hostsUsingKey[key.id] ?: 0,
+                                // The line comes from the private key (never the stored line alone): see
+                                // VaultScreenViewModel.publicKeyLine.
                                 onCopy = {
-                                    Toolkit.getDefaultToolkit().systemClipboard
-                                        .setContents(StringSelection(key.publicKey), null)
+                                    uiScope.launch {
+                                        viewModel.publicKeyLine(key)?.let { line ->
+                                            Toolkit.getDefaultToolkit().systemClipboard
+                                                .setContents(StringSelection(line), null)
+                                        }
+                                    }
                                 },
-                                onDownload = { exportPublicKey(key) },
+                                onDownload = {
+                                    uiScope.launch {
+                                        viewModel.publicKeyLine(key)?.let { line ->
+                                            exportPublicKey(key, line, publicKeySaveTitle, publicKeyFilterLabel)
+                                        }
+                                    }
+                                },
                                 onDelete = { keyToDelete = key },
                                 modifier = Modifier.width(400.dp),
                             )
@@ -350,7 +446,7 @@ fun VaultScreen(onBack: () -> Unit) {
             onDismiss = { showExportPassphraseDialog = false },
             onConfirm = { passphrase ->
                 showExportPassphraseDialog = false
-                val dest = pickSaveNextshFile()
+                val dest = pickSaveNextshFile(backupSaveTitle, backupFilterLabel)
                 if (dest != null) {
                     viewModel.exportBackup(dest, passphrase)
                 } else {
@@ -379,7 +475,7 @@ fun VaultScreen(onBack: () -> Unit) {
                 BtnPrimarySm(
                     onClick = {
                         showImportConfirmDialog = false
-                        val src = pickOpenNextshFile()
+                        val src = pickOpenNextshFile(backupOpenTitle, backupFilterLabel)
                         if (src != null) {
                             pendingImportFile = src
                         }
@@ -403,6 +499,11 @@ fun VaultScreen(onBack: () -> Unit) {
         )
     }
 
+    val importReport = status.importReport
+    if (importReport != null) {
+        ImportReportDialog(report = importReport, onDismiss = viewModel::dismissImportReport)
+    }
+
     val kToDelete = keyToDelete
     if (kToDelete != null) {
         ConfirmDeleteDialog(
@@ -420,14 +521,21 @@ fun VaultScreen(onBack: () -> Unit) {
 // ── Status banner ────────────────────────────────────────────────────────────
 
 @Composable
-private fun StatusBanner(text: String, isError: Boolean) {
-    val color = if (isError) ErrorRed else SuccessGreen
+private fun StatusBanner(text: String, isError: Boolean, isWarning: Boolean = false, padded: Boolean = true) {
+    val color = when {
+        isError -> ErrorRed
+        isWarning -> WarningAmber
+        else -> SuccessGreen
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(color.copy(alpha = 0.08f))
+            .background(color.copy(alpha = 0.08f), if (padded) RoundedCornerShape(0.dp) else RoundedCornerShape(Radii.Md))
             .border(BorderStroke(0.dp, Color.Transparent))
-            .padding(horizontal = Spacing.Xxl, vertical = Spacing.Sm),
+            .padding(
+                horizontal = if (padded) Spacing.Xxl else Spacing.Md,
+                vertical = Spacing.Sm,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -436,8 +544,142 @@ private fun StatusBanner(text: String, isError: Boolean) {
                 .background(color, RoundedCornerShape(9999.dp)),
         )
         Spacer(Modifier.width(Spacing.Sm))
-        Text(text = text, color = color, fontSize = 12.sp)
+        Text(text = text, color = color, fontSize = 12.sp, modifier = Modifier.weight(1f))
     }
+}
+
+@Composable
+private fun noticeText(notice: VaultNotice): String = when (notice) {
+    is VaultNotice.LabelRequired -> stringResource(Res.string.vault_notice_label_required)
+    is VaultNotice.KeyGenerated -> stringResource(Res.string.vault_notice_key_generated, notice.label)
+    is VaultNotice.KeyGenerationFailed -> stringResource(Res.string.vault_notice_key_generation_failed)
+    is VaultNotice.Fido2KeyEnrolled -> stringResource(Res.string.vault_notice_fido2_enrolled, notice.label)
+    is VaultNotice.KeyImported -> stringResource(Res.string.vault_notice_key_imported, notice.label)
+    is VaultNotice.KeyPassphraseRequired -> stringResource(Res.string.vault_notice_key_passphrase_required)
+    is VaultNotice.KeyPassphraseWrong -> stringResource(Res.string.vault_notice_key_passphrase_wrong)
+    is VaultNotice.KeyUnreadable -> stringResource(Res.string.vault_notice_key_unreadable)
+    is VaultNotice.KeyTooLarge -> stringResource(Res.string.vault_notice_key_too_large)
+    is VaultNotice.KeyImportFailed -> stringResource(Res.string.vault_notice_key_import_failed)
+    is VaultNotice.KeyTooCostly -> stringResource(Res.string.vault_notice_key_too_costly)
+    is VaultNotice.KeyInconsistent -> stringResource(Res.string.vault_notice_key_inconsistent)
+    is VaultNotice.KeyEncryptionUnsupported -> stringResource(Res.string.vault_notice_key_encryption_unsupported)
+    is VaultNotice.PublicKeyCorrected -> stringResource(Res.string.vault_notice_public_key_corrected)
+    is VaultNotice.PublicKeyUnverified -> stringResource(Res.string.vault_notice_public_key_unverified)
+    is VaultNotice.PublicKeyUnavailable -> stringResource(Res.string.vault_notice_public_key_unavailable)
+    is VaultNotice.BackupExported ->
+        stringResource(Res.string.vault_notice_backup_exported, notice.path, notice.entries)
+    is VaultNotice.BackupExportFailed -> stringResource(Res.string.vault_notice_backup_export_failed)
+    is VaultNotice.BackupFileTooLarge -> stringResource(Res.string.vault_notice_backup_too_large)
+    is VaultNotice.BackupWrongPassphrase -> stringResource(Res.string.vault_notice_backup_wrong_passphrase)
+    is VaultNotice.BackupMalformed -> stringResource(Res.string.vault_notice_backup_malformed)
+    is VaultNotice.BackupUnsupportedVersion ->
+        stringResource(Res.string.vault_notice_backup_unsupported_version, notice.version)
+    is VaultNotice.BackupImportFailed -> stringResource(Res.string.vault_notice_backup_import_failed)
+}
+
+// ── Import summary dialog ────────────────────────────────────────────────────
+
+@Composable
+private fun BackupReportRow.label(): String = stringResource(
+    when (this) {
+        BackupReportRow.HOSTS -> Res.string.vault_import_report_row_hosts
+        BackupReportRow.SSH_KEYS -> Res.string.vault_import_report_row_ssh_keys
+        BackupReportRow.TUNNELS -> Res.string.vault_import_report_row_tunnels
+        BackupReportRow.PASSWORDS -> Res.string.vault_import_report_row_passwords
+        BackupReportRow.PRIVATE_KEYS -> Res.string.vault_import_report_row_private_keys
+        BackupReportRow.KEY_PASSPHRASES -> Res.string.vault_import_report_row_key_passphrases
+        BackupReportRow.CERTIFICATES -> Res.string.vault_import_report_row_certificates
+        BackupReportRow.SNIPPETS -> Res.string.vault_import_report_row_snippets
+        BackupReportRow.CUSTOM_THEMES -> Res.string.vault_import_report_row_custom_themes
+        BackupReportRow.KNOWN_HOSTS_ADDED -> Res.string.vault_import_report_row_known_hosts_added
+        BackupReportRow.KNOWN_HOSTS_ALREADY_KNOWN -> Res.string.vault_import_report_row_known_hosts_already_known
+        BackupReportRow.SETTINGS_APPLIED -> Res.string.vault_import_report_row_settings_applied
+    },
+)
+
+@Composable
+private fun BackupRestoreStep.label(): String = stringResource(
+    when (this) {
+        BackupRestoreStep.VAULT_SECRETS -> Res.string.vault_import_report_step_vault_secrets
+        BackupRestoreStep.KNOWN_HOSTS -> Res.string.vault_import_report_step_known_hosts
+        BackupRestoreStep.SETTINGS -> Res.string.vault_import_report_step_settings
+    },
+)
+
+@Composable
+private fun BackupReportWarning.text(report: BackupImportReport): String = when (this) {
+    BackupReportWarning.TUNNELS_SKIPPED ->
+        stringResource(Res.string.vault_import_skipped_tunnels, report.tunnelsSkipped)
+    BackupReportWarning.KNOWN_HOST_CONFLICTS -> {
+        val names = report.knownHostConflictNames.joinToString(", ")
+        val notNamed = report.knownHostConflictsNotNamed
+        val shown = if (notNamed > 0) stringResource(Res.string.vault_import_report_names_more, names, notNamed) else names
+        stringResource(Res.string.vault_import_report_warning_known_host_conflicts, report.knownHostConflicts, shown)
+    }
+    BackupReportWarning.PARTIAL_RESTORE -> {
+        // map is inline (a composable call is allowed in its lambda), the transform of joinToString is not.
+        val steps = report.failedSteps.sortedBy { it.ordinal }.map { it.label() }.joinToString(", ")
+        stringResource(Res.string.vault_import_report_warning_partial_restore, steps)
+    }
+    BackupReportWarning.KNOWN_HOST_HELD -> {
+        val names = report.knownHostHeldNames.joinToString(", ")
+        val notNamed = report.knownHostsHeldNotNamed
+        val shown = if (notNamed > 0) stringResource(Res.string.vault_import_report_names_more, names, notNamed) else names
+        stringResource(Res.string.vault_import_report_warning_known_host_held, report.knownHostsHeld, shown)
+    }
+    BackupReportWarning.INVALID_IGNORED ->
+        stringResource(Res.string.vault_import_report_warning_invalid_ignored, report.invalidIgnored)
+    BackupReportWarning.NEWER_DATA_NOT_RESTORED -> stringResource(Res.string.vault_import_report_warning_newer_data)
+    BackupReportWarning.LANGUAGE_AFTER_RESTART -> stringResource(Res.string.vault_import_report_warning_language)
+    BackupReportWarning.PUBLIC_KEYS_RECOMPUTED ->
+        stringResource(Res.string.vault_import_report_warning_public_keys_recomputed, report.publicKeysRecomputed)
+    BackupReportWarning.LOCAL_KEYS_KEPT ->
+        stringResource(Res.string.vault_import_report_warning_local_keys_kept, report.localKeysKept)
+}
+
+/** Summary shown after a successful import: the non-zero counters, then the warnings (same order as Android). */
+@Composable
+private fun ImportReportDialog(report: BackupImportReport, onDismiss: () -> Unit) {
+    val rows = report.rows()
+    val warnings = report.warnings()
+    TechticalDialogCard(
+        title = stringResource(Res.string.vault_import_report_title),
+        icon = Lucide.Download,
+        subtitle = stringResource(Res.string.vault_import_report_subtitle),
+        onDismiss = onDismiss,
+        content = {
+            if (rows.isEmpty()) {
+                Text(
+                    text = stringResource(
+                        if (warnings.isEmpty()) Res.string.vault_import_report_empty
+                        else Res.string.vault_import_report_none_restored,
+                    ),
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.Xs)) {
+                    rows.forEach { (row, count) ->
+                        Text(
+                            text = stringResource(Res.string.vault_import_report_row_format, row.label(), count),
+                            color = TextPrimary,
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+            }
+            warnings.forEach { warning ->
+                StatusBanner(text = warning.text(report), isError = false, isWarning = true, padded = false)
+            }
+        },
+        footer = {
+            BtnPrimarySm(
+                onClick = onDismiss,
+                icon = Lucide.Check,
+                label = stringResource(Res.string.action_close),
+            )
+        },
+    )
 }
 
 // ── Section header ───────────────────────────────────────────────────────────
@@ -577,7 +819,7 @@ private fun KeyCard(
         // Count hôtes
         Text(
             text = if (hostsUsing == 0) stringResource(Res.string.vault_key_unused)
-            else "$hostsUsing hôte${if (hostsUsing > 1) "s" else ""}",
+            else stringResource(Res.string.vault_key_hosts_count, hostsUsing),
             color = if (hostsUsing == 0) TextDisabled else TextSecondary,
             fontSize = 11.sp,
             maxLines = 1,
@@ -743,17 +985,17 @@ private fun computeFingerprint(publicKeyOpenSsh: String): String {
  * Export de la clé publique vers un `.pub` choisi par l'utilisateur.
  * Pas de chiffrement : c'est la partie publique uniquement.
  */
-private fun exportPublicKey(key: SshKey) {
+private fun exportPublicKey(key: SshKey, publicKeyLine: String, title: String, filterLabel: String) {
     val chooser = JFileChooser().apply {
-        dialogTitle = "Enregistrer la clé publique"
-        fileFilter = FileNameExtensionFilter("OpenSSH public key (*.pub)", "pub")
+        dialogTitle = title
+        fileFilter = FileNameExtensionFilter(filterLabel, "pub")
         selectedFile = File("${key.label}.pub")
     }
     if (chooser.showSaveDialog(null) != JFileChooser.APPROVE_OPTION) return
     val picked = chooser.selectedFile ?: return
     val target = if (picked.extension.equals("pub", ignoreCase = true)) picked
     else File(picked.parentFile, picked.name + ".pub")
-    target.writeText(key.publicKey)
+    target.writeText(publicKeyLine)
 }
 
 @Composable
@@ -1196,10 +1438,10 @@ private fun BtnPrimarySm(
     }
 }
 
-private fun pickSaveNextshFile(): File? {
+private fun pickSaveNextshFile(title: String, filterLabel: String): File? {
     val chooser = JFileChooser().apply {
-        dialogTitle = "Enregistrer le backup .nextsh"
-        fileFilter = FileNameExtensionFilter("NextSH backup (*.nextsh)", "nextsh")
+        dialogTitle = title
+        fileFilter = FileNameExtensionFilter(filterLabel, "nextsh")
         selectedFile = File("nextsh-backup.nextsh")
     }
     val result = chooser.showSaveDialog(null)
@@ -1209,10 +1451,10 @@ private fun pickSaveNextshFile(): File? {
     else File(picked.parentFile, picked.name + ".nextsh")
 }
 
-private fun pickOpenNextshFile(): File? {
+private fun pickOpenNextshFile(title: String, filterLabel: String): File? {
     val chooser = JFileChooser().apply {
-        dialogTitle = "Ouvrir un backup .nextsh"
-        fileFilter = FileNameExtensionFilter("NextSH backup (*.nextsh)", "nextsh")
+        dialogTitle = title
+        fileFilter = FileNameExtensionFilter(filterLabel, "nextsh")
     }
     val result = chooser.showOpenDialog(null)
     if (result != JFileChooser.APPROVE_OPTION) return null

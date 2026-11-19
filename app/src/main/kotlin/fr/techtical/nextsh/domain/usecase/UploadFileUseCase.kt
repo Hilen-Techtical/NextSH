@@ -6,10 +6,15 @@ package fr.techtical.nextsh.domain.usecase
 import android.content.Context
 import android.net.Uri
 import dagger.hilt.android.qualifiers.ApplicationContext
+import fr.techtical.nextsh.core.ssh.SFTP_SOURCE_UNAVAILABLE_MESSAGE
+import fr.techtical.nextsh.core.ssh.SFTP_SOURCE_VIRTUAL_MESSAGE
 import fr.techtical.nextsh.core.ssh.SftpManager
+import fr.techtical.nextsh.core.ssh.isVirtualDocument
 import fr.techtical.nextsh.domain.model.SshErrorCode
 import fr.techtical.nextsh.shared.domain.model.SshResult
+import fr.techtical.nextsh.shared.util.errorClass
 import timber.log.Timber
+import java.io.FileNotFoundException
 import javax.inject.Inject
 
 /**
@@ -21,6 +26,10 @@ import javax.inject.Inject
  *
  * Pas de permission stockage nécessaire : SAF gère l'accès fichier.
  *
+ * Un document virtuel (Google Docs de Drive) ne s'ouvre pas : le résultat porte
+ * [SFTP_SOURCE_VIRTUAL_MESSAGE] et non [SFTP_SOURCE_UNAVAILABLE_MESSAGE], pour que
+ * l'écran dise d'exporter le document. Rien n'est exporté ici.
+ *
  * @param sftpManager    gestionnaire des connexions SFTP.
  * @param context        contexte application pour le ContentResolver.
  */
@@ -29,15 +38,24 @@ class UploadFileUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     /**
+     * La source est ouverte avant le serveur : une source illisible ne crée rien côté serveur.
+     *
      * @param sessionId   identifiant de la session SSH active.
      * @param remotePath  chemin absolu de destination sur le serveur distant.
      * @param localUri    URI SAF (content://) du fichier source local.
+     * @param replaceExisting vrai seulement après la confirmation de l'utilisateur, quand un fichier
+     *   porte déjà ce nom : il est alors remplacé, sans être vidé avant la fin de l'envoi (le contenu
+     *   passe par un fichier temporaire caché du même dossier, qui prend sa place d'un seul coup, voir
+     *   [SftpManager.writeFile]). Faux, un nom déjà pris est refusé par le serveur
+     *   ([fr.techtical.nextsh.core.ssh.SFTP_UPLOAD_TARGET_EXISTS_MESSAGE]) et rien n'est remplacé.
+     *   Sans valeur par défaut : aucun appelant ne remplace un fichier par omission.
      * @param onProgress  lambda appelée avec (bytesTransferred, totalBytes).
      */
     suspend operator fun invoke(
         sessionId: String,
         remotePath: String,
         localUri: Uri,
+        replaceExisting: Boolean,
         onProgress: (bytesTransferred: Long, totalBytes: Long) -> Unit,
     ): SshResult<Unit> {
         return try {
@@ -47,15 +65,16 @@ class UploadFileUseCase @Inject constructor(
             val inputStream = context.contentResolver.openInputStream(localUri)
                 ?: return SshResult.Error(
                     SshErrorCode.UNKNOWN,
-                    "Impossible d'ouvrir le fichier source"
+                    SFTP_SOURCE_UNAVAILABLE_MESSAGE
                 )
             inputStream.use { stream ->
                 sftpManager.writeFile(
-                    sessionId   = sessionId,
-                    remotePath  = remotePath,
-                    inputStream = stream,
-                    size        = fileSize,
-                    onProgress  = onProgress,
+                    sessionId       = sessionId,
+                    remotePath      = remotePath,
+                    inputStream     = stream,
+                    size            = fileSize,
+                    replaceExisting = replaceExisting,
+                    onProgress      = onProgress,
                 )
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -64,10 +83,16 @@ class UploadFileUseCase @Inject constructor(
             // echec et masquerait la nature de l interruption.
             throw e
         } catch (e: Exception) {
-            Timber.e(e, "UploadFileUseCase: erreur d'accès SAF pour $localUri")
+            // Un document virtuel (Google Docs de Drive) n'a pas de contenu brut : son fournisseur
+            // refuse de l'ouvrir en `FileNotFoundException`, comme un fichier disparu. Les drapeaux
+            // du document les distinguent, pour dire à l'utilisateur d'exporter le document plutôt
+            // que de lui annoncer une lecture impossible. L'écran refuse déjà ce choix avant tout
+            // transfert : ceci est le filet, au cas où il n'aurait pas vu le drapeau.
+            val virtual = e is FileNotFoundException && isVirtualDocument(context, localUri)
+            Timber.e("UploadFileUseCase: SAF access error (virtual document: $virtual, ${errorClass(e)})")
             SshResult.Error(
                 SshErrorCode.UNKNOWN,
-                "Impossible d'accéder au fichier source"
+                if (virtual) SFTP_SOURCE_VIRTUAL_MESSAGE else SFTP_SOURCE_UNAVAILABLE_MESSAGE
             )
         }
     }
@@ -97,7 +122,7 @@ class UploadFileUseCase @Inject constructor(
                 }
             } ?: 0L
         } catch (e: Exception) {
-            Timber.w(e, "UploadFileUseCase: impossible de résoudre la taille pour $uri")
+            Timber.w("UploadFileUseCase: cannot resolve the file size (${errorClass(e)})")
             0L
         }
     }

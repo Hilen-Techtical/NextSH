@@ -7,11 +7,23 @@ import android.security.keystore.UserNotAuthenticatedException
 import java.security.Key
 import java.security.KeyStore
 import java.security.KeyStoreException
+import java.security.NoSuchAlgorithmException
+import java.security.Provider
 import java.security.ProviderException
+import java.security.Security
 import javax.crypto.Cipher
+import javax.crypto.NoSuchPaddingException
 import kotlin.random.Random
+import timber.log.Timber
 
 private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+
+/**
+ * Fournisseur JCA qu'Android installe dans chaque processus pour les clés du Keystore, au-dessus du
+ * BouncyCastle de la plateforme. Même nom de l'API 23 à aujourd'hui, mais interne : si un jour il
+ * manque, [keystoreAesGcmCipher] retombe sur la sélection par défaut.
+ */
+internal const val ANDROID_KEYSTORE_CIPHER_PROVIDER = "AndroidKeyStoreBCWorkaround"
 private const val AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding"
 
 /** Pause maximale, en millisecondes, avant le nouvel essai d'une erreur transitoire du Keystore. */
@@ -35,10 +47,16 @@ internal const val AUTH_REQUIRED_MESSAGE = "Authentification requise pour utilis
  *   `GeneralSecurityException`), consigne « cannot use Android Keystore, it'll be disabled » et
  *   poursuit, par exemple en relisant le jeu de clés chiffré comme s'il était en clair (ou, sans jeu
  *   de clés stocké, la `KeyStoreException` de Tink « exists but is unusable ») ;
- * - sur une version d'Android 16 d'un constructeur, observée en test, keystore2 répond
- *   `KEY_USER_NOT_AUTHENTICATED` mais la couche Java lève une `NullPointerException`, qui n'est pas
- *   une `GeneralSecurityException` : elle traverse Tink et remonte à l'appelant. AOSP convertit
- *   cette même erreur en `UserNotAuthenticatedException` : c'est un écart du constructeur.
+ * - `Cipher.getInstance` sans fournisseur choisit le fournisseur à `init` et relance l'exception du
+ *   premier qui échoue. BouncyCastle, placé en tête par App, passe le premier sur une clé du Keystore
+ *   et lève une `NullPointerException` (`KeyParameter` : la clé n'a pas d'encodage) quand le Keystore
+ *   refuse l'opération, par exemple `KEY_USER_NOT_AUTHENTICATED`. Ce n'est pas une
+ *   `GeneralSecurityException` : elle traverse Tink et remonte à l'appelant, et l'erreur réelle du
+ *   Keystore est perdue. Sur tous les appareils, pas seulement chez un constructeur.
+ *
+ * La sonde désigne donc le fournisseur `AndroidKeyStoreBCWorkaround` par son nom (voir
+ * [keystoreAesGcmCipher]) pour voir l'erreur réelle. Ne pas déplacer BouncyCastle dans App : la
+ * sauvegarde, la génération des clés SSH et le repli de Tink en dépendent.
  *
  * Dans les deux cas [VaultAuthExpiredException] n'est jamais levée.
  *
@@ -53,8 +71,9 @@ internal const val AUTH_REQUIRED_MESSAGE = "Authentification requise pour utilis
  * - [android.security.keystore.UserNotAuthenticatedException] (chargement ou chiffrement) : fenêtre
  *   expirée, propagée telle quelle, qu'elle soit levée à l'initialisation ou à la fin de
  *   l'opération, et jamais rejouée. [VaultManager] la traduit en [VaultAuthExpiredException].
- * - `NullPointerException` du CHIFFREMENT à blanc : sur l'appareil de test elle signifie
- *   « authentification requise ». Elle devient une [UserNotAuthenticatedException] à message fixe,
+ * - `NullPointerException` du CHIFFREMENT à blanc : ne vient plus que du repli sur la sélection par
+ *   défaut, où elle masque l'erreur du Keystore et signifie le plus souvent « authentification
+ *   requise ». Elle devient une [UserNotAuthenticatedException] à message fixe,
  *   qui a cette NullPointerException pour cause, jamais rejouée. C'est sûr : cela ne peut qu'amener à
  *   demander une authentification, jamais à accorder l'accès. Si la cause est autre, l'utilisateur
  *   voit l'invite, l'unique nouvel essai qui suit échoue de nouveau et le message d'échec existant
@@ -119,10 +138,10 @@ internal class KeystoreMasterKeyProbe(
         try {
             dryEncrypt(key)
         } catch (e: NullPointerException) {
-            // Écart d'un constructeur : keystore2 répond KEY_USER_NOT_AUTHENTICATED, la couche Java
-            // lève une NullPointerException au lieu de UserNotAuthenticatedException (voir
-            // MasterKeyProbe). Ce n'est donc pas une erreur transitoire, et la traduire ne peut
-            // qu'amener à demander une authentification.
+            // Ne vient plus que du repli sur la sélection par défaut (fournisseur du Keystore
+            // absent) : BouncyCastle, en tête, lève une NullPointerException de KeyParameter quand
+            // le Keystore refuse l'opération (voir MasterKeyProbe). Ce n'est pas une erreur
+            // transitoire, et la traduire ne peut qu'amener à demander une authentification.
             throw authRequired(e)
         }
     }
@@ -144,7 +163,32 @@ internal fun loadAndroidKeystoreKey(alias: String): Key? =
     KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.getKey(alias, null)
 
 internal fun dryEncryptAesGcm(key: Key) {
-    runDryEncryption(Cipher.getInstance(AES_GCM_TRANSFORMATION), key)
+    runDryEncryption(keystoreAesGcmCipher(), key)
+}
+
+/**
+ * Chiffreur AES-GCM du fournisseur du Keystore, désigné par son nom. Sans nom, Cipher choisit le
+ * fournisseur à `init` et relance l'exception du PREMIER qui échoue : BouncyCastle, placé en tête par
+ * App, échoue toujours le premier sur une clé du Keystore (NullPointerException de `KeyParameter` : la
+ * clé n'a pas d'encodage) et l'erreur réelle du Keystore est perdue. Repli sur la sélection par défaut
+ * si le fournisseur manque ou n'offre pas la transformation. [findProvider] est injectable pour les
+ * tests.
+ */
+internal fun keystoreAesGcmCipher(
+    findProvider: (String) -> Provider? = { Security.getProvider(it) },
+): Cipher {
+    val provider = findProvider(ANDROID_KEYSTORE_CIPHER_PROVIDER)
+    if (provider?.getService("Cipher", AES_GCM_TRANSFORMATION) != null) {
+        try {
+            return Cipher.getInstance(AES_GCM_TRANSFORMATION, provider)
+        } catch (e: NoSuchAlgorithmException) {
+            // Repli ci-dessous.
+        } catch (e: NoSuchPaddingException) {
+            // Repli ci-dessous.
+        }
+    }
+    Timber.w("Vault master key probe: Keystore cipher provider unavailable, default selection")
+    return Cipher.getInstance(AES_GCM_TRANSFORMATION)
 }
 
 /**

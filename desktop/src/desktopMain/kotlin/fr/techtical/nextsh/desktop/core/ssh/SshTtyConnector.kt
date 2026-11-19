@@ -6,8 +6,10 @@ package fr.techtical.nextsh.desktop.core.ssh
 import com.jediterm.core.util.TermSize
 import com.jediterm.terminal.TtyConnector
 import net.schmizz.sshj.connection.channel.direct.Session
+import net.schmizz.sshj.connection.channel.direct.Signal
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -28,7 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class SshTtyConnector(
     private val shell: Session.Shell,
     onRemoteClipboardWrite: (String) -> Unit = {},
-) : TtyConnector {
+) : TtyConnector, ShellEndInfo {
 
     private val reader = InputStreamReader(shell.inputStream, StandardCharsets.UTF_8)
     private val output = shell.outputStream
@@ -47,7 +49,31 @@ class SshTtyConnector(
 
     override fun init(q: com.jediterm.terminal.Questioner?): Boolean = true
 
+    @Volatile
+    private var closedByUs = false
+
+    override val closedLocally: Boolean get() = closedByUs
+
+    override fun exitCode(): Int? {
+        val command = shell as? Session.Command ?: return null
+        // The stream ends at CHANNEL_EOF, but the server sends exit-status AFTER it and before CLOSE (SSHJ
+        // fills it in on the transport thread): wait for the channel to close, bounded. Called from the
+        // emulator thread, never from the UI.
+        try {
+            command.join(EXIT_STATUS_WAIT_SECONDS, TimeUnit.SECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        } catch (_: Exception) {
+            // Timeout or broken transport: read what is there.
+        }
+        command.exitStatus?.let { return it }
+        val signal = command.exitSignal ?: return null
+        // Shell convention: a process killed by signal N reports 128 + N.
+        return SIGNAL_NUMBERS[signal]?.let { 128 + it }
+    }
+
     override fun close() {
+        closedByUs = true
         if (!connected.compareAndSet(true, false)) return
         try { shell.close() } catch (_: Exception) {}
     }
@@ -112,6 +138,10 @@ class SshTtyConnector(
     override fun ready(): Boolean = spillEnd > spillStart || reader.ready()
 
     override fun resize(size: TermSize) {
+        // Never on a closed or ended channel: sshd answers a request on a channel it no longer knows by
+        // dropping the whole connection ("unknown channel"), SFTP and every other channel with it. A resize
+        // posted just before the end of the shell is applied up to 500 ms later (JediTerm debounce).
+        if (!connected.get() || !shell.isOpen || shell.isEOF) return
         try {
             shell.changeWindowDimensions(size.columns, size.rows, 0, 0)
         } catch (_: Exception) {
@@ -162,5 +192,26 @@ class SshTtyConnector(
 
     private companion object {
         private const val ESC = 0x1b
+        private const val EXIT_STATUS_WAIT_SECONDS = 2L
+
+        // Linux signal numbers, the only ones a server reports by name.
+        private val SIGNAL_NUMBERS = mapOf(
+            Signal.HUP to 1, Signal.INT to 2, Signal.QUIT to 3, Signal.ILL to 4, Signal.ABRT to 6,
+            Signal.FPE to 8, Signal.KILL to 9, Signal.USR1 to 10, Signal.SEGV to 11, Signal.USR2 to 12,
+            Signal.PIPE to 13, Signal.ALRM to 14, Signal.TERM to 15,
+        )
     }
+}
+
+/**
+ * What a terminal session needs to know when the shell stream ends: whether WE closed the shell
+ * (user, watchdog shutdown, app exit), in which case the end is not a normal `exit`, and the exit
+ * code the server reported, when there is one.
+ */
+interface ShellEndInfo {
+    /** True once this side closed the shell, whatever the reason. */
+    val closedLocally: Boolean
+
+    /** Exit status (or 128 + signal number) reported by the server, null when unknown. */
+    fun exitCode(): Int?
 }

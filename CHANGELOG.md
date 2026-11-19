@@ -8,6 +8,213 @@ NextSH ships two products from one codebase, versioned independently:
 grouped by release date; bullets are tagged `[All]`, `[Android]` or
 `[Desktop]` to indicate the platform(s) they apply to.
 
+## [android-v1.1.0] / [desktop-v1.1.0] - 2026-11-19
+
+Feature release for both products: backup format 2, automatic app lock and
+background terminal sessions on Android, much more reliable tunnels, a safer
+SFTP browser, and a large security and translation pass.
+
+### Added
+- [All] The `.nextsh` backup (version 2) now also carries snippets, custom
+  terminal themes, certificates, known hosts and the main display settings.
+  Older versions refuse a version 2 file with a clear message instead of
+  restoring it badly. Security settings and the sync secret are never saved.
+- [All] After an import, a summary dialog tells what was restored, what was
+  skipped and why, and whether the restore was only partial. An export now
+  warns about items that could not be restored later.
+- [All] The SFTP browser has a "+" button with New folder and New file, and
+  sending or downloading onto an existing name asks "Replace / Cancel"
+  instead of overwriting without notice.
+- [All] The SFTP browser shows the hidden leftovers of an interrupted
+  replacement ("Upload interrupted" badge) and offers to delete them after
+  listing their exact names. Nothing is ever deleted on its own.
+- [All] Creating or renaming in the SFTP browser now says why a name is
+  refused, under the field, instead of silently changing it.
+- [All] A tunnel stopped because it was deleted on another device is announced
+  by a notification.
+- [All] Snippet and theme editors refuse invisible characters and oversized
+  values, with the reason under the field, so what you save can always be
+  restored from a backup.
+- [Android] The app locks itself: at startup, after a delay spent away
+  (immediately, 1, 5, 15 or 30 minutes) or with "Lock now". The lock screen
+  covers everything, and the vault stays open under it, so background
+  reconnections keep working.
+- [Android] Terminal sessions keep running when you leave the terminal screen
+  or the app. A "Resume" banner and a badge in the host list bring them back,
+  and a notification offers "Close all".
+- [Android] A biometric SSH key can now be chosen in the host form, with one
+  fingerprint prompt per connection.
+- [Android] A tunnel that needs you (fingerprint or security key) before it can
+  reconnect posts an "Authentication required" notification, and tapping it
+  restarts the tunnels that were waiting.
+- [Android] A tunnel card in error can be dismissed.
+- [Android] "Erase vault" asks for confirmation in two steps, shows its
+  progress, resumes after the app was killed halfway and returns to the first
+  launch screen.
+- [Android] The terminal draws in JetBrains Mono, like the Desktop app, and
+  its scrollback follows the setting (1,000 to 20,000 lines, 5,000 by default).
+- [Android] Deleting an SSH key used by hosts names those hosts and counts the
+  tunnels concerned before asking for confirmation.
+- [Android] Opening a file in the SFTP browser keeps the connection through the
+  file picker, and a document that exists only online (such as a Google Docs
+  file) is refused with a message asking you to export it.
+- [Android] Messages use the app's own message bar everywhere, read aloud by
+  TalkBack.
+- [Desktop] The built-in browser asks for the user name and password of
+  services protected by HTTP authentication.
+- [Desktop] After `exit`, a terminal stays readable under a "Session ended"
+  banner with Reconnect and Close, instead of looking connected while frozen.
+  The connection closes once no SFTP browser or transfer still uses it.
+
+### Changed
+- [Android] Tunnel reconnection is shown in amber with its reason (network
+  lost, session closed, no answer from the server) and the card turns red only
+  when the app gives up. No attempt is wasted while the device is offline.
+- [Desktop] The reason of a tunnel reconnection stays visible on the card (full
+  text on hover). While offline the tunnel waits for the network, and a change
+  of network adapters wakes it up.
+- [Android] The global Keep-alive setting is gone: each host's own Keep-alive
+  field (0 to disable, otherwise 15 to 60 seconds) now applies to all its
+  sessions, so an idle terminal is no longer silently dropped by a router.
+- [Android] A host key that no longer matches is never retried automatically,
+  and its confirmation prompt now expires instead of waiting forever.
+- [Android] The Passkey mode is no longer offered for new FIDO2 hosts, and a
+  FIDO2 host with no mode connects with its security key.
+- [All] Dates older than 7 days are shown as an absolute date, in the language
+  of the displayed texts.
+- [All] The sync conflict screen shows the favorite and the other synchronized
+  fields, in both languages, and "Keep local" really settles the conflict
+  instead of letting it come back.
+- [All] Text that was still hardcoded now follows the app language: on Android
+  the host list, tunnel screens, sync screens, SFTP browser, snippets, known
+  hosts and settings, and on Desktop the SFTP browser, vault messages, FIDO2
+  errors and host key dialogs.
+- [All] French texts use the formal "vous" consistently, and a few messages
+  that suggested an action that does not exist now name one that does.
+- [Android] Error messages of connections, enrollment and the vault no longer
+  quote the raw text of an exception.
+- [Android] A launcher shortcut acts immediately on an already unlocked app and
+  reuses the open terminal.
+
+### Fixed
+- [All] Deleting a host also deletes its tunnels and stops the running ones.
+  Editing a host or a tunnel is atomic, keeps its dates and no longer brings
+  back an item deleted elsewhere.
+- [All] A restore now updates existing items instead of replacing them, and
+  sync ignores a tunnel whose host is unknown instead of failing.
+- [All] A refused client connection or a slow channel opening no longer stops a
+  local tunnel while the SSH connection is alive.
+- [All] A lost connection while checking a name in the SFTP browser now says
+  "connection lost".
+- [All] An SFTP upload that fails or is cancelled no longer leaves a partial
+  file under a new name, and an in-place write reads the first block of the
+  source before emptying the target, so an unreadable source no longer leaves
+  an empty file. A source shorter than announced is reported as a failure.
+- [Android] The app no longer crashes when background sync runs while the vault
+  has not been opened yet.
+- [Android] A tunnel stopped during its startup stays stopped, a failed start
+  gives a precise reason, and a cancelled start no longer leaves a card on
+  "Starting" forever.
+- [Android] Tunnels use one SSH connection per host, and a session lasts as
+  long as its last user: closing a tab no longer cuts a tunnel or a transfer
+  that shares the connection.
+- [Android] Tapping a host opens a single SSH connection, and a shell that does
+  not open closes its session.
+- [Android] A tunnel that drops again right after being restored is no longer
+  reconnected endlessly, and both automatic reconnection options are now
+  honored.
+- [Android] A tunnel that never ran is no longer reported as deleted elsewhere,
+  and a deleted tunnel no longer keeps running in the background.
+- [Android] FIDO2 security keys are more reliable: the prompt no longer cancels
+  itself while the key asks for its PIN, alphanumeric PINs work, NFC and USB
+  problems are explained, a silent server no longer blocks the connection, and
+  cancelling really cancels.
+- [Android] A FIDO2 enrollment with a wrong or missing PIN says so plainly, and
+  security keys no longer appear in the SSH key list.
+- [Android] Rotating the phone no longer loses open dialogs, sheets and forms
+  on the SFTP, snippet, key, import and settings screens, and SFTP dialogs
+  scroll in landscape.
+- [Android] A host import no longer needs two Back presses.
+- [Android] The Vault screen counts passwords without decrypting the vault and
+  locks the app again when it finds the vault authentication expired.
+- [Android] A vault key invalidated by a screen lock change is reported with
+  the real cause.
+- [Android] Exporting a backup asks for the passphrase before the location and
+  no longer leaves an empty file.
+- [Android] SFTP file dates and sizes follow the language of the displayed
+  texts, not the system one.
+- [Desktop] A split pane reconnects to its own server, and SFTP browsers and
+  snippet filters in a split follow the host of their pane.
+- [Desktop] Closing a terminal tab or pane no longer cuts a transfer in
+  progress, and a resize sent to a closed shell no longer drops the whole
+  connection and its SFTP.
+- [Desktop] A SOCKS5 tunnel whose listener fails now reconnects instead of
+  staying "Active" without listening, and a tunnel no longer stays stuck on
+  "Starting" after an error.
+- [Desktop] "Erase vault" now closes sync, tunnels, transfers and sessions
+  first, removes leftover temporary files, can be retried after a failure and
+  leaves the app on the vault creation screen.
+- [Desktop] Downloads go through a temporary file, so a file you agreed to
+  replace stays intact if the transfer fails, and its permissions are kept.
+- [Desktop] The SFTP browser keeps its hidden files option, sort order and
+  current folder when you switch tabs, and an error that arrives during a
+  loading is no longer lost.
+- [Desktop] Host and tunnel editors show a clear error instead of creating a
+  duplicate host, and the host editor keeps the typed password until saving.
+- [Desktop] Local database links between hosts and tunnels are really enforced.
+- [Desktop] The first session after creating the vault also starts the sync
+  server, and an abandoned host import erases its secrets.
+- [Desktop] An apostrophe in the purge dialog no longer shows a backslash.
+
+### Security
+- [All] SSH keys are proven, not trusted: the public key is now derived from the
+  private key and checked by a signature, so the key you copy to a server is
+  always the right one. A key file whose public part does not match is refused
+  at import, and a backup with a wrong public key gets it corrected.
+  Keys that would take too long to open or use an unsupported encryption are
+  refused with a message explaining how to save them again, and key files are
+  read with a 64 KiB limit.
+- [All] A backup cannot replace one of your keys: SSH keys are only added on
+  restore, and a booby-trapped file is validated, truncated at fixed limits or
+  refused before it can use too much memory or time.
+- [All] A backup never brings the first fingerprint of a host already present on
+  the device, so a crafted file cannot silently redirect it to another server.
+  The first connection checks it again.
+- [All] Invisible formatting characters (such as right-to-left overrides) are
+  refused in SFTP names, so an `.exe` can no longer pass for a `.pdf`. They are
+  replaced when sending or downloading and shown as a marker in lists.
+- [All] An SFTP replacement writes a hidden temporary file first and only
+  follows a symbolic link that belongs to you and points straight to its
+  target, so a link planted by someone else in a shared folder cannot redirect
+  it.
+- [All] Pasting in the terminal is sanitized: escape and control codes are
+  removed and line breaks become returns, so copied text cannot run commands
+  by itself.
+- [All] Logs no longer contain host names, addresses, paths, labels, device
+  identifiers or exception texts, and masked values also hide invisible and
+  control characters.
+- [All] Sync errors no longer quote decrypted content, and a received key is
+  normalized before it is kept.
+- [All] A user name with a control character is refused in the host editor.
+- [Desktop] A split pane no longer sends its password to the server of the first
+  pane when it reconnects.
+- [Desktop] The sync server checks a push before reading it (headers, time,
+  known device, 32 MiB limit), accepts at most two at once and answers 503 when
+  overloaded instead of making a healthy device enroll again.
+- [Desktop] Copying an SFTP path that contains a hidden character is refused,
+  and a file sent from the computer no longer keeps a backslash in its name.
+- [Android] The vault is erased without decrypting its secrets, and the
+  biometric keys are deleted with it. Restore and sync refuse a foreign
+  Keystore alias.
+- [Android] Launcher shortcuts carry a token specific to the installation, so
+  another app cannot trigger them.
+- [Android] The trust button for an unknown server key disarms itself when the
+  app leaves the foreground, and a known-hosts entry that cannot be stored (a
+  host address with a space or an invisible character) is refused.
+- [Android] The FIDO2 PIN is no longer kept as text, is announced as a password
+  by TalkBack, and the exported USB entry point no longer crashes on a
+  malformed request.
+
 ## [android-v1.0.1] / [desktop-v1.0.1] - 2026-11-04
 
 Maintenance release for both products.

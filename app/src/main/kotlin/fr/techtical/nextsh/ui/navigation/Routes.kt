@@ -19,9 +19,20 @@ sealed class Routes(val route: String) {
     object HostImport       : Routes("host_import")
 
     // Sessions / Terminal
-    object Sessions         : Routes("sessions?hostId={hostId}") {
+    //  - no argument: the terminal opens on the tabs that exist (the "Resume" banner of the host list,
+    //    the notification of the terminal service).
+    //  - hostId only: the terminal shows the tab the host already has, and connects to the host itself
+    //    if it has none (launcher shortcut, tap on a host that has a tab). The in-terminal picker and
+    //    the reconnection of a tab do not navigate: they call SessionViewModel.connectToHost.
+    //  - hostId and sessionId: the host list already connected, the terminal takes that session over
+    //    instead of connecting a second time.
+    object Sessions         : Routes("sessions?hostId={hostId}&sessionId={sessionId}") {
         fun createRoute(hostId: String? = null) =
             if (hostId != null) "sessions?hostId=$hostId" else "sessions"
+
+        /** The terminal of a session the host list has just connected (host and session ids are UUIDs). */
+        fun createRoute(hostId: String, sessionId: String) =
+            "sessions?hostId=$hostId&sessionId=$sessionId"
     }
 
     // Tunnels

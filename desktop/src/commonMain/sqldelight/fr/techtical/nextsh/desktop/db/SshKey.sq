@@ -23,12 +23,22 @@ SELECT * FROM ssh_keys ORDER BY label;
 selectById:
 SELECT * FROM ssh_keys WHERE id = ? AND deleted = 0;
 
+selectByIdIncludingDeleted:
+SELECT * FROM ssh_keys WHERE id = ?;
+
+-- Plain INSERT on purpose: INSERT OR REPLACE would reset createdAt, the only local-only column. A row
+-- that already exists is rewritten with updateFromSync instead.
 insert:
-INSERT OR REPLACE INTO ssh_keys(id, label, keyType, publicKey, isBiometric, keystoreAlias, fido2CredentialId, fido2RpId, createdAt, vectorClock, deleted, deletedAt, updatedAt)
+INSERT INTO ssh_keys(id, label, keyType, publicKey, isBiometric, keystoreAlias, fido2CredentialId, fido2RpId, createdAt, vectorClock, deleted, deletedAt, updatedAt)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 update:
 UPDATE ssh_keys SET label = ?, keyType = ?, publicKey = ?, isBiometric = ?, keystoreAlias = ?, fido2CredentialId = ?, fido2RpId = ?, vectorClock = ?, updatedAt = ?
+WHERE id = ?;
+
+-- Write on an existing row (live or tombstoned): sync apply and backup restore. Leaves createdAt alone.
+updateFromSync:
+UPDATE ssh_keys SET label = ?, keyType = ?, publicKey = ?, isBiometric = ?, keystoreAlias = ?, fido2CredentialId = ?, fido2RpId = ?, vectorClock = ?, deleted = ?, deletedAt = ?, updatedAt = ?
 WHERE id = ?;
 
 markDeleted:
@@ -36,3 +46,7 @@ UPDATE ssh_keys SET deleted = 1, deletedAt = ?, updatedAt = ?, vectorClock = ? W
 
 delete:
 DELETE FROM ssh_keys WHERE id = ?;
+
+-- Vault wipe: every row, tombstones included. Generated, so that the listeners of the table are notified.
+deleteAll:
+DELETE FROM ssh_keys;

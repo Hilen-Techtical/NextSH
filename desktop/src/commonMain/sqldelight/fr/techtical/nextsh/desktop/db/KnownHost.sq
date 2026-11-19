@@ -15,6 +15,10 @@ upsert:
 INSERT OR REPLACE INTO known_hosts(hostPort, algorithm, publicKeyEncoded, addedAt)
 VALUES (?, ?, ?, ?);
 
+insertIfAbsent:
+INSERT OR IGNORE INTO known_hosts(hostPort, algorithm, publicKeyEncoded, addedAt)
+VALUES (?, ?, ?, ?);
+
 deleteByHostPort:
 DELETE FROM known_hosts WHERE hostPort = ?;
 

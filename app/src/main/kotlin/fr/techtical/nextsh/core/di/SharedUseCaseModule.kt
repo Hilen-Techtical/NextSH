@@ -8,14 +8,15 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import fr.techtical.nextsh.core.ssh.AndroidTunnelSessionProvider
+import fr.techtical.nextsh.core.ssh.LiveSessionCheck
 import fr.techtical.nextsh.core.vault.VaultManagerAdapter
 import fr.techtical.nextsh.shared.domain.repository.HostRepository
 import fr.techtical.nextsh.shared.domain.repository.SshKeyRepository
-import fr.techtical.nextsh.shared.domain.repository.TunnelRepository
 import fr.techtical.nextsh.shared.domain.ssh.SshKeyManager
 import fr.techtical.nextsh.shared.domain.ssh.SshSessionManager
 import fr.techtical.nextsh.shared.domain.ssh.SshTunnelManager
-import fr.techtical.nextsh.shared.domain.usecase.ConnectSessionUseCase
+import fr.techtical.nextsh.shared.domain.ssh.TunnelSessionProvider
 import fr.techtical.nextsh.shared.domain.usecase.GenerateSshKeyUseCase
 import fr.techtical.nextsh.shared.domain.usecase.StartTunnelUseCase
 import fr.techtical.nextsh.shared.domain.usecase.StopTunnelUseCase
@@ -23,7 +24,7 @@ import fr.techtical.nextsh.shared.domain.vault.VaultManager
 import javax.inject.Singleton
 
 /**
- * Hilt module providing the 4 shared use cases from :shared.
+ * Hilt module providing the shared use cases from :shared.
  *
  * The shared use cases cannot be annotated with @Inject (they live in KMP commonMain,
  * not Android), so they are provided explicitly here.
@@ -34,25 +35,12 @@ object SharedUseCaseModule {
 
     @Provides
     @Singleton
-    fun provideConnectSessionUseCase(
-        sessionManager: SshSessionManager,
-        hostRepository: HostRepository,
-        vaultManager: VaultManager,
-        sshKeyRepository: SshKeyRepository,
-    ): ConnectSessionUseCase = ConnectSessionUseCase(
-        sessionManager, hostRepository, vaultManager, sshKeyRepository
-    )
-
-    @Provides
-    @Singleton
     fun provideStartTunnelUseCase(
         tunnelManager: SshTunnelManager,
-        sessionManager: SshSessionManager,
-        tunnelRepository: TunnelRepository,
         hostRepository: HostRepository,
-        connectSession: ConnectSessionUseCase,
+        sessionProvider: TunnelSessionProvider,
     ): StartTunnelUseCase = StartTunnelUseCase(
-        tunnelManager, sessionManager, tunnelRepository, hostRepository, connectSession
+        tunnelManager, hostRepository, sessionProvider
     )
 
     @Provides
@@ -104,4 +92,17 @@ abstract class SharedManagerBindingsModule {
     abstract fun bindVaultManager(
         impl: VaultManagerAdapter,
     ): VaultManager
+
+    @Binds
+    @Singleton
+    abstract fun bindTunnelSessionProvider(
+        impl: AndroidTunnelSessionProvider,
+    ): TunnelSessionProvider
+
+    /** The same instance, seen by the reconnection as "does this host already have a live session". */
+    @Binds
+    @Singleton
+    abstract fun bindLiveSessionCheck(
+        impl: AndroidTunnelSessionProvider,
+    ): LiveSessionCheck
 }

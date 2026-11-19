@@ -253,7 +253,7 @@ private fun PinUnlockCard(
             focusRequester = focusRequester,
         )
 
-        val errorMessage = state.error
+        val errorMessage = state.error?.let { vaultErrorText(it) }
         if (errorMessage != null) {
             Spacer(Modifier.height(Spacing.Sm))
             Text(
@@ -425,7 +425,7 @@ private fun RecoveryEntryCard(
             textAlign = TextAlign.End,
         )
 
-        val errorMessage = state.recoveryError
+        val errorMessage = state.recoveryError?.let { vaultErrorText(it) }
         if (errorMessage != null) {
             Spacer(Modifier.height(Spacing.Sm))
             Text(
@@ -481,14 +481,14 @@ private fun SetNewPinCard(
 ) {
     var pinInput by remember { mutableStateOf("") }
     var confirmInput by remember { mutableStateOf("") }
-    var localError by remember { mutableStateOf<String?>(null) }
+    var localError by remember { mutableStateOf<VaultError?>(null) }
     val pinFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { pinFocus.requestFocus() }
 
     val submit = submit@{
         if (pinInput.isEmpty() || confirmInput.isEmpty() || state.isUnlocking) return@submit
         if (pinInput != confirmInput) {
-            localError = "Les deux Passphrases ne correspondent pas"
+            localError = VaultError.PASSPHRASE_MISMATCH
             return@submit
         }
         localError = null
@@ -498,9 +498,10 @@ private fun SetNewPinCard(
         viewModel.setNewPin(pinChars, onDone)
     }
     val canSubmit = pinInput.isNotEmpty() && confirmInput.isNotEmpty() && !state.isUnlocking
-    val errorMessage = localError ?: state.recoveryError
+    val errorKey = localError ?: state.recoveryError
+    val errorMessage = errorKey?.let { vaultErrorText(it) }
 
-    UnlockCard(shakeKey = errorMessage) {
+    UnlockCard(shakeKey = errorKey) {
         Text(
             text = stringResource(Res.string.recovery_set_pin_title),
             color = TextPrimary,

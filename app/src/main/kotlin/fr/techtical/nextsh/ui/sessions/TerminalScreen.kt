@@ -20,12 +20,15 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -33,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.res.ResourcesCompat
 import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.ArrowLeftRight
 import com.composables.icons.lucide.Code
@@ -50,11 +54,13 @@ import fr.techtical.nextsh.R
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
+import fr.techtical.nextsh.core.logging.TermuxLog
 import fr.techtical.nextsh.domain.model.Host
 import fr.techtical.nextsh.domain.model.SessionStatus
 import fr.techtical.nextsh.domain.model.Snippet
+import fr.techtical.nextsh.ui.components.NextShMessage
+import fr.techtical.nextsh.ui.components.NotificationPermissionEffect
 import fr.techtical.nextsh.ui.theme.*
-import timber.log.Timber
 
 // ── Touches extra ─────────────────────────────────────────────────────────────
 
@@ -79,6 +85,7 @@ private val EXTRA_KEYS = listOf(
 @Composable
 fun TerminalScreen(
     hostId: String?,
+    sessionId: String? = null,
     onBack: () -> Unit,
     onNavigateToSftp: (sessionId: String, hostLabel: String) -> Unit = { _, _ -> },
     viewModel: SessionViewModel = hiltViewModel(),
@@ -87,11 +94,12 @@ fun TerminalScreen(
     val fontSize by viewModel.terminalFontSize.collectAsState()
     val hosts by viewModel.hosts.collectAsState()
     val customThemes by viewModel.customThemes.collectAsState()
-    val fido2ChallengeState by viewModel.fido2ChallengeState.collectAsState()
 
-    var showHostPicker by remember { mutableStateOf(false) }
-    var showSnippetPicker by remember { mutableStateOf(false) }
-    var snippetToConfirm by remember { mutableStateOf<Snippet?>(null) }
+    // Feuilles de choix : saveable, elles survivent à une rotation (le terminal tourne). La demande de
+    // confirmation d'un snippet est tenue par le ViewModel, voir `pendingSnippet`.
+    var showHostPicker by rememberSaveable { mutableStateOf(false) }
+    var showSnippetPicker by rememberSaveable { mutableStateOf(false) }
+    val snippetToConfirm by viewModel.pendingSnippet.collectAsState()
 
     val activeHostId = uiState.tabs.getOrNull(uiState.activeTabIndex)?.host?.id
     val snippetsForHost by remember(activeHostId) {
@@ -109,21 +117,39 @@ fun TerminalScreen(
     // configuration (ex : rotation écran) et relance la connexion alors même
     // que l'utilisateur avait fermé l'onglet → bug "auto-reconnect après
     // rotation depuis EmptyTerminal".
-    var initialConnectAttempted by androidx.compose.runtime.saveable.rememberSaveable(hostId) {
+    //
+    // Avec un sessionId, la liste d'hôtes a déjà connecté : le terminal reprend
+    // cette session au lieu d'en ouvrir une seconde. La même garde s'applique :
+    // une session reprise puis fermée par l'utilisateur ne revient pas à la rotation,
+    // et la reprise ne se rejoue jamais pour une session déjà affichée.
+    //
+    // Les onglets survivent à l'écran (ils appartiennent à `TerminalTabStore`) : un hôte qui a
+    // déjà un onglet ouvert le sélectionne au lieu de se reconnecter. La garde ne s'arme qu'au
+    // premier passage de la navigation, donc l'onglet fermé ensuite par l'utilisateur ne revient pas.
+    var initialConnectAttempted by androidx.compose.runtime.saveable.rememberSaveable(hostId, sessionId) {
         mutableStateOf(false)
     }
-    LaunchedEffect(hostId) {
-        if (hostId != null && !initialConnectAttempted && uiState.tabs.none { it.host.id == hostId }) {
+    LaunchedEffect(hostId, sessionId) {
+        if (hostId != null && !initialConnectAttempted) {
             initialConnectAttempted = true
-            viewModel.connectToHost(hostId)
+            if (viewModel.selectTabOfHost(hostId)) return@LaunchedEffect
+            if (sessionId != null) {
+                viewModel.attachToSession(sessionId, hostId)
+            } else {
+                viewModel.connectToHost(hostId)
+            }
         }
     }
+
+    // Les sessions tiennent dans une notification de service au premier plan (Android 13+ :
+    // permission à demander). Demandée à l'ouverture du premier onglet, pas avant.
+    NotificationPermissionEffect(trigger = uiState.tabs.isNotEmpty())
 
     var currentTerminalView by remember { mutableStateOf<TerminalView?>(null) }
     var ctrlDown by remember { mutableStateOf(false) }
     var altDown by remember { mutableStateOf(false) }
 
-    var showSplitPicker by remember { mutableStateOf(false) }
+    var showSplitPicker by rememberSaveable { mutableStateOf(false) }
     val splitPickerSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val splitTerminalViews = remember { mutableStateMapOf<PaneSlot, TerminalView>() }
 
@@ -200,19 +226,12 @@ fun TerminalScreen(
     // tout le reste de l'application, et Android 16 ignore de toute façon ces
     // demandes sur les écrans d'au moins 600 dp.
 
-    // Snackbar canal unique pour TOUTES les erreurs de connexion. Sans cette
-    // route, `uiState.error` resterait collée dans `EmptyTerminal` (cas où
-    // tabs.isEmpty au moment de l'échec) ou totalement invisible (cas
-    // tabs.isNotEmpty, l'EmptyTerminal n'est jamais rendu). On flush dans
-    // tous les cas, EmptyTerminal n'a plus à afficher l'erreur.
-    val snackbarHostState = remember { SnackbarHostState() }
-    LaunchedEffect(uiState.error) {
-        val err = uiState.error
-        if (err != null) {
-            snackbarHostState.showSnackbar(err)
-            viewModel.clearError()
-        }
-    }
+    // Message canal unique pour TOUTES les erreurs de connexion (NextShMessage, en bas du `Box`
+    // plus loin). Sans cette route, `uiState.error` resterait collée dans `EmptyTerminal` (cas où
+    // tabs.isEmpty au moment de l'échec) ou totalement invisible (cas tabs.isNotEmpty,
+    // l'EmptyTerminal n'est jamais rendu). EmptyTerminal n'a plus à afficher l'erreur.
+    // Hauteur mesurée de la barre des touches : le message se pose au-dessus d'elle.
+    var extraKeysBarHeightPx by remember { mutableIntStateOf(0) }
 
     Box(
         modifier = Modifier
@@ -307,6 +326,7 @@ fun TerminalScreen(
 
         if (uiState.tabs.isNotEmpty()) {
             ExtraKeysBar(
+                modifier     = Modifier.onSizeChanged { extraKeysBarHeightPx = it.height },
                 ctrlActive   = ctrlDown,
                 altActive    = altDown,
                 onCtrlToggle = { ctrlDown = !ctrlDown },
@@ -333,23 +353,29 @@ fun TerminalScreen(
             )
         }
     } // ── Column body
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier  = Modifier.align(Alignment.BottomCenter),
+        // Superposé, jamais dans la `Column` : y entrer redimensionnerait le terminal (nouvelles
+        // lignes envoyées au serveur, l'application distante se redessine).
+        NextShMessage(
+            message   = uiState.error,
+            isError   = true,
+            onDismiss = viewModel::clearError,
+            modifier  = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(
+                    start  = Spacing.Md,
+                    end    = Spacing.Md,
+                    bottom = Spacing.Sm + if (uiState.tabs.isNotEmpty()) {
+                        with(LocalDensity.current) { extraKeysBarHeightPx.toDp() }
+                    } else {
+                        0.dp
+                    },
+                ),
         )
     } // ── Box overlay
 
     // Note Phase 3.2 : le dialogue de vérification de clé hôte est rendu
-    // globalement par MainActivity via HostKeyPromptCoordinator.
-
-    fido2ChallengeState?.let { state ->
-        Fido2ChallengeBottomSheet(
-            state = state,
-            hardwareKeyAuthenticator = viewModel.hardwareKeyAuth,
-            onSigned = { signature -> viewModel.completeFido2Challenge(signature) },
-            onCancel = { viewModel.cancelFido2Challenge() },
-        )
-    }
+    // globalement par MainActivity via HostKeyPromptCoordinator. La feuille de
+    // demande de clé FIDO2 l'est aussi (Fido2PromptHost + Fido2PromptCoordinator).
 
     if (showHostPicker) {
         ModalBottomSheet(
@@ -390,7 +416,7 @@ fun TerminalScreen(
                         SnippetPickerItem(
                             snippet = snippet,
                             onClick = {
-                                snippetToConfirm = snippet
+                                viewModel.requestSnippet(snippet)
                                 showSnippetPicker = false
                             },
                         )
@@ -435,11 +461,8 @@ fun TerminalScreen(
     snippetToConfirm?.let { snippet ->
         SnippetConfirmDialog(
             snippet = snippet,
-            onDismiss = { snippetToConfirm = null },
-            onExecute = {
-                viewModel.executeSnippet(snippet.command)
-                snippetToConfirm = null
-            },
+            onDismiss = viewModel::cancelSnippet,
+            onExecute = viewModel::confirmSnippet,
         )
     }
 }
@@ -1089,6 +1112,7 @@ private fun ReconnectOverlay(
 
 @Composable
 private fun ExtraKeysBar(
+    modifier: Modifier = Modifier,
     ctrlActive: Boolean,
     altActive: Boolean,
     onCtrlToggle: () -> Unit,
@@ -1098,7 +1122,7 @@ private fun ExtraKeysBar(
     onOpenSftp: () -> Unit = {},
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .background(Surface)
             .border(1.dp, Border1)
@@ -1249,17 +1273,25 @@ internal fun TerminalViewWrapper(
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { ctx ->
-            TerminalView(ctx, null).apply {
+            PasteSafeTerminalView(ctx).apply {
                 isFocusable = true
                 isFocusableInTouchMode = true
                 setTerminalViewClient(buildTerminalViewClient(this, { currentPalette }, readCtrl, readAlt, { currentIsSelected() }, onCopyModeChanged))
                 setTextSize(fontSize)
-                terminalSession.onScreenUpdate = { onScreenUpdated() }
-                // Repose le thème dès que le programme distant remet la palette
-                // à zéro. ncurses le fait à chaque redessin complet, donc à
-                // chaque redimensionnement : ouvrir ou fermer le clavier
-                // pendant un nano faisait sinon perdre le thème de l'hôte.
-                terminalSession.onPaletteOverridden = { applyTerminalTheme(this, currentPalette) }
+                // Police embarquée, comme le terminal Desktop : la « monospace » du système
+                // dépend du constructeur, de la police choisie et de la langue (sous ColorOS en
+                // anglais, DroidSansMono faisait paraître le « i » et le « l » en gras). Après
+                // setTextSize : setTypeface reprend la taille du rendu, que setTextSize crée.
+                ResourcesCompat.getFont(ctx, R.font.jetbrains_mono_regular)?.let { setTypeface(it) }
+                // Le second callback repose le thème dès que le programme distant remet la
+                // palette à zéro. ncurses le fait à chaque redessin complet, donc à chaque
+                // redimensionnement : ouvrir ou fermer le clavier pendant un nano faisait sinon
+                // perdre le thème de l'hôte.
+                terminalSession.bindView(
+                    owner = this,
+                    onScreenUpdate = { onScreenUpdated() },
+                    onPaletteOverridden = { applyTerminalTheme(this, currentPalette) },
+                )
                 attachSession(terminalSession)
                 terminalView = this
                 onViewReady(this)
@@ -1269,13 +1301,28 @@ internal fun TerminalViewWrapper(
         update = { view ->
             view.setTextSize(fontSize)
             if (view.mTermSession !== terminalSession) {
-                terminalSession.onScreenUpdate = { view.onScreenUpdated() }
+                // Le même AndroidView passe à une autre session (changement d'onglet) : l'ancienne
+                // ne doit plus tenir cette vue, elle survit à l'écran et la retiendrait.
+                (view.mTermSession as? fr.techtical.nextsh.core.ssh.SshTerminalSession)?.unbindView(view)
+                // Liée ici et dans `factory` seulement, jamais à chaque mise à jour : une vue sur le
+                // départ qui se remettrait propriétaire volerait les callbacks de la nouvelle.
+                terminalSession.bindView(
+                    owner = view,
+                    onScreenUpdate = { view.onScreenUpdated() },
+                    onPaletteOverridden = { applyTerminalTheme(view, currentPalette) },
+                )
                 view.attachSession(terminalSession)
                 onViewReady(view)
             }
-            terminalSession.onPaletteOverridden = { applyTerminalTheme(view, currentPalette) }
             if (terminalView !== view) terminalView = view
             applyTerminalTheme(view, currentPalette)
+        },
+        // La session survit à sa vue : on coupe ses callbacks, qui capturent la vue et donc
+        // l'Activity. `unbindView` ne les retire que si cette vue en est encore propriétaire : au
+        // passage du plein écran au split, la nouvelle vue peut être liée avant que l'ancienne
+        // soit libérée, et la libération de l'ancienne ne doit pas défaire la liaison de la nouvelle.
+        onRelease = { view ->
+            (view.mTermSession as? fr.techtical.nextsh.core.ssh.SshTerminalSession)?.unbindView(view)
         },
     )
 }
@@ -1319,15 +1366,15 @@ internal fun buildTerminalViewClient(
             applyTerminalTheme(terminalView, getPalette())
         }
 
-        override fun logError(tag: String, message: String) { Timber.tag(tag).e(message) }
-        override fun logWarn(tag: String, message: String) { Timber.tag(tag).w(message) }
-        override fun logInfo(tag: String, message: String) { Timber.tag(tag).i(message) }
-        override fun logDebug(tag: String, message: String) { Timber.tag(tag).d(message) }
-        override fun logVerbose(tag: String, message: String) { Timber.tag(tag).v(message) }
-        override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {
-            Timber.tag(tag).e(e, message)
-        }
-        override fun logStackTrace(tag: String, e: Exception) { Timber.tag(tag).e(e) }
+        // Termux text can carry what the remote host sent: scrubbed before it is logged.
+        override fun logError(tag: String, message: String) = TermuxLog.error(tag, message)
+        override fun logWarn(tag: String, message: String) = TermuxLog.warn(tag, message)
+        override fun logInfo(tag: String, message: String) = TermuxLog.info(tag, message)
+        override fun logDebug(tag: String, message: String) = TermuxLog.debug(tag, message)
+        override fun logVerbose(tag: String, message: String) = TermuxLog.verbose(tag, message)
+        override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) =
+            TermuxLog.stackTraceWithMessage(tag, message, e)
+        override fun logStackTrace(tag: String, e: Exception) = TermuxLog.stackTrace(tag, e)
     }
 }
 

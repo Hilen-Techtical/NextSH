@@ -3,6 +3,7 @@
 
 package fr.techtical.nextsh.desktop.core.vault
 
+import fr.techtical.nextsh.shared.util.Logger
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.file.Files
@@ -40,7 +41,7 @@ internal object VaultPaths {
         if (!dir.isDirectory) {
             throw IllegalStateException("${dir.absolutePath} existe mais n'est pas un dossier")
         }
-        println("[NextSH] Vault dir: ${dir.absolutePath}")
+        Logger.d("VaultPaths", "Vault dir resolved (${if (override.isNullOrBlank()) "default" else "NEXTSH_HOME override"})")
         return dir
     }
 

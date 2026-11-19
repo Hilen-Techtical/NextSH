@@ -6,16 +6,13 @@ package fr.techtical.nextsh.core.crypto
 import android.content.Context
 import android.os.Build
 import androidx.biometric.BiometricManager as AndroidBiometricManager
-import androidx.biometric.BiometricPrompt
-import androidx.core.content.ContextCompat
-import androidx.fragment.app.FragmentActivity
 import dagger.hilt.android.qualifiers.ApplicationContext
-import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Moyens d'authentification acceptés pour ouvrir le vault selon la version d'Android.
+ * Moyens d'authentification acceptés pour ouvrir le vault selon la version d'Android : ceux du
+ * dialogue du vault (`BiometricPromptHost`) et ceux que [BiometricHelper.checkCapability] vérifie.
  *
  * À partir de l'API 30 : biométrie forte ou code de l'appareil. Avant, androidx.biometric refuse
  * `BIOMETRIC_STRONG or DEVICE_CREDENTIAL` (et `DEVICE_CREDENTIAL` seul) : `canAuthenticate` renvoie
@@ -38,22 +35,21 @@ internal fun vaultAuthenticators(sdkInt: Int): Int =
     }
 
 /**
- * Wrapper autour de BiometricPrompt API.
- * Gère l'authentification biométrique pour le déverrouillage du vault
- * et la signature de clés liées au Keystore.
+ * Ce que l'appareil sait faire pour authentifier le propriétaire (biométrie ou code), et rien de
+ * plus : aucun dialogue n'est lancé d'ici. Tous les dialogues système du coffre passent par
+ * `BiometricPromptCoordinator` (voir `authenticateVault`), qui prend le tour partagé avec les autres
+ * invites et l'unique emplacement de rappel d'androidx.
  *
  * Le constructeur interne rend la version d'Android et l'appel à `BiometricManager.canAuthenticate`
  * injectables pour les tests unitaires.
  */
 @Singleton
 class BiometricHelper internal constructor(
-    private val context: Context,
     private val sdkInt: Int,
     private val canAuthenticateWith: (authenticators: Int) -> Int,
 ) {
     @Inject
     constructor(@ApplicationContext context: Context) : this(
-        context = context,
         sdkInt = Build.VERSION.SDK_INT,
         canAuthenticateWith = { authenticators ->
             AndroidBiometricManager.from(context).canAuthenticate(authenticators)
@@ -110,51 +106,13 @@ class BiometricHelper internal constructor(
     }
 
     /**
-     * Lance le prompt biométrique SANS CryptoObject.
-     * Utilisé pour l'authentification basée sur le temps (time-based auth)
-     * où une validation biométrique réussie suffit à satisfaire l'exigence
-     * d'authentification de la MasterKey, sans déchiffrement per-use. Les moyens acceptés sont ceux
-     * de [vaultAuthenticators], qui dépendent de l'API.
-     *
-     * @param activity FragmentActivity requise par BiometricPrompt
-     * @param title Titre affiché dans le prompt
-     * @param subtitle Sous-titre affiché dans le prompt
-     * @param onSuccess Callback avec le résultat d'authentification
-     * @param onError Callback en cas d'échec
+     * Whether the phone can check a STRONG biometric (BIOMETRIC_STRONG) right now. Unlike
+     * [checkCapability] the device PIN does not count: a key of the Keystore generated for a
+     * biometric SSH key never accepts it, and the Keystore refuses to create such a key when no
+     * strong biometric is enrolled.
      */
-    fun authenticate(
-        activity: FragmentActivity,
-        title: String = "Déverrouiller NextSH",
-        subtitle: String = "Authentification requise pour accéder au vault",
-        onSuccess: (BiometricPrompt.AuthenticationResult) -> Unit,
-        onError: (Int, String) -> Unit,
-    ) {
-        val executor = ContextCompat.getMainExecutor(context)
-
-        val callback = object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                Timber.d("Biometric auth succeeded (no CryptoObject)")
-                onSuccess(result)
-            }
-
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                Timber.w("Biometric auth error $errorCode: $errString")
-                onError(errorCode, errString.toString())
-            }
-
-            override fun onAuthenticationFailed() {
-                Timber.d("Biometric auth failed (retry possible)")
-            }
-        }
-
-        val prompt = BiometricPrompt(activity, executor, callback)
-
-        val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(title)
-            .setSubtitle(subtitle)
-            .setAllowedAuthenticators(vaultAuthenticators(sdkInt))
-            .build()
-
-        prompt.authenticate(promptInfo)
-    }
+    fun checkStrongBiometric(): StrongBiometricStatus =
+        strongBiometricStatusFor(
+            canAuthenticateWith(AndroidBiometricManager.Authenticators.BIOMETRIC_STRONG),
+        )
 }

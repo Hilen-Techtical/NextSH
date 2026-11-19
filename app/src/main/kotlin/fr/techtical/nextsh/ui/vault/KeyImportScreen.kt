@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,7 +37,17 @@ import com.composables.icons.lucide.Lock
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Save
 import fr.techtical.nextsh.R
+import fr.techtical.nextsh.domain.usecase.MAX_PRIVATE_KEY_BYTES
+import fr.techtical.nextsh.domain.usecase.MAX_PRIVATE_KEY_FILE_BYTES
+import fr.techtical.nextsh.domain.usecase.isPrivateKeyTooLarge
+import fr.techtical.nextsh.shared.util.errorClass
+import fr.techtical.nextsh.ui.components.NextShMessage
+import fr.techtical.nextsh.ui.components.SavedTextLimits
+import fr.techtical.nextsh.ui.components.boundedTextSaver
 import fr.techtical.nextsh.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -46,57 +57,59 @@ fun KeyImportScreen(
     viewModel: VaultViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
 
-    var label by remember { mutableStateOf("") }
+    // Le libellé est saveable (borné). Le PEM collé reste en `remember` : un secret ne va jamais dans un
+    // `Bundle`, il est à recoller après une recréation de l'activité.
+    var label by rememberSaveable(stateSaver = boundedTextSaver(SavedTextLimits.LABEL_BYTES)) { mutableStateOf("") }
     var privateKeyPem by remember { mutableStateOf("") }
+
+    val scope = rememberCoroutineScope()
+    // A key file that could not be read (too large or unreadable) is told like the errors of the view model.
+    var fileError by remember { mutableStateOf<String?>(null) }
+    val pemTooLarge = remember(privateKeyPem) { isPrivateKeyTooLarge(privateKeyPem.trim()) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
-            try {
-                val inputStream = context.contentResolver.openInputStream(it)
-                val content = inputStream?.bufferedReader()?.use { reader -> reader.readText() } ?: ""
-                privateKeyPem = content
-                if (label.isBlank()) {
-                    val cursor = context.contentResolver.query(it, null, null, null, null)
-                    cursor?.use { c ->
-                        if (c.moveToFirst()) {
-                            val nameIndex = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                            if (nameIndex >= 0) {
-                                val fileName = c.getString(nameIndex)
-                                label = fileName?.substringBeforeLast('.') ?: ""
-                            }
-                        }
+            // Off the main thread, and bounded: the size a provider announces is not trusted.
+            scope.launch {
+                val outcome = withContext(Dispatchers.IO) {
+                    try {
+                        readKeyFile(context.contentResolver.openInputStream(it), MAX_PRIVATE_KEY_FILE_BYTES)
+                    } catch (e: Exception) {
+                        // Class chain only: the message of an I/O failure can quote the path of the file.
+                        Timber.e("Key file open failed (${errorClass(e)})")
+                        KeyFileRead.Failed
                     }
                 }
-            } catch (e: Exception) {
-                Timber.e(e, "Erreur lecture fichier")
+                when (outcome) {
+                    is KeyFileRead.Content -> {
+                        privateKeyPem = outcome.text
+                        if (label.isBlank()) {
+                            val name = withContext(Dispatchers.IO) { documentDisplayName(context, it) }
+                            if (name != null) label = name.substringBeforeLast('.')
+                        }
+                    }
+                    KeyFileRead.TooLarge -> fileError = context.getString(R.string.vault_key_import_too_large)
+                    KeyFileRead.Failed -> fileError = context.getString(R.string.vault_key_file_read_failed)
+                }
             }
         }
     }
 
-    LaunchedEffect(uiState.error) {
-        uiState.error?.let { msg ->
-            snackbarHostState.showSnackbar(message = msg, duration = SnackbarDuration.Short)
-            viewModel.clearMessage()
-        }
-    }
-
-    // Sur succès : pas de snackbar (latence inutile, `showSnackbar` suspend
-    // ~4s avant d'appeler `onBack()`). Retour immédiat au Vault, l'apparition
-    // de la nouvelle clé dans la liste fait office de feedback. Le message
+    // Sur succès : pas de message (latence inutile avant d'appeler `onBack()`). Retour immédiat
+    // au Vault, l'apparition de la nouvelle clé dans la liste fait office de feedback. Le message
     // est juste consommé pour ne pas re-tirer.
-    LaunchedEffect(uiState.successMessage) {
-        if (uiState.successMessage != null) {
+    LaunchedEffect(uiState.successMessage, uiState.successRes) {
+        if (uiState.hasSuccess) {
             viewModel.clearMessage()
             onBack()
         }
     }
 
-    val canImport = label.isNotBlank() && privateKeyPem.isNotBlank() && !uiState.isGenerating
+    val canImport = label.isNotBlank() && privateKeyPem.isNotBlank() && !pemTooLarge && !uiState.isGenerating
 
     Scaffold(
         topBar = {
@@ -123,7 +136,19 @@ fun KeyImportScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = NearBlack),
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        // Le slot du Scaffold dessine le message juste au-dessus de la barre Importer, sans décaler
+        // le formulaire. Une erreur reste 7 s.
+        snackbarHost = {
+            NextShMessage(
+                message   = uiState.errorText(context) ?: fileError,
+                isError   = true,
+                onDismiss = {
+                    fileError = null
+                    viewModel.clearMessage()
+                },
+                modifier  = Modifier.padding(horizontal = Spacing.Md, vertical = Spacing.Sm),
+            )
+        },
         bottomBar = {
             BottomSaveBar(
                 label   = if (uiState.isGenerating)
@@ -179,7 +204,10 @@ fun KeyImportScreen(
                 FormField(
                     label         = stringResource(R.string.label_private_key_content),
                     value         = privateKeyPem,
-                    onValueChange = { privateKeyPem = it },
+                    // A huge paste is cut at twice the limit: it stays flagged as too large below,
+                    // and the field never holds megabytes.
+                    onValueChange = { privateKeyPem = it.take(MAX_PRIVATE_KEY_BYTES * 2) },
+                    errorText     = if (pemTooLarge) stringResource(R.string.vault_key_import_too_large) else null,
                     placeholder   = "-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----",
                     mono          = true,
                     singleLine    = false,
@@ -249,7 +277,7 @@ fun KeyImportScreen(
                         )
                     }
                     Text(
-                        text       = "Passphrase requise",
+                        text       = stringResource(R.string.key_import_passphrase_title),
                         fontFamily = SpaceGroteskFamily,
                         fontWeight = FontWeight.SemiBold,
                         fontSize   = 16.sp,
@@ -260,7 +288,7 @@ fun KeyImportScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
                     Text(
-                        text       = "La clé importée est chiffrée. Entrez la passphrase pour la déverrouiller.",
+                        text       = stringResource(R.string.key_import_passphrase_message),
                         fontFamily = SpaceGroteskFamily,
                         fontSize   = 13.sp,
                         color      = TextSecondary,
@@ -270,7 +298,7 @@ fun KeyImportScreen(
                         onValueChange = { passphraseInput = it },
                         label = {
                             Text(
-                                "Passphrase",
+                                stringResource(R.string.label_passphrase),
                                 fontFamily = JetBrainsMonoFamily,
                                 fontSize   = 13.sp,
                             )
@@ -316,7 +344,7 @@ fun KeyImportScreen(
                     shape = RoundedCornerShape(Radii.Md),
                 ) {
                     Text(
-                        text       = "Déverrouiller",
+                        text       = stringResource(R.string.key_import_passphrase_unlock),
                         fontFamily = SpaceGroteskFamily,
                         fontWeight = FontWeight.SemiBold,
                         fontSize   = 13.sp,
@@ -394,6 +422,7 @@ private fun FormField(
     minLines: Int = 1,
     minHeight: androidx.compose.ui.unit.Dp = 0.dp,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    errorText: String? = null,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.Xs)) {
         Text(
@@ -409,6 +438,10 @@ private fun FormField(
             singleLine    = singleLine,
             minLines      = minLines,
             keyboardOptions = keyboardOptions,
+            isError       = errorText != null,
+            supportingText = if (errorText != null) {
+                { Text(text = errorText, fontFamily = SpaceGroteskFamily, fontSize = 12.sp) }
+            } else null,
             placeholder = if (placeholder.isNotEmpty()) {
                 {
                     Text(
@@ -437,6 +470,21 @@ private fun FormField(
                 .let { if (minHeight > 0.dp) it.heightIn(min = minHeight) else it },
         )
     }
+}
+
+/** The display name of a document, or null when the provider gives none. Blocking: off the main thread. */
+private fun documentDisplayName(context: android.content.Context, uri: android.net.Uri): String? = try {
+    context.contentResolver.query(uri, null, null, null, null)?.use { c ->
+        if (c.moveToFirst()) {
+            val nameIndex = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (nameIndex >= 0) c.getString(nameIndex) else null
+        } else {
+            null
+        }
+    }
+} catch (e: Exception) {
+    Timber.w("Key file name read failed (${errorClass(e)})")
+    null
 }
 
 @Composable

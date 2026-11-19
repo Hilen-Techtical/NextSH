@@ -31,7 +31,7 @@
     <string name="action_cancel_connection">Cancel connection</string>
     <string name="action_unlock_vault">Unlock vault</string>
     <string name="action_skip">Skip</string>
-    <string name="action_wipe_vault">Wipe vault</string>
+    <string name="action_wipe_vault">Wipe the vault</string>
     <string name="action_wipe">Wipe</string>
     <string name="action_continue">Continue</string>
     <string name="action_select_file">Select file (.pem, .key, id_rsa…)</string>
@@ -50,6 +50,7 @@
     <string name="action_show_password">Show</string>
     <string name="action_favorite">Add to favorites</string>
     <string name="action_unfavorite">Remove from favorites</string>
+    <string name="action_dismiss_tunnel_error">Dismiss error</string>
     <string name="shortcut_connect_host">Connect to %s</string>
     <string name="shortcut_start_tunnel">Start tunnel %s</string>
     <string name="shortcut_disabled_message">Shortcut unavailable</string>
@@ -63,6 +64,9 @@
     <string name="title_vault">Vault</string>
     <string name="title_import_key">Import key</string>
     <string name="title_settings">Settings</string>
+    <string name="settings_subtitle">Connection, terminal, security, LAN sync</string>
+    <string name="section_danger_zone">Danger zone</string>
+    <string name="settings_danger_zone_hint">Irreversible action. All local data will be lost.</string>
     <string name="title_known_hosts">Known hosts</string>
     <string name="title_ssh_tunnels">SSH Tunnels</string>
 
@@ -133,7 +137,15 @@
     <string name="label_associated_private_key">Associated private key</string>
     <string name="label_group">Group</string>
     <string name="label_keepalive">Keep-alive (s)</string>
-    <string name="label_auto_reconnect">Auto reconnect</string>
+    <string name="label_auto_reconnect">Auto reconnect tunnels</string>
+    <!-- The option is about tunnels only: a terminal session does not reconnect by itself. It must be on here AND on the host. -->
+    <string name="settings_auto_reconnect_help">Restarts SSH tunnels that drop, without any action from you. Each host can also turn it off for its own tunnels.</string>
+    <string name="host_auto_reconnect_help">Restarts the tunnels of this host if they drop. Has no effect if automatic reconnection is turned off in Settings.</string>
+    <string name="host_keepalive_help">Silence after which the app checks the connection and keeps it open. 0 to turn off. Nothing is sent while the device sleeps.</string>
+    <string name="host_keepalive_error">Enter 0 to turn off, or a value between 15 and 60 seconds.</string>
+    <string name="host_hostname_error">Enter a host name or an address, without spaces or invisible characters (255 characters at most).</string>
+    <string name="host_port_error">Enter a port between 1 and 65535.</string>
+    <string name="settings_scrollback_help">Applies to new tabs. A longer history uses more memory.</string>
     <string name="label_local_port">Local port</string>
     <string name="label_remote_host">Remote host</string>
     <string name="label_remote_port">Remote port</string>
@@ -142,6 +154,13 @@
     <string name="label_auto_start">Auto start</string>
     <string name="label_open_browser_on_connect">Open browser on connect</string>
     <string name="label_keep_alive_after_browser_close">Keep tunnel active after close</string>
+    <string name="label_tunnel_browser_path">Start path</string>
+    <string name="helper_tunnel_browser_path">Example: /admin. Do not put a secret in this path: it is synced.</string>
+    <string name="error_tunnel_browser_path_too_long">This path is too long. Shorten it.</string>
+    <string name="error_tunnel_browser_path_missing_slash">The path must start with a slash (/).</string>
+    <string name="error_tunnel_browser_path_invalid_character" formatted="false">Character not allowed. Use unaccented letters, digits and the signs - . _ ~ ! $ &amp; \' ( ) * + , ; = : @ / ? # %. For a space, write %20.</string>
+    <string name="error_tunnel_browser_path_invalid_percent" formatted="false">A % must be followed by two digits or letters from A to F, for example %20.</string>
+    <string name="error_tunnel_browser_path_multiple_fragments">The path can contain only one hash sign (#).</string>
     <string name="label_key_name">Key name</string>
     <string name="label_key_type">Type</string>
     <string name="badge_biometric">Bio</string>
@@ -166,9 +185,41 @@
     <string name="auth_type_ssh_key">SSH key</string>
     <string name="auth_type_certificate">Certificate</string>
     <string name="auth_type_fido2">FIDO2</string>
+    <string name="auth_type_biometric_key">Biometric</string>
 
     <!-- ── Filter chips ───────────────────────────────────────────────────── -->
     <string name="filter_all">All</string>
+
+    <!-- ── Host list: open terminal sessions ("Resume" banner and card dot) ── -->
+    <plurals name="host_list_open_sessions">
+        <item quantity="one">%1$d session open</item>
+        <item quantity="other">%1$d sessions open</item>
+    </plurals>
+    <!-- The tabs whose shell has dropped, in the banner: "2 sessions open · 1 disconnected". -->
+    <plurals name="host_list_disconnected_sessions">
+        <item quantity="one">%1$d disconnected</item>
+        <item quantity="other">%1$d disconnected</item>
+    </plurals>
+    <!-- The total, then the disconnected ones, set apart by a middle dot (U+00B7). %1$s: "2 sessions open", %2$s: "1 disconnected". -->
+    <string name="host_list_open_sessions_summary">%1$s · %2$s</string>
+    <string name="host_list_resume_sessions">Resume</string>
+    <string name="host_card_session_open">Session open</string>
+    <string name="host_card_session_disconnected">Session disconnected</string>
+    <!-- What a tap on the card of a host does (TalkBack: "double tap to ..."), depending on whether a tab exists. -->
+    <string name="host_card_action_connect">Connect to this host</string>
+    <string name="host_card_action_reopen_session">Reopen the session of this host</string>
+    <!-- The counter under the title of the bar: "3 hosts". Zero does not come here (in French "one" covers 0 and 1):
+         the code then says host_list_count_zero, short enough for the bar beside the sync state. -->
+    <plurals name="host_list_count">
+        <item quantity="one">%1$d host</item>
+        <item quantity="other">%1$d hosts</item>
+    </plurals>
+    <string name="host_list_count_zero">No hosts</string>
+    <!-- Description of the settings icon of the bar when conflicts are waiting: the tap then opens the conflicts screen (with none, it is action_settings). -->
+    <plurals name="host_list_resolve_conflicts">
+        <item quantity="one">Resolve %1$d sync conflict</item>
+        <item quantity="other">Resolve %1$d sync conflicts</item>
+    </plurals>
 
     <!-- ── Placeholders ───────────────────────────────────────────────────── -->
     <string name="placeholder_host_name">My server</string>
@@ -183,6 +234,9 @@
     <string name="placeholder_remote_host">127.0.0.1</string>
     <string name="placeholder_remote_port">80</string>
     <string name="placeholder_socks5_port">1080</string>
+    <string name="placeholder_remote_bind_host">0.0.0.0</string>
+    <string name="placeholder_remote_forward_local_port">3000</string>
+    <string name="placeholder_tunnel_browser_path">/</string>
     <string name="placeholder_key_name">My Ed25519 key</string>
     <string name="placeholder_server_key_name">My server key</string>
     <string name="placeholder_key_formats">Formats: PEM (.pem), OpenSSH (id_rsa, id_ed25519), PKCS#8 (.key)</string>
@@ -200,7 +254,15 @@
     <string name="host_import_action_confirm">Import (%1$d)</string>
     <string name="host_import_parsing">Reading file…</string>
     <string name="host_import_importing">Importing…</string>
-    <string name="host_import_result">%1$d imported, %2$d skipped.</string>
+    <string name="host_import_result">%1$s, %2$s.</string>
+    <plurals name="host_import_imported_count">
+        <item quantity="one">%1$d host imported</item>
+        <item quantity="other">%1$d hosts imported</item>
+    </plurals>
+    <plurals name="host_import_skipped_count">
+        <item quantity="one">%1$d skipped</item>
+        <item quantity="other">%1$d skipped</item>
+    </plurals>
     <string name="host_import_error_none">No hosts found in this file. Make sure it is a NextSH, Termius (JSON) or KeePassXC (CSV/XML) export. If this file is an encrypted NextSH backup (.nextsh), use “Import backup” in the Vault (Backup section) instead of host import.</string>
     <string name="host_import_error_generic">The file could not be read. Check the format and try again.</string>
     <string name="host_import_error_too_large">This file exceeds the maximum allowed size (%1$d MiB) for import.</string>
@@ -218,10 +280,47 @@
     <string name="host_import_format_info_copied">Example copied</string>
     <string name="empty_no_tunnels_title">No tunnels configured</string>
     <string name="empty_no_tunnels_subtitle">Create a tunnel profile to access your remote services</string>
+    <!-- Tunnels screen: the card, its diagram and the form. Status and type are in sentence case, the pill and the badge turn them into capitals. -->
+    <string name="tunnels_subtitle">%1$s · %2$s</string>
+    <plurals name="tunnels_count_total">
+        <item quantity="one">%1$d tunnel</item>
+        <item quantity="other">%1$d tunnels</item>
+    </plurals>
+    <plurals name="tunnels_count_active">
+        <item quantity="one">%1$d active</item>
+        <item quantity="other">%1$d active</item>
+    </plurals>
+    <string name="tunnel_status_active">Active</string>
+    <string name="tunnel_status_starting">Starting</string>
+    <string name="tunnel_status_reconnecting">Reconnecting</string>
+    <string name="tunnel_status_error">Error</string>
+    <string name="tunnel_status_stopped">Stopped</string>
+    <string name="tunnel_type_local">Local</string>
+    <string name="tunnel_type_remote">Remote</string>
+    <string name="tunnel_type_socks5">SOCKS5</string>
+    <!-- The three nodes of the diagram of a card: local, SSH gateway, target. -->
+    <string name="tunnel_node_local">Local</string>
+    <string name="tunnel_node_gateway">SSH gateway</string>
+    <string name="tunnel_node_remote">Remote</string>
+    <string name="tunnel_node_multi_target">Multi-target</string>
+    <string name="tunnel_node_localhost">localhost</string>
+    <string name="tunnel_node_via_socks5">via SOCKS5</string>
+    <string name="helper_tunnel_type_local">Exposes a remote service on localhost through SSH.</string>
+    <string name="helper_tunnel_type_remote">Exposes a local service on the remote server through SSH.</string>
+    <string name="helper_tunnel_type_socks5">Creates a SOCKS5 proxy to route your connections through SSH.</string>
+    <!-- %1$s: the local port typed, or ? while it is empty. -->
+    <string name="helper_tunnel_socks5_exposed">SOCKS5 proxy exposed on localhost:%1$s.</string>
+    <!-- Tunnel browser: the description comes from WebView or from the server, %1$d is the error code or the HTTP status. -->
+    <string name="browser_error_load">Error %1$d: %2$s</string>
+    <string name="browser_error_http">HTTP %1$d: %2$s</string>
     <string name="empty_no_keys_title">No SSH keys</string>
     <string name="empty_no_keys_subtitle">Generate or import your first key</string>
     <string name="empty_no_known_hosts_title">No known hosts</string>
     <string name="empty_no_known_hosts_subtitle">Hosts will be added on your first connection</string>
+    <plurals name="known_hosts_count">
+        <item quantity="one">%1$d saved fingerprint</item>
+        <item quantity="other">%1$d saved fingerprints</item>
+    </plurals>
     <string name="empty_no_hosts_picker">No hosts configured</string>
 
     <!-- ── Status messages ────────────────────────────────────────────────── -->
@@ -238,11 +337,85 @@
     <string name="connect_error_timeout">Connection timed out (%1$d s)</string>
     <string name="connect_error_refused">The server did not respond</string>
     <string name="connect_error_host_not_found">Host name not found</string>
+    <string name="connect_error_invalid_host_address">The address of this host contains a space or an invisible character. Edit the host to correct it.</string>
     <string name="connect_error_generic">Connection failed</string>
     <string name="connect_error_generic_detail">Connection failed (%1$s)</string>
+    <!-- What ConnectSessionUseCase says when it cannot prepare the connection: %1$s is the label of the host, or of the key when the error names it.
+         Never the message of an exception: it is technical, in English, and stays in the log as a class name. -->
+    <string name="connect_error_password_missing">Password not found in the Vault for %1$s</string>
+    <string name="connect_error_key_missing">SSH key not found in the Vault for %1$s</string>
+    <string name="connect_error_certificate_missing">Certificate not found in the Vault for %1$s</string>
+    <string name="connect_error_fido2_key_missing">FIDO2 key not found for %1$s</string>
+    <string name="connect_error_fido2_key_invalid">Invalid FIDO2 key format for %1$s</string>
+    <string name="connect_error_passkey_key_missing">SSH key linked to the passkey not found for %1$s</string>
+    <string name="connect_error_biometric_key_missing">Biometric key not found for %1$s</string>
+    <string name="connect_error_vault_auth_expired">The vault was locked. Try again once NextSH is unlocked.</string>
+    <string name="connect_error_unexpected">Unexpected error while connecting. Try again.</string>
+    <!-- Opening the terminal on an already connected session (SshSessionManager.openShell). -->
+    <string name="shell_error_session_not_found">SSH session not found. Reconnect to the host.</string>
+    <string name="shell_error_open_failed">Could not open the terminal on this connection. Try again.</string>
     <string name="auth_error_failed">Authentication failed</string>
-    <string name="auth_error_failed_biometric">Authentication failed with the biometric key</string>
+    <string name="auth_error_failed_biometric">The server refused the biometric key. Check that its public key is in the authorized_keys file of the server.</string>
     <string name="auth_error_failed_fido2">FIDO2 authentication failed</string>
+    <!-- The relay of the fingerprint or security key prompt is not wired: not a state the user causes, restarting the app restores it. -->
+    <string name="auth_error_prompt_unavailable">Authentication cannot be requested right now. Restart NextSH, then try again.</string>
+    <string name="auth_error_fido2_cancelled">Connection cancelled</string>
+    <string name="auth_error_fido2_timeout">Security key not touched in time</string>
+    <string name="auth_error_fido2_key_error">The security key did not respond correctly</string>
+    <string name="auth_error_key_unreadable">The SSH key could not be read (passphrase?)</string>
+    <string name="auth_error_biometric_key_invalid">Biometric key invalidated or deleted: regenerate it</string>
+    <!-- Keystore failure that does not prove the key is gone: never tell the user to regenerate it. -->
+    <string name="auth_error_biometric_key_unusable">The phone could not use the biometric key. Try again.</string>
+    <string name="auth_error_biometric_expired">Biometric authentication expired: try again</string>
+    <!-- System dialog of the fingerprint of a biometric key: %1$s is the label of the host, then of the key. -->
+    <string name="biometric_sign_title">Connecting to %1$s</string>
+    <string name="biometric_sign_subtitle">Biometric key: %1$s</string>
+    <!-- Fingerprint asked for a biometric key: one sentence per cause, so the user knows what to do. -->
+    <string name="auth_error_biometric_timeout">Fingerprint not presented in time</string>
+    <string name="auth_error_biometric_lockout">Too many fingerprint attempts. Wait a moment, then try again.</string>
+    <string name="auth_error_biometric_lockout_permanent">The fingerprint sensor is locked. Unlock the phone with your passcode, then try again.</string>
+    <string name="auth_error_biometric_none_enrolled">No fingerprint is enrolled on this phone.</string>
+    <string name="auth_error_biometric_sensor_unavailable">The fingerprint sensor is not available right now.</string>
+    <string name="auth_error_biometric_no_sensor">This phone has no compatible fingerprint sensor.</string>
+    <string name="auth_error_biometric_error">The fingerprint could not be checked.</string>
+    <!-- Security key or fingerprint asked while NextSH is not on screen (background reconnection): nobody can answer, so the request ends at once. -->
+    <string name="auth_error_no_screen">Authentication required: open NextSH to authenticate</string>
+    <string name="auth_error_host_key">Host key verification failed</string>
+    <!-- The key of an unknown server needs to be confirmed while NextSH is not on screen (background reconnection): nobody can answer, the prompt ends at once. This is not a key that changed. -->
+    <string name="auth_error_host_key_no_screen">Server check required: open NextSH to confirm its identity</string>
+    <string name="auth_error_host_key_timeout">The server\'s identity was not confirmed in time. Try again, then confirm it without delay.</string>
+    <string name="tunnel_error_start_cancelled">Start cancelled</string>
+    <string name="tunnel_error_reconnect_interrupted">Reconnection interrupted</string>
+    <string name="tunnel_error_auth_required">Authentication required: open NextSH to restart this tunnel</string>
+    <!-- Fixed reasons of a cut, set by the tunnel manager and translated at display time. -->
+    <string name="tunnel_error_session_lost">SSH connection lost</string>
+    <string name="tunnel_error_listener_stopped">Local tunnel interrupted</string>
+    <string name="tunnel_error_socks_stopped">SOCKS5 proxy stopped</string>
+    <string name="tunnel_error_no_answer">The server stopped responding</string>
+    <string name="tunnel_error_network_lost">Network unavailable</string>
+    <!-- Fixed reasons of a start or a stop that fails, set by the tunnel manager and translated at display time. Never the message of an exception. -->
+    <string name="tunnel_error_start_failed">The tunnel could not start. Check its settings, then try again.</string>
+    <string name="tunnel_error_port_in_use">This tunnel\'s local port is already in use by another app. Change the port or close that app.</string>
+    <string name="tunnel_error_session_not_found">The SSH connection for this tunnel closed before it started. Start the tunnel again.</string>
+    <string name="tunnel_error_host_not_found">This tunnel\'s host no longer exists. Edit the tunnel to choose another one.</string>
+    <string name="tunnel_error_connect_unexpected">Unexpected error while connecting. Try again.</string>
+    <string name="tunnel_error_vault_auth_expired">Vault locked: open NextSH and unlock it, then restart the tunnel.</string>
+    <string name="tunnel_error_not_found">This tunnel is not running.</string>
+    <string name="tunnel_error_stop_failed">The tunnel could not be stopped cleanly. Try again.</string>
+    <!-- Ports a tunnel cannot use (a tunnel that came from the sync or an import) and a refusal by the server. Fixed texts: never the port that was typed. -->
+    <string name="tunnel_error_local_port_invalid">The local port of this tunnel is not valid. Choose a port between 1 and 65535.</string>
+    <string name="tunnel_error_remote_port_invalid">The remote port of this tunnel is not valid. Choose a port between 1 and 65535.</string>
+    <string name="tunnel_error_local_port_reserved">Android does not let apps use local ports below 1024. Choose a port between 1024 and 65535.</string>
+    <string name="tunnel_error_remote_forward_refused">The server refused to open the remote port. It may already be taken on the server, reserved (ports below 1024), or forwarding may be turned off there.</string>
+    <!-- A start the user stopped while it was connecting: never shown, the tunnel has no card any more. -->
+    <string name="tunnel_error_start_stopped">Start stopped</string>
+    <!-- Automatic reconnection given up: %1$s is the number of attempts (a number turned into text), %2$s the reason of the last one (already in the user's language). -->
+    <string name="tunnel_error_reconnect_failed_reason">Reconnection failed after %1$s attempts: %2$s</string>
+    <string name="tunnel_error_reconnect_failed">Reconnection failed after %1$s attempts</string>
+    <!-- The tunnel was cut three times in a row, each time soon after being restored: the automatic reconnection stops, it would only multiply the connections. -->
+    <string name="tunnel_error_quick_cuts">The tunnel drops again as soon as it is restored. Check the server, then restart it.</string>
+    <!-- Reconnection stopped by an internal error, with no reason to give. -->
+    <string name="tunnel_error_reconnect_failed_internal">Reconnection failed</string>
 
     <!-- ── Credential storage ─────────────────────────────────────────────── -->
     <string name="label_no_passwords_stored">No passwords stored</string>
@@ -255,18 +428,88 @@
     <string name="dialog_delete_tunnel_title">Delete tunnel?</string>
     <string name="dialog_delete_tunnel_message">The tunnel will be stopped if active, then permanently deleted.</string>
     <string name="dialog_delete_key_title">Delete key?</string>
-    <string name="dialog_delete_key_message">"%s" will be permanently deleted from the vault.</string>
-    <string name="dialog_wipe_vault_title">Wipe vault?</string>
-    <string name="dialog_wipe_vault_message">This will permanently delete all hosts, SSH keys and tunnels. This action is irreversible.</string>
+    <string name="dialog_delete_key_message">\"%s\" will be permanently deleted from the vault.</string>
+    <!-- ── Key deletion ─────────────────────────────────────────────────────
+         When hosts use the key, the dialog reads: dialog_delete_key_message + used_by_hosts +
+         cannot_connect. In used_by_hosts, %2$s is the list of hosts (three at most, alphabetical,
+         then "and N others", see hosts_and_more) and %3$s the tunnels in parentheses, preceded by
+         a space, or nothing. The key is deleted anyway if the user confirms. -->
+    <plurals name="dialog_delete_key_used_by_hosts">
+        <item quantity="one">It is used by %1$d host: %2$s%3$s.</item>
+        <item quantity="other">It is used by %1$d hosts: %2$s%3$s.</item>
+    </plurals>
+    <plurals name="dialog_delete_key_hosts_and_more">
+        <item quantity="one">%1$s and %2$d other</item>
+        <item quantity="other">%1$s and %2$d others</item>
+    </plurals>
+    <!-- Tunnels of the hosts that use the key: "it" for a single host, "them" for several. -->
+    <plurals name="dialog_delete_key_tunnels_one_host">
+        <item quantity="one">(and %1$d tunnel that goes through it)</item>
+        <item quantity="other">(and %1$d tunnels that go through it)</item>
+    </plurals>
+    <plurals name="dialog_delete_key_tunnels_many_hosts">
+        <item quantity="one">(and %1$d tunnel that goes through them)</item>
+        <item quantity="other">(and %1$d tunnels that go through them)</item>
+    </plurals>
+    <plurals name="dialog_delete_key_cannot_connect">
+        <item quantity="one">This host will no longer be able to connect until you choose another key for it.</item>
+        <item quantity="other">These hosts will no longer be able to connect until you choose another key for them.</item>
+    </plurals>
+    <!-- When the lookup of the hosts that use the key failed: line added to the plain sentence. The deletion stays possible. -->
+    <string name="dialog_delete_key_usage_unknown">Could not check whether any hosts use this key.</string>
+    <!-- ── Vault: key messages (generation, import, deletion) and backup import ──
+         Fixed sentences: the screen never shows the message of an exception. -->
+    <string name="vault_key_pem_empty">The private key cannot be empty</string>
+    <string name="vault_key_generated">%1$s key \"%2$s\" generated successfully</string>
+    <string name="vault_key_generate_failed">The key could not be generated. Try again.</string>
+    <string name="vault_key_imported">Key \"%1$s\" imported successfully</string>
+    <string name="vault_key_import_failed">The key could not be imported. Try again.</string>
+    <string name="vault_key_import_unreadable">This file is not a private key that NextSH can read. Supported formats: PEM, OpenSSH, PKCS#8.</string>
+    <string name="vault_key_import_wrong_passphrase">Incorrect passphrase. Check it, then try again.</string>
+    <string name="vault_key_import_too_large">This private key is too large: 64 KiB at most.</string>
+    <string name="vault_key_import_too_costly">This private key is protected by a computation too long to open: it was not imported. Save it again with fewer rounds (ssh-keygen -p -a 100 -f key_file), then try again.</string>
+    <string name="vault_key_import_inconsistent">This key file is inconsistent: its public key does not match its private key. It was not imported.</string>
+    <string name="vault_key_import_unsupported_encryption">The encryption of this key file is not supported. Export the key with ssh-keygen (OpenSSH format), then try again.</string>
+    <string name="vault_key_file_read_failed">The file could not be read. Try again or paste the key.</string>
+    <string name="vault_key_deleted">Key deleted</string>
+    <string name="vault_key_delete_failed">The key could not be deleted. Try again.</string>
+    <!-- The app lock (unlock screen) asks for the authentication again and reopens the vault. -->
+    <string name="vault_error_auth_expired">The vault was locked. Try again once NextSH is unlocked.</string>
+    <string name="vault_import_file_unreadable">This file could not be read. Check that it is still accessible, then try again.</string>
+    <string name="vault_import_file_too_large">This file is too large to be a NextSH backup (50 MB at most).</string>
+    <string name="vault_import_failed">The backup import failed. Try again.</string>
+    <plurals name="vault_keys_subtitle">
+        <item quantity="one">%1$d key · encrypted locally</item>
+        <item quantity="other">%1$d keys · encrypted locally</item>
+    </plurals>
+    <!-- Importing an encrypted key: the passphrase is asked in a dialog -->
+    <string name="key_import_passphrase_title">Passphrase required</string>
+    <string name="key_import_passphrase_message">The imported key is encrypted. Enter its passphrase to unlock it.</string>
+    <string name="key_import_passphrase_unlock">Unlock</string>
+    <string name="dialog_wipe_vault_title">Wipe the vault?</string>
+    <string name="dialog_wipe_vault_message">This cannot be undone. It erases the vault (passwords, private SSH keys, certificates, passphrases, sync secrets), the biometric keys of NextSH, the database (hosts, tunnels, keys, snippets, custom themes, enrolled devices, conflicts) and the known hosts list.\n\nBefore erasing, NextSH closes every terminal and SFTP browser, cancels the transfers in progress and stops the tunnels and the LAN sync. Commands still running in the terminals will be interrupted.\n\nThe app settings are kept. On the synced computer, remove this phone from the enrolled devices afterwards. You will then create a new vault.</string>
+    <!-- Wipe the vault: second step (the word to type), progress and failure -->
+    <string name="settings_wipe_token_title">Type %1$s to confirm</string>
+    <string name="settings_wipe_token_body">To confirm the wipe, type the word “%1$s” exactly below.</string>
+    <string name="settings_wipe_token_field_label">Confirmation</string>
+    <string name="settings_wipe_progress">Closing the sessions and wiping the vault…</string>
+    <string name="settings_wipe_close_blocked">Closing is not possible right now: NextSH cannot safely be reopened until this wipe is finished. Tap “Retry”. If this message comes back, restart your phone, then open NextSH again.</string>
+    <string name="settings_wipe_failed_title">Wipe incomplete</string>
+    <string name="settings_wipe_failed">The wipe could not be completed: some data is still there. You can try again. If it fails again, close NextSH, open it again, then start over.</string>
     <string name="dialog_generate_key_title">Generate SSH key</string>
     <string name="dialog_export_vault_title">Export vault</string>
     <string name="dialog_import_backup_title">Import backup</string>
-    <string name="dialog_export_vault_message">Choose a passphrase to encrypt the backup. It will be required to restore your data.</string>
-    <string name="dialog_import_backup_message">Enter the passphrase used when exporting the backup.</string>
+    <string name="dialog_export_vault_message">Choose a passphrase to encrypt the backup. It will be required to restore your data. You will then choose where to save the file.\n\nThe backup contains your hosts, tunnels, SSH keys, passwords, certificates, snippets, custom themes, known host fingerprints and some of your settings. The LAN sync secret and the security settings are never included.</string>
+    <string name="dialog_import_backup_message">Enter the passphrase used when exporting the backup.\n\nItems of the backup replace those on this device that have the same identifier. Known host fingerprints already on this device are kept. The backup can also approve servers: their fingerprints are added, except for a host already on this device, whose first connection will ask you to verify the server. Your security settings do not change. Items deleted since the backup was made will be restored too, and your other devices will receive them at the next sync.</string>
     <string name="dialog_host_verification_title">Host verification</string>
     <string name="dialog_host_key_changed_title">⚠ Host key changed</string>
     <string name="dialog_host_key_changed_message">WARNING: The SSH key of host %s has changed since the last connection. This may indicate a man-in-the-middle attack.</string>
     <string name="dialog_trust_host_question">Do you want to trust this host?</string>
+    <!-- Confirmation dialog for the key of an unknown server (HostKeyPromptDialog). -->
+    <string name="host_key_dialog_hint">First connection to this server. Compare this fingerprint with the one your administrator gave you before going on.</string>
+    <string name="host_key_dialog_algorithm">Algorithm</string>
+    <string name="host_key_dialog_fingerprint">SHA-256 FINGERPRINT</string>
+    <string name="host_key_dialog_time_limit">With no answer within %1$d s, the connection is dropped.</string>
     <string name="dialog_external_nav_title">External navigation</string>
     <string name="dialog_external_nav_message">This page is trying to open an external URL.</string>
     <string name="dialog_external_nav_warning">Traffic will no longer be protected by the SSH tunnel.</string>
@@ -280,7 +523,7 @@
     <string name="browser_auth_submit">Sign in</string>
     <string name="browser_auth_error_banner">Authentication required: missing or rejected credentials.</string>
     <string name="dialog_delete_known_host_title">Delete host?</string>
-    <string name="dialog_delete_known_host_message">Entry "%s" will be removed from known_hosts. You will need to confirm the key on the next connection.</string>
+    <string name="dialog_delete_known_host_message">Entry \"%s\" will be removed from known_hosts. You will need to confirm the key on the next connection.</string>
     <string name="dialog_delete_all_known_hosts_title">Delete all?</string>
     <string name="dialog_delete_all_known_hosts_message">All known host keys will be deleted. You will need to confirm fingerprints on future connections.</string>
     <string name="dialog_connect_to_host">Connect to host</string>
@@ -294,26 +537,50 @@
 
     <!-- ── FIDO2 explanatory text ──────────────────────────────────────────── -->
     <string name="label_experimental">Experimental</string>
-    <string name="fido2_info_line1">FIDO2/Passkey authentication requires an SSH server configured to accept FIDO2 keys (sk-ecdsa-sha2-nistp256 or sk-ssh-ed25519).</string>
-    <string name="fido2_info_line2">The passkey must be registered on your device via the Android password manager.</string>
-    <string name="fido2_tap_key">Tap your security key (USB or NFC)</string>
+    <string name="fido2_info_line1">You sign in with a security key (YubiKey or similar) enrolled in the Vault. Plug it in over USB or hold it near the phone for NFC, then touch it when the app asks you to. The SSH server must accept FIDO2 keys (sk-ssh-ed25519 or sk-ecdsa-sha2-nistp256).</string>
+    <string name="fido2_info_line2">This host signs in with the SSH key you chose, with no security key check. To require your security key at every sign-in, switch to Hardware Key mode.</string>
+    <string name="fido2_tap_key">Use your security key</string>
     <string name="fido2_timeout">Timeout: no security key detected</string>
     <string name="fido2_no_key_detected">No security key detected</string>
     <string name="fido2_mode_hardware">Hardware Key</string>
     <string name="fido2_mode_passkey">Passkey</string>
     <string name="label_fido2_sk_key">Security key (sk-*)</string>
-    <string name="fido2_no_sk_keys">No sk-* keys, import a FIDO2 public key</string>
+    <string name="fido2_no_sk_keys">No security key, enroll one from the Vault</string>
     <string name="fido2_error_no_key">No FIDO2 key configured for this host</string>
     <string name="fido2_error_cancelled">FIDO2 authentication cancelled</string>
     <string name="fido2_error_timeout">FIDO2 authentication timeout</string>
     <string name="fido2_pin_title">Enter your security key PIN</string>
-    <string name="fido2_pin_hint">PIN (4–63 chars)</string>
+    <string name="fido2_pin_hint">PIN (at least 4 characters)</string>
     <string name="fido2_pin_tries_remaining">Tries remaining: %1$d</string>
     <string name="fido2_pin_blocked">Key is blocked. A full reset is required to reuse it.</string>
     <string name="fido2_pin_required_no_ui">This key requires a PIN but the PIN entry UI is unavailable.</string>
 
+    <!-- ── FIDO2 security key request: exchange status and failure reasons ── -->
+    <string name="fido2_status_waiting_key">Plug in your security key or hold it close to the phone.</string>
+    <string name="fido2_status_usb_denied">Accept the Android prompt to use the key. If it does not appear, unplug the key and plug it back in.</string>
+    <string name="fido2_status_nfc_off">NFC is turned off. Turn it on in the phone settings, or plug your key in over USB.</string>
+    <string name="fido2_status_talking">Key detected. Do not remove it.</string>
+    <string name="fido2_status_touch">Touch the button or sensor on your key.</string>
+    <string name="fido2_status_pin_reapproach">Take the key away, type your PIN, then hold it close to the phone again.</string>
+    <string name="fido2_status_reapproach">Take the key away, then hold it close to the phone again.</string>
+    <string name="fido2_pin_nfc_hint">After typing it, take the key away, then hold it close to the phone again.</string>
+    <string name="fido2_error_no_matching_credential">Use the security key this SSH key was created with.</string>
+    <string name="fido2_error_pin_incorrect">Incorrect PIN.</string>
+    <string name="fido2_error_pin_incorrect_tries">Incorrect PIN. Tries left before the key locks: %1$d.</string>
+    <string name="fido2_error_pin_auth_blocked">Too many wrong PINs in a row. Unplug and plug the key back in (or move it away from the phone), then try again.</string>
+    <string name="fido2_error_pin_not_set">No PIN is set on this key. Set one, then try again.</string>
+    <string name="fido2_error_key_removed">The key was removed or the communication was interrupted. Keep it in place, then try again.</string>
+    <string name="fido2_error_unsupported_key">This key is not supported for SSH sign-in.</string>
+    <string name="fido2_error_touch_timeout">The key was not touched in time. Try again.</string>
+    <string name="fido2_error_refused">The key refused the operation. Try again, and touch it when it asks you to.</string>
+    <string name="fido2_error_unexpected">Unexpected error with the security key. Try again.</string>
+
     <!-- ── Certificate hint ───────────────────────────────────────────────── -->
     <string name="certificate_hint">The certificate must be imported into the vault with the same ID as the key (cert_{id}).</string>
+
+    <!-- ── Biometric key host (form) ──────────────────────────────────────── -->
+    <string name="biometric_no_keys">No biometric key, create one in the Vault first</string>
+    <string name="biometric_key_hint">You will be asked for your fingerprint at each connection. Add the public key to the server\'s authorized_keys file (you can copy it from the Vault).</string>
 
     <!-- ── No key dropdown item ───────────────────────────────────────────── -->
     <string name="label_no_key_import_first">No keys, import one first</string>
@@ -336,10 +603,8 @@
     <string name="error_tunnel_local_port_reserved">Android does not let apps use local ports below 1024. Choose a port between 1024 and 65535.</string>
 
     <!-- ── Settings display values ───────────────────────────────────────── -->
-    <string name="settings_scrollback_lines">%d lines</string>
     <string name="settings_scrollback_klines">%dk lines</string>
     <string name="settings_font_size_pt">%d pt</string>
-    <string name="settings_keepalive_seconds">%d s</string>
     <string name="settings_timeout_seconds">%d s</string>
     <string name="settings_app_credit">NextSH by Techtical</string>
 
@@ -376,6 +641,17 @@
     <string name="dialog_snippet_picker_title">Insert snippet</string>
     <string name="error_snippet_label_empty">Snippet name cannot be empty</string>
     <string name="error_snippet_command_empty">Command cannot be empty</string>
+    <string name="snippet_saved_added">Snippet added</string>
+    <string name="snippet_saved_updated">Snippet updated</string>
+    <string name="snippet_deleted">Snippet deleted</string>
+    <string name="snippet_save_failed">The snippet could not be saved. Please try again.</string>
+    <string name="snippet_save_failed_storage_full">The snippet could not be saved: the device storage is full.</string>
+    <string name="snippet_delete_failed">The snippet could not be deleted. Please try again.</string>
+    <string name="snippet_delete_failed_storage_full">The snippet could not be deleted: the device storage is full.</string>
+    <plurals name="snippet_list_count">
+        <item quantity="one">%1$d snippet</item>
+        <item quantity="other">%1$d snippets</item>
+    </plurals>
 
     <!-- ── SFTP Browser ──────────────────────────────────────────────────── -->
     <string name="action_sftp_browse">SFTP Browser</string>
@@ -392,6 +668,12 @@
     <string name="sftp_sort_date">Date</string>
     <string name="sftp_sort_ascending">Ascending</string>
     <string name="sftp_sort_descending">Descending</string>
+    <string name="sftp_sort_option">%1$s (%2$s)</string>
+    <!-- Size of a file: the code writes the number with the language of the device, one decimal above bytes -->
+    <string name="sftp_size_bytes">%1$s B</string>
+    <string name="sftp_size_kilobytes">%1$s KB</string>
+    <string name="sftp_size_megabytes">%1$s MB</string>
+    <string name="sftp_size_gigabytes">%1$s GB</string>
     <string name="sftp_show_hidden">Show hidden files</string>
     <string name="sftp_hide_hidden">Hide hidden files</string>
     <string name="action_sort">Sort</string>
@@ -404,20 +686,56 @@
     <string name="sftp_action_rename">Rename</string>
     <string name="sftp_action_chmod">Permissions</string>
     <string name="sftp_action_delete">Delete</string>
+    <!-- Menu of the "Create" button at the right of the breadcrumb, and accessibility label of the ⋮ of the selection bar -->
+    <string name="sftp_action_new_folder">New folder</string>
+    <string name="sftp_action_new_file">New file</string>
+    <string name="sftp_action_more">More actions</string>
     <string name="sftp_dialog_rename_title">Rename</string>
     <string name="sftp_dialog_mkdir_title">New folder</string>
     <string name="sftp_dialog_mkdir_hint">Folder name</string>
+    <string name="sftp_dialog_new_file_title">New file</string>
+    <string name="sftp_dialog_new_file_hint">File name</string>
     <string name="sftp_dialog_chmod_title">Permissions</string>
     <string name="sftp_dialog_delete_title">Delete</string>
-    <string name="sftp_dialog_delete_message">Delete "%1$s"?</string>
+    <string name="sftp_dialog_delete_message">Delete \"%1$s\"?</string>
     <string name="sftp_dialog_delete_dir_warning">This folder and all its contents will be permanently deleted.</string>
     <string name="sftp_dialog_delete_file_warning">This file will be permanently deleted.</string>
     <string name="sftp_success_mkdir">Folder created</string>
-    <string name="sftp_success_rename">File renamed</string>
+    <string name="sftp_success_create_file">File created</string>
+    <string name="sftp_success_rename">Item renamed</string>
     <string name="sftp_success_chmod">Permissions changed</string>
     <string name="sftp_success_delete">Item deleted</string>
     <string name="sftp_error_name_empty">Name cannot be empty</string>
     <string name="sftp_error_name_invalid">Invalid file name</string>
+    <string name="sftp_error_name_reserved">The names \".\" and \"..\" are reserved, choose another one</string>
+    <string name="sftp_error_name_has_separator">A name cannot contain / or \\</string>
+    <string name="sftp_error_name_has_control">The name contains an invisible character that is not allowed</string>
+    <string name="sftp_error_name_has_invisible_format">The name contains an invisible character that can change how it looks, type it again</string>
+    <string name="sftp_error_name_too_long">The name is too long</string>
+    <string name="sftp_error_entry_name_invalid">Invalid name</string>
+    <!-- Errors of the SFTP layer, said at display time (see SftpMessages.kt) -->
+    <string name="sftp_error_session_not_found">The SSH connection is closed. Reconnect to the host.</string>
+    <string name="sftp_error_open_failed">Cannot open SFTP on this server.</string>
+    <string name="sftp_error_invalid_path">Invalid path</string>
+    <string name="sftp_error_unknown">Unexpected SFTP error</string>
+    <string name="sftp_error_folder_name_invalid">Invalid folder name</string>
+    <string name="sftp_error_folder_exists">A folder with this name already exists</string>
+    <string name="sftp_error_mkdir_failed">Cannot create the folder</string>
+    <string name="sftp_error_create_file_failed">Cannot create the file</string>
+    <string name="sftp_error_delete_failed">Cannot delete the item</string>
+    <string name="sftp_error_name_exists">An item with this name already exists</string>
+    <string name="sftp_error_rename_failed">Cannot rename</string>
+    <string name="sftp_error_chmod_failed">Cannot change the permissions</string>
+    <string name="sftp_error_permissions_invalid">Invalid permissions value</string>
+    <string name="sftp_error_read_failed">Cannot read the file</string>
+    <string name="sftp_error_download_failed">Cannot download the file</string>
+    <string name="sftp_error_no_space">Not enough disk space on the server</string>
+    <string name="sftp_error_upload_failed">Cannot upload the file</string>
+    <string name="sftp_error_destination_unavailable">Cannot save the file on this device</string>
+    <string name="sftp_error_source_unavailable">Cannot read the file to upload</string>
+    <string name="sftp_error_source_truncated">The source file ended early: upload canceled.</string>
+    <string name="sftp_error_source_truncated_in_place">The source file ended early: the file on the server is incomplete.</string>
+    <string name="sftp_error_source_virtual">This document only exists online and cannot be sent as is. Export it from its app first (as a PDF, for example).</string>
     <string name="sftp_chmod_owner">Owner</string>
     <string name="sftp_chmod_group">Group</string>
     <string name="sftp_chmod_others">Others</string>
@@ -425,11 +743,45 @@
     <string name="sftp_chmod_write">Write</string>
     <string name="sftp_chmod_execute">Execute</string>
     <!-- SFTP Multi-select -->
-    <string name="sftp_selection_count">%1$d selected</string>
-    <string name="sftp_select_all">All</string>
+    <plurals name="sftp_selection_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <string name="sftp_select_all">Select all</string>
     <string name="sftp_action_delete_selected">Delete</string>
-    <string name="sftp_dialog_multi_delete_title">Delete %1$d item(s)?</string>
+    <plurals name="sftp_dialog_multi_delete_title">
+        <item quantity="one">Delete %1$d item?</item>
+        <item quantity="other">Delete %1$d items?</item>
+    </plurals>
     <string name="sftp_dialog_multi_delete_message">These items will be permanently deleted.</string>
+    <!-- Result of the deletion of several items: "N deleted, M could not be deleted" -->
+    <plurals name="sftp_multi_delete_done">
+        <item quantity="one">%1$d item deleted</item>
+        <item quantity="other">%1$d items deleted</item>
+    </plurals>
+    <string name="sftp_multi_delete_partial">%1$s, %2$s</string>
+    <plurals name="sftp_multi_delete_failed">
+        <item quantity="one">%1$d could not be deleted</item>
+        <item quantity="other">%1$d could not be deleted</item>
+    </plurals>
+    <string name="sftp_multi_delete_none">No item could be deleted</string>
+    <!-- Leftovers of interrupted uploads (temporary files .name.nextsh-part-xxxxxxxx) -->
+    <string name="sftp_leftover_badge">Interrupted upload</string>
+    <string name="sftp_leftover_detail">Incomplete copy of \"%1$s\"</string>
+    <plurals name="sftp_leftover_banner">
+        <item quantity="one">%1$d temporary file left by an interrupted upload</item>
+        <item quantity="other">%1$d temporary files left by interrupted uploads</item>
+    </plurals>
+    <string name="sftp_leftover_banner_dismiss">Dismiss</string>
+    <string name="sftp_leftover_banner_dismiss_description">Dismiss the temporary files of this folder</string>
+    <string name="sftp_leftover_banner_delete_description">Delete the temporary files</string>
+    <plurals name="sftp_leftover_delete_title">
+        <item quantity="one">Delete %1$d temporary file?</item>
+        <item quantity="other">Delete %1$d temporary files?</item>
+    </plurals>
+    <string name="sftp_leftover_delete_message_single">This file is an incomplete copy of \"%1$s\", left by an interrupted upload. Deleting it does not touch the file \"%1$s\".</string>
+    <string name="sftp_leftover_delete_message_multi">These files are incomplete copies, left by interrupted uploads. Deleting them does not touch the original files.</string>
+    <string name="sftp_leftover_delete_warning">If an upload is still running from another device, it will fail, without changing the original file.</string>
     <string name="action_create">Create</string>
     <string name="action_confirm">Confirm</string>
 
@@ -437,14 +789,20 @@
     <string name="sftp_preview_title">Preview</string>
     <string name="sftp_preview_loading">Loading preview…</string>
     <string name="sftp_preview_error">Unable to load preview</string>
-    <string name="sftp_preview_too_large">File too large for preview (%1$s). Download to view.</string>
+    <string name="sftp_preview_too_large">File too large for preview</string>
     <string name="sftp_preview_decode_error">Unable to decode image</string>
-    <string name="sftp_preview_line_count">%1$d lines</string>
+    <plurals name="sftp_preview_line_count">
+        <item quantity="one">%1$d line</item>
+        <item quantity="other">%1$d lines</item>
+    </plurals>
 
     <!-- ── SFTP Connection ───────────────────────────────────────────────── -->
     <string name="sftp_disconnected">SFTP connection lost</string>
     <string name="sftp_reconnect">Reconnect</string>
     <string name="sftp_reconnecting">Reconnecting…</string>
+    <!-- The SSH session itself is gone: nothing to reconnect from the browser. Full-screen version, then the pane of a split (the terminal next to it reconnects and the pane follows) -->
+    <string name="sftp_session_ended">The connection to the host was lost. Go back, then open SFTP again.</string>
+    <string name="sftp_session_ended_pane">The connection to the host was cut. Reconnect the terminal to get your files back.</string>
 
     <!-- ── SFTP Transfers ─────────────────────────────────────────────────── -->
     <string name="sftp_transfer_channel_name">SFTP Transfers</string>
@@ -458,12 +816,29 @@
     <string name="sftp_transfer_progress">%1$d%%</string>
     <string name="sftp_transfer_notification_title">SFTP Transfer</string>
     <string name="sftp_transfer_cancel_action">Cancel</string>
-    <string name="sftp_transfer_more">+%1$d more transfer(s)</string>
+    <plurals name="sftp_transfer_more">
+        <item quantity="one">+%1$d more transfer</item>
+        <item quantity="other">+%1$d more transfers</item>
+    </plurals>
+    <string name="sftp_transfer_download_started">Download of %1$s started</string>
+    <string name="sftp_transfer_upload_started">Upload of %1$s started</string>
     <string name="sftp_transfer_no_session">SFTP session not ready. Reopen the folder and try again.</string>
     <string name="sftp_transfer_session_lost">SSH connection closed. Reconnect, then start the transfer again.</string>
     <string name="sftp_transfer_failed_detail">Transfer of %1$s failed: %2$s</string>
     <string name="sftp_transfer_timeout">Reached the 6-hour background transfer limit. Reopen NextSH to resume.</string>
     <string name="sftp_transfer_start_refused">Cannot start the transfer right now. Reopen NextSH and try again.</string>
+    <!-- Upload of a file whose name is already taken: replace dialog, refusals and failure from the server -->
+    <string name="sftp_upload_replace_title">Replace the file?</string>
+    <string name="sftp_upload_replace_message">A file named \"%1$s\" already exists in \"%2$s\".</string>
+    <string name="sftp_upload_replace_warning">Its current content will be permanently replaced.</string>
+    <string name="sftp_upload_replace_action">Replace</string>
+    <string name="sftp_upload_target_is_folder">A folder named \"%1$s\" is already here. The file was not sent.</string>
+    <string name="sftp_upload_target_not_replaceable">An item named \"%1$s\" is already here and cannot be replaced. The file was not sent.</string>
+    <string name="sftp_transfer_target_exists">An item with this name already exists on the server. Nothing was replaced.</string>
+    <string name="sftp_transfer_target_changed">The item to replace changed on the server. Nothing was replaced.</string>
+    <string name="sftp_transfer_replace_failed_kept">The upload failed. The existing file was not changed.</string>
+    <!-- Notification of the service while the system file picker is open -->
+    <string name="sftp_picker_notification_title">Choosing a file</string>
 
     <!-- ── Tunnels: foreground service notification ───────────────────────── -->
     <string name="tunnel_notification_title_single">%1$s active</string>
@@ -476,6 +851,42 @@
     <string name="tunnel_notification_more">+%1$d more</string>
     <string name="tunnel_service_timeout">System time limit reached. Restart your tunnels from NextSH.</string>
     <string name="tunnel_service_start_refused">Cannot keep the tunnel running in the background. Reopen NextSH and try again.</string>
+    <string name="tunnel_start_unavailable">This tunnel or its host was deleted: it cannot be started.</string>
+
+    <!-- ── Terminal: notification of the service that keeps the SSH sessions open ── -->
+    <string name="terminal_channel_name">SSH sessions</string>
+    <string name="terminal_channel_description">Open SSH terminal sessions, kept connected while you use another app</string>
+    <plurals name="terminal_notification_title">
+        <item quantity="one">%1$d SSH session open</item>
+        <item quantity="other">%1$d SSH sessions open</item>
+    </plurals>
+    <string name="terminal_notification_close_all">Close all</string>
+    <plurals name="terminal_notification_more">
+        <item quantity="one">and %1$d more</item>
+        <item quantity="other">and %1$d more</item>
+    </plurals>
+    <string name="terminal_service_start_refused">The session may drop if you leave NextSH.</string>
+    <!-- Notification: tunnels stopped because they, or their host, were deleted on another device -->
+    <plurals name="tunnel_deleted_elsewhere_title">
+        <item quantity="one">Tunnel stopped</item>
+        <item quantity="other">Tunnels stopped</item>
+    </plurals>
+    <string name="tunnel_deleted_elsewhere_text_single">\"%1$s\" was deleted on another device.</string>
+    <plurals name="tunnel_deleted_elsewhere_text_count">
+        <item quantity="one">%1$d tunnel was deleted on another device.</item>
+        <item quantity="other">%1$d tunnels were deleted on another device.</item>
+    </plurals>
+    <!-- Notification: tunnels are waiting for the user (security key, fingerprint or confirmation of a server's key) while NextSH is not on screen -->
+    <string name="auth_required_channel_name">Action required</string>
+    <string name="auth_required_channel_description">Tells you when tunnels are waiting for your security key, your fingerprint or the confirmation of a server</string>
+    <string name="auth_required_title">Action required</string>
+    <string name="auth_required_text_single">\"%1$s\" is waiting for you. Tap to open NextSH and restart it.</string>
+    <plurals name="auth_required_text_count">
+        <item quantity="one">%1$d tunnel is waiting for you. Tap to open NextSH and restart it.</item>
+        <item quantity="other">%1$d tunnels are waiting for you. Tap to open NextSH and restart them.</item>
+    </plurals>
+    <!-- Version of the notification shown on a locked screen: no tunnel name -->
+    <string name="auth_required_public_text">Tunnels are waiting for you.</string>
     <string name="notification_permission_rationale">Allow notifications to follow your tunnels and transfers, and to stop them from the notification shade.</string>
 
     <!-- ── LAN Sync: Enrollment Phase 2 + Scheduler Wave 3.4 ─────────── -->
@@ -493,6 +904,8 @@
     <string name="relative_minutes_ago">%1$d min ago</string>
     <string name="relative_hours_ago">%1$d h ago</string>
     <string name="relative_days_ago">%1$d d ago</string>
+    <!-- Language of the displayed resources, to write an absolute date in the language of the interface. -->
+    <string name="relative_date_language">en</string>
     <string name="sync_subtitle_uptodate">Sync up to date</string>
     <string name="sync_subtitle_syncing">Syncing</string>
     <string name="sync_subtitle_error">Sync error</string>
@@ -501,7 +914,22 @@
     <string name="sync_subtitle_conflicts_many">%1$d pending conflicts</string>
     <string name="sync_last_sync_at">Last sync: %1$s</string>
     <string name="sync_never_synced">Never synced</string>
-    <string name="sync_pending_conflicts">%1$d pending conflict(s)</string>
+    <!-- Last sync error, built by AndroidSyncScheduler and shown after "Error:" (sync_status_error).
+         Each text is a sentence that follows the colon without adding one: the device name (%1$s) is
+         inside the sentence, never followed by ":". When there is something to do, the sentence says it.
+         sync_error_device_unreachable also serves SyncError.HOST_UNREACHABLE (lost address).
+         Never the message of an exception nor the name of an enum. -->
+    <string name="sync_error_load_devices">could not read the enrolled devices. Restart NextSH and try again.</string>
+    <string name="sync_error_vault_locked">the vault is locked. Unlock NextSH, then run the sync again.</string>
+    <string name="sync_error_device_unreachable">%1$s unreachable. Check that the Desktop is open and on the same network.</string>
+    <string name="sync_error_device_auth_failed">%1$s refused the connection. Check the time on both devices, otherwise re-enroll it.</string>
+    <string name="sync_error_decrypt_failed">unreadable data received from %1$s</string>
+    <string name="sync_error_hmac_invalid">the signature of the data from %1$s is invalid. If this persists, re-enroll it.</string>
+    <string name="sync_error_timestamp_drift">the date or time differs between %1$s and this device. Check the date and time on both devices.</string>
+    <string name="sync_error_version_mismatch">the NextSH version of %1$s is not compatible with the one on this device. Update NextSH on both devices.</string>
+    <string name="sync_error_network_timeout">%1$s is not responding</string>
+    <string name="sync_error_server_error">%1$s ran into an error. Try again.</string>
+    <string name="sync_error_unknown">sync with %1$s failed</string>
     <string name="title_enrollment_scan">Enroll a Desktop device</string>
     <string name="enrollment_scan_hint">Align the QR code within the frame</string>
     <string name="enrollment_camera_permission_required">Camera permission is required to scan the enrollment QR code.\nOpen the app settings to grant it.</string>
@@ -513,20 +941,84 @@
     <string name="enrollment_submitting">Sending…</string>
     <string name="enrollment_success">Device \'%1$s\' enrolled successfully</string>
     <string name="enrollment_action_done">Done</string>
+    <!-- Why the enrollment stopped (EnrollmentError). Never the message of an exception: it is in English and may quote an address.
+         %1$s and %2$d of enrollment_error_unreachable are the address and the port of the QR code. -->
+    <string name="enrollment_error_invalid_qr">Invalid QR code or unrecognized format</string>
+    <string name="enrollment_error_invalid_response">Unexpected response from the Desktop. Try again.</string>
+    <string name="enrollment_error_connect_timeout">Timed out: the Desktop is not responding</string>
+    <string name="enrollment_error_unreachable">Could not reach %1$s:%2$d. Check that the phone and the PC are on the same network.</string>
+    <string name="enrollment_error_refused">The Desktop refused the request. Show a new QR code on the PC, then try again.</string>
+    <string name="enrollment_error_server">The Desktop ran into an error. Try again.</string>
+    <string name="enrollment_error_submit_timeout">Timed out while sending</string>
+    <string name="enrollment_error_connection_lost">Connection to the Desktop lost</string>
+    <string name="enrollment_error_network">Network error. Check your connection, then try again.</string>
+    <!-- After the submission the Desktop is done with this QR code: a new one is needed, trying again with the same one leads nowhere. -->
+    <string name="enrollment_error_vault_locked">The vault was locked. Once NextSH is unlocked, start the enrollment again with a new QR code.</string>
+    <string name="enrollment_error_not_saved">The enrollment could not be saved on this phone. Start again with a new QR code.</string>
 
     <!-- ── Conflict resolution: Wave 4.2 ──────────────────────────────── -->
     <string name="title_conflict_resolution">Sync conflicts</string>
-    <string name="conflict_banner_pending">%1$d conflict(s) to resolve</string>
+    <string name="conflict_subtitle_resolved">All conflicts are resolved</string>
+    <!-- The zero case is handled by the code (conflict_subtitle_resolved). -->
+    <plurals name="conflict_subtitle_pending">
+        <item quantity="one">%1$d conflict to resolve</item>
+        <item quantity="other">%1$d conflicts to resolve</item>
+    </plurals>
+    <string name="conflict_detected_at">Detected %1$s</string>
+    <string name="conflict_detected_on">Detected on %1$s</string>
+    <string name="conflict_corrupted">Corrupted conflict: unreadable data</string>
+    <string name="action_ignore_conflict">Ignore this conflict</string>
+    <string name="conflict_empty_title">Everything is in sync</string>
+    <!-- Badge for the type of the conflicting item (SyncableEntityType), upper-cased when shown -->
+    <string name="conflict_entity_host">Host</string>
+    <string name="conflict_entity_tunnel">Tunnel</string>
+    <string name="conflict_entity_ssh_key">SSH key</string>
+    <string name="conflict_entity_snippet">Snippet</string>
+    <string name="conflict_entity_credential">Credential</string>
+    <string name="conflict_entity_custom_terminal_theme">Terminal theme</string>
     <string name="conflict_local_label">My version</string>
     <string name="conflict_remote_label">Remote version</string>
     <string name="action_keep_local">Keep my version</string>
     <string name="action_keep_remote">Take remote version</string>
     <string name="action_apply_resolutions">Apply resolutions (%1$d)</string>
     <string name="conflict_empty">No conflicts</string>
-    <string name="sync_banner_syncing">Syncing…</string>
-    <string name="sync_banner_error">Sync failed: %1$s</string>
-    <string name="sync_banner_offline">Offline</string>
-    <string name="sync_banner_synced_relative">Synced %1$s</string>
+    <string name="conflict_apply_failed">Some conflicts could not be resolved. Try again or ignore them.</string>
+    <!-- Conflict card: row names (ConflictField), upper-cased when shown. The other names are the
+         form ones: label_name, label_theme_name, section_authentication,
+         label_group, label_keepalive_interval, section_tunnel_type, label_tunnel_browser_path,
+         label_auto_start, label_snippet_command, label_theme_background, label_theme_foreground.
+         The ones here are shorter than the form label when that one would take two lines in half a card,
+         or more precise when the form label is ambiguous on a card (Host, Type). -->
+    <string name="conflict_field_address">Address</string>
+    <string name="conflict_field_favorite">Favorite</string>
+    <string name="conflict_field_auto_reconnect">Auto reconnect</string>
+    <string name="conflict_field_terminal_theme">Theme</string>
+    <string name="conflict_field_fido2_mode">FIDO2 mode</string>
+    <string name="conflict_field_credential_reference">Key or password</string>
+    <string name="conflict_field_forwarding">Port forwarding</string>
+    <string name="conflict_field_host_reference">Host ID</string>
+    <string name="conflict_field_open_browser_on_connect">Open browser</string>
+    <string name="conflict_field_keep_alive_after_browser_close">Active without browser</string>
+    <string name="conflict_field_key_type">Key type</string>
+    <string name="conflict_field_public_key">Public key</string>
+    <string name="conflict_field_category">Category</string>
+    <string name="conflict_field_credential_type">Credential type</string>
+    <string name="conflict_field_credential_id">ID</string>
+    <string name="conflict_field_encrypted_content">Encrypted</string>
+    <string name="conflict_field_deleted">Deleted</string>
+    <!-- Conflict card: values (ConflictValue) and title (ConflictTitle) -->
+    <string name="conflict_value_yes">Yes</string>
+    <string name="conflict_value_no">No</string>
+    <!-- Format: "30 s" -->
+    <string name="conflict_value_seconds">%1$d s</string>
+    <!-- Format: "Custom (a1b2c3d4…)", %1$s = the first 8 characters of the theme id -->
+    <string name="conflict_value_custom_theme">Custom (%1$s…)</string>
+    <string name="conflict_value_encrypted">Yes (content not shown)</string>
+    <string name="conflict_value_deleted_title">(deleted)</string>
+    <string name="conflict_value_credential_host_password">Password</string>
+    <string name="conflict_value_credential_ssh_private_key">SSH private key</string>
+    <string name="conflict_value_credential_ssh_private_key_passphrase">SSH key passphrase</string>
+    <string name="conflict_value_credential_certificate">SSH certificate</string>
 
     <!-- ── Split-screen ────────────────────────────────────────────────── -->
     <string name="action_split_screen">Split screen</string>
@@ -547,11 +1039,15 @@
     <string name="dialog_revoke_message">The shared secret will be wiped. You will need to re-enroll this device to sync again.</string>
     <string name="enrolled_status_revoked">Device %1$s revoked</string>
     <string name="enrolled_status_error">Revocation failed</string>
-    <string name="enrolled_host_label">Host: %1$s</string>
-    <string name="enrolled_ecdh_label">ECDH: %1$s</string>
-    <string name="enrolled_tls_label">TLS: %1$s…</string>
-    <string name="enrolled_enrolled_label">Enrolled %1$s</string>
-    <string name="enrolled_last_sync_label">Last sync: %1$s</string>
+    <!-- Subtitle counter; the zero case is handled by the code (enrolled_empty). -->
+    <plurals name="enrolled_devices_count">
+        <item quantity="one">%1$d enrolled device</item>
+        <item quantity="other">%1$d enrolled devices</item>
+    </plurals>
+    <!-- Labels of a device card, upper-cased when shown. ECDH and TLS stay acronyms. -->
+    <string name="enrolled_meta_host">Host</string>
+    <string name="enrolled_meta_enrolled">Enrolled</string>
+    <string name="enrolled_meta_last_sync">Last sync</string>
     <string name="enrolled_last_sync_never">never</string>
 
     <!-- ── LAN discovery (C4): "Search on network" button ──────────────── -->
@@ -563,20 +1059,27 @@
     <!-- ── FIDO2 enrollment (YubiKey hardware) ──────────────────────────── -->
     <string name="vault_action_enroll_fido2">Enroll FIDO2 key</string>
     <string name="title_fido2_enroll">Enroll a FIDO2 key</string>
-    <string name="fido2_enroll_intro">Generate an sk-ssh-ed25519 key protected by your YubiKey.\nA physical touch is required.</string>
+    <string name="fido2_enroll_intro">Generate an SSH key protected by your security key (Ed25519 if it supports it, otherwise ECDSA P-256).\nA physical touch is required.</string>
+    <string name="fido2_enroll_label_placeholder">My security key</string>
     <string name="fido2_enroll_show_advanced">Advanced options</string>
     <string name="fido2_enroll_hide_advanced">Hide options</string>
     <string name="fido2_enroll_advanced_title">Advanced options</string>
     <string name="fido2_enroll_label_rpid">Relying Party ID (rpId)</string>
-    <string name="fido2_enroll_rpid_hint">FIDO2 RP identifier. Default "ssh:" is recommended for SSH keys.</string>
+    <string name="fido2_enroll_rpid_hint">FIDO2 RP identifier. Default \"ssh:\" is recommended for SSH keys.</string>
     <string name="fido2_enroll_action_detect">Plug in / Tap your key</string>
     <string name="fido2_pin_optional_label">PIN (optional)</string>
-    <string name="fido2_pin_optional_hint">Leave blank if the key has no PIN configured.</string>
-    <string name="fido2_waiting_key_title">Plug in or tap your YubiKey</string>
+    <string name="fido2_pin_optional_hint">Leave blank if the key has no PIN configured. A PIN has at least 4 characters.</string>
+    <string name="fido2_waiting_key_title">Plug in or tap your security key</string>
     <string name="fido2_waiting_key_hint">USB-C: plug in the key. NFC: hold it against the phone until confirmation.</string>
     <string name="fido2_error_pin_required_hint">Enter your PIN in the form and try again.</string>
+    <string name="fido2_enroll_error_no_key">No security key was detected in time. Plug it in or hold it close to the phone, then try again.</string>
+    <string name="fido2_enroll_error_pin_required">This key is protected by a PIN.</string>
+    <string name="fido2_enroll_error_pin_not_set">This key has no PIN. Leave the PIN field blank and try again.</string>
+    <string name="fido2_enroll_error_unsupported_key">This security key cannot be used for SSH. Try another one, such as a YubiKey 5 or newer.</string>
+    <string name="fido2_enroll_error_name_missing">Give the key a name so you can recognize it later.</string>
+    <string name="fido2_enroll_error_not_saved">The key was created, but NextSH could not save it to the Vault. Try again.</string>
     <string name="fido2_enroll_success_title">Key enrolled!</string>
-    <string name="fido2_enroll_success_message">Key "%1$s" has been added to your vault.\nAssign it to an SSH host to use it.</string>
+    <string name="fido2_enroll_success_message">Key \"%1$s\" has been added to your Vault.\nAssign it to an SSH host to use it.</string>
 
     <!-- ── Vault: public key actions ───────────────────────────────────── -->
     <string name="vault_key_action_copy_pub">Copy public key</string>
@@ -584,6 +1087,91 @@
     <string name="vault_message_pub_key_copied">Public key copied</string>
     <string name="vault_message_pub_key_downloaded">Public key saved</string>
     <string name="error_pub_key_save_failed">Failed to save file</string>
+    <string name="vault_message_pub_key_corrected">The saved public key did not match the private key. NextSH copied the right one and fixed the key. If you copied the old one to a server, remove it.</string>
+    <string name="vault_message_pub_key_unverified">Public key copied without a check: NextSH cannot read the matching private key.</string>
+    <string name="vault_message_pub_key_biometric_missing">This biometric key does not exist on this device: its public key was not copied.</string>
+    <string name="vault_message_pub_key_unavailable">No public key is available for this key.</string>
+    <string name="dialog_import_summary_title">Import complete</string>
+    <string name="vault_import_nothing_restored">The backup did not contain anything to restore.</string>
+    <string name="vault_import_none_restored">Nothing was restored.</string>
+    <string name="vault_import_step_secrets">passwords, keys and certificates</string>
+    <string name="vault_import_step_known_hosts">known host fingerprints</string>
+    <string name="vault_import_step_settings">settings</string>
+    <string name="vault_import_warning_partial">Part of the restore did not complete (%1$s). The rest was restored: you can import this backup again.</string>
+    <plurals name="vault_import_warning_known_host_held">
+        <item quantity="one">%1$d fingerprint was not imported: it belongs to a host already on this device. The first connection will ask you to verify the server. %2$s</item>
+        <item quantity="other">%1$d fingerprints were not imported: they belong to hosts already on this device. The first connection will ask you to verify each server. %2$s</item>
+    </plurals>
+    <plurals name="vault_import_warning_public_keys_recomputed">
+        <item quantity="one">%1$d public key did not match its private key and was recomputed. If you copied the old one to a server, remove it.</item>
+        <item quantity="other">%1$d public keys did not match their private keys and were recomputed. If you copied the old ones to servers, remove them.</item>
+    </plurals>
+    <plurals name="vault_import_warning_local_keys_kept">
+        <item quantity="one">%1$d key already on this device kept its own key: the backup offered a different one.</item>
+        <item quantity="other">%1$d keys already on this device kept their own key: the backup offered a different one.</item>
+    </plurals>
+    <string name="dialog_export_done_title">Export complete</string>
+    <plurals name="vault_export_not_restorable">
+        <item quantity="one">%1$d item will not be restorable: invalid or invisible character, port out of range, size too large, or tunnel of an affected host. Check this item before relying on this backup.</item>
+        <item quantity="other">%1$d items will not be restorable: invalid or invisible character, port out of range, size too large, or tunnel of an affected host. Check these items before relying on this backup.</item>
+    </plurals>
+    <string name="field_problem_empty">This field is required.</string>
+    <string name="field_problem_too_long">Too long: 256 characters at most.</string>
+    <string name="field_problem_too_long_command">Too long: 64 KiB at most.</string>
+    <string name="field_problem_too_long_username">Too long: 4,096 characters at most.</string>
+    <string name="field_problem_control">Control character not allowed.</string>
+    <string name="field_problem_invisible">Invisible character not allowed (often copied from a web page).</string>
+    <string name="vault_import_row_format">%1$s: %2$d</string>
+    <string name="vault_import_row_hosts">Hosts</string>
+    <string name="vault_import_row_ssh_keys">SSH keys</string>
+    <string name="vault_import_row_tunnels">Tunnels</string>
+    <string name="vault_import_row_passwords">Passwords</string>
+    <string name="vault_import_row_private_keys">Private keys</string>
+    <string name="vault_import_row_key_passphrases">Key passphrases</string>
+    <string name="vault_import_row_certificates">Certificates</string>
+    <string name="vault_import_row_snippets">Snippets</string>
+    <string name="vault_import_row_custom_themes">Custom themes</string>
+    <string name="vault_import_row_known_hosts_added">Fingerprints added</string>
+    <string name="vault_import_row_known_hosts_known">Fingerprints already known</string>
+    <string name="vault_import_row_settings">Settings applied</string>
+    <plurals name="vault_import_warning_known_host_conflicts">
+        <item quantity="one">%1$d server has a different fingerprint in the backup than the one saved on this device. The fingerprint on this device was kept: %2$s.</item>
+        <item quantity="other">%1$d servers have a different fingerprint in the backup than the one saved on this device. The fingerprint on this device was kept: %2$s.</item>
+    </plurals>
+    <plurals name="vault_import_warning_more">
+        <item quantity="one">and %d other</item>
+        <item quantity="other">and %d others</item>
+    </plurals>
+    <plurals name="vault_import_warning_invalid">
+        <item quantity="one">%d item of the backup was invalid and was skipped.</item>
+        <item quantity="other">%d items of the backup were invalid and were skipped.</item>
+    </plurals>
+    <string name="vault_import_warning_newer_data">This backup contains data that a newer version of NextSH can restore. Update the app to recover it.</string>
+    <string name="vault_import_warning_language">The language you chose will apply the next time the app starts.</string>
+    <plurals name="vault_import_skipped_tunnels">
+        <item quantity="one">%d tunnel skipped: its host could not be found. Recreate the host, then import the backup again.</item>
+        <item quantity="other">%d tunnels skipped: their hosts could not be found. Recreate the hosts, then import the backup again.</item>
+    </plurals>
+    <string name="error_backup_wrong_passphrase">Incorrect passphrase, or the backup file is corrupted.</string>
+    <string name="error_backup_malformed">This backup file cannot be read: its content is invalid or in an unsupported format.</string>
+    <string name="error_backup_unsupported_version">This backup was created by a version of NextSH that this app does not support. Please update the app, then try again.</string>
+    <string name="vault_export_success">Backup exported successfully.</string>
+    <string name="vault_export_failed">The backup export failed: the file was not saved. Please try again.</string>
+    <string name="vault_export_interrupted">The export was interrupted before the file could be saved: the backup was not created. Please start the export again.</string>
+
+    <!-- ── Vault: creating a biometric key ────────────────────────────────── -->
+    <string name="vault_biometric_name_empty">The key name cannot be empty</string>
+    <string name="vault_biometric_generated">Biometric key \"%1$s\" generated (ECDSA P-256)</string>
+    <string name="vault_biometric_failed">The biometric key could not be created. Try again, and if the problem continues, restart the phone.</string>
+    <string name="vault_biometric_no_sensor">This phone has no compatible biometric sensor: a biometric key cannot be created on it.</string>
+    <string name="vault_biometric_not_enrolled">No fingerprint is enrolled on this phone, and the device PIN is not enough for these keys. Add a fingerprint in the phone settings, then try again.</string>
+    <string name="vault_biometric_unavailable">The biometric sensor is temporarily unavailable. Try again in a moment.</string>
+
+    <!-- ── Editing: item deleted while the form was open ──────────────────── -->
+    <string name="error_host_deleted_meanwhile">This host was deleted in the meantime, by a sync for example. Your changes were not saved.</string>
+    <string name="error_host_delete_failed">Could not delete this host. Please try again.</string>
+    <string name="error_tunnel_deleted_meanwhile">This tunnel was deleted in the meantime, by a sync for example. Your changes were not saved.</string>
+    <string name="error_tunnel_host_deleted_meanwhile">This tunnel\'s host was deleted in the meantime, by a sync for example. The tunnel was not saved.</string>
 
     <!-- ── First-launch onboarding (3-step stepper) ─────────────────────────
          Step 1 (Welcome) → Step 2 (Secure vault) → Step 3 (Optional sync)
@@ -603,5 +1191,25 @@
     <string name="firstlaunch_sync_skip">Skip</string>
     <string name="firstlaunch_sync_later_hint">You can set up sync later in Settings.</string>
     <string name="firstlaunch_error_auth_expired">Authentication session expired. Please try again.</string>
-    <string name="firstlaunch_error_key_invalidated">Vault key invalidated: your biometric data has changed.</string>
+    <string name="firstlaunch_error_key_invalidated">Vault key invalidated: the screen lock of your phone was removed or reset.</string>
+
+    <!-- ── Lock: lock screen, unlocking the vault, automatic lock ─────────────────────────────────── -->
+    <string name="vault_auth_unlock_title">Unlock NextSH</string>
+    <string name="vault_auth_unlock_subtitle">Authentication required to access the vault</string>
+    <string name="vault_unlock_error_auth_expired">Authentication session expired. Please try again.</string>
+    <string name="vault_unlock_error_key_invalidated">Vault key invalidated: the screen lock of your phone was removed or reset. The vault must be recreated. Restore your data from a .nextsh backup.</string>
+    <!-- Why the unlock dialog ended without authorizing, by the reason the system gives.
+         Closing the dialog says nothing: these are not messages of that case. -->
+    <string name="vault_unlock_error_prompt_failed">Authentication did not complete. Please try again.</string>
+    <string name="vault_unlock_error_lockout">Too many attempts. Wait a moment, then try again.</string>
+    <string name="vault_unlock_error_lockout_permanent">The sensor is locked. Unlock the phone with your passcode, then try again.</string>
+    <string name="vault_unlock_error_none_enrolled">No fingerprint or passcode is set up on this phone. Set one up in the phone settings, then try again.</string>
+    <string name="vault_unlock_error_sensor_unavailable">The sensor is not available right now. Try again in a moment.</string>
+    <string name="vault_unlock_error_no_sensor">This phone has no compatible sensor. Use the phone passcode to unlock NextSH.</string>
+    <string name="vault_unlock_error_open_failed">The vault could not be opened. Try again, and if the problem continues, restart the phone.</string>
+    <string name="label_auto_lock">Auto-lock</string>
+    <string name="settings_auto_lock_immediately">Immediately</string>
+    <string name="settings_auto_lock_minutes">%1$d min</string>
+    <string name="settings_auto_lock_hint">NextSH locks when you leave it for longer than this delay. Sessions and tunnels keep running behind the lock.</string>
+    <string name="action_lock_now">Lock now</string>
 </resources>

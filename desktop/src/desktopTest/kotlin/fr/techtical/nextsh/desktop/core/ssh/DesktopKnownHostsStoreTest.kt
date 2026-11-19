@@ -91,6 +91,75 @@ class DesktopKnownHostsStoreTest {
     }
 
     @Test
+    fun `exportEntries returns the raw keys`() {
+        store.upsert("host1:22", "EdDSA", byteArrayOf(0x01, 0x02))
+
+        val entry = store.exportEntries().single()
+
+        assertEquals("host1:22", entry.hostPort)
+        assertEquals("EdDSA", entry.algorithm)
+        assertContentEquals(byteArrayOf(0x01, 0x02), entry.publicKeyEncoded)
+        assertEquals(1_700_000_000L, entry.addedAt)
+        assertEquals("StoredKnownHost", entry.toString(), "no key bytes in a log line")
+    }
+
+    @Test
+    fun `importMissing adds an absent host, counts the same key and never replaces a different one`() {
+        store.upsert("same:22", "EdDSA", byteArrayOf(0x01))
+        store.upsert("changed:22", "EdDSA", byteArrayOf(0x02))
+
+        val result = store.importMissing(
+            listOf(
+                StoredKnownHost("new:22", "EdDSA", byteArrayOf(0x0A), addedAt = 42L),
+                StoredKnownHost("same:22", "EdDSA", byteArrayOf(0x01), addedAt = 42L),
+                StoredKnownHost("changed:22", "EdDSA", byteArrayOf(0x09), addedAt = 42L),
+                // Same bytes but another algorithm name: also a different key.
+                StoredKnownHost("same:22", "RSA", byteArrayOf(0x01), addedAt = 42L),
+            ),
+        )
+
+        assertEquals(1, result.added)
+        assertEquals(1, result.alreadyKnown)
+        assertEquals(listOf("changed:22", "same:22"), result.conflicts)
+        assertContentEquals(byteArrayOf(0x0A), store.getStored("new:22")?.second)
+        assertEquals(42L, store.exportEntries().first { it.hostPort == "new:22" }.addedAt)
+        assertContentEquals(byteArrayOf(0x02), store.getStored("changed:22")?.second, "the local key is kept")
+        assertEquals("EdDSA", store.getStored("same:22")?.first)
+    }
+
+    @Test
+    fun `a held address that is absent is not inserted, one that is stored keeps the normal outcome`() {
+        store.upsert("known:22", "EdDSA", byteArrayOf(0x01))
+        store.upsert("other:22", "EdDSA", byteArrayOf(0x02))
+
+        val result = NextShDatabase(driver).transactionWithResult {
+            store.importMissingInTransaction(
+                listOf(
+                    StoredKnownHost("absent:22", "EdDSA", byteArrayOf(0x0A), addedAt = 42L),
+                    StoredKnownHost("known:22", "EdDSA", byteArrayOf(0x01), addedAt = 42L),
+                    StoredKnownHost("other:22", "EdDSA", byteArrayOf(0x09), addedAt = 42L),
+                    StoredKnownHost("free:22", "EdDSA", byteArrayOf(0x0B), addedAt = 42L),
+                ),
+                heldDestinations = setOf("absent:22", "known:22", "other:22"),
+            )
+        }
+
+        assertEquals(listOf("absent:22"), result.held)
+        assertEquals(1, result.alreadyKnown)
+        assertEquals(listOf("other:22"), result.conflicts)
+        assertEquals(1, result.added)
+        assertNull(store.getStored("absent:22"))
+        assertNotNull(store.getStored("free:22"))
+    }
+
+    @Test
+    fun `importMissing gives an entry without a date the date of the import`() {
+        store.importMissing(listOf(StoredKnownHost("dateless:22", "EdDSA", byteArrayOf(0x01), addedAt = 0L)))
+
+        assertEquals(1_700_000_000L, store.exportEntries().single().addedAt)
+    }
+
+    @Test
     fun `sha256Fingerprint produces stable SHA256 base64 with prefix`() {
         val fp = DesktopKnownHostsStore.sha256Fingerprint(byteArrayOf(1, 2, 3))
         assertTrue(fp.startsWith("SHA256:"))

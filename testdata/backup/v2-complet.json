@@ -1,0 +1,161 @@
+{
+  "version": 2,
+  "exportedAt": 1762300000000,
+  "producer": { "platform": "DESKTOP", "appVersion": "1.1.0" },
+  "hosts": [
+    {
+      "id": "0b6c1d2e-0000-4000-8000-000000000001",
+      "label": "Web fixture",
+      "hostname": "web.fixture.test",
+      "username": "deploy",
+      "authType": "PASSWORD",
+      "credentialId": "fixture-cred-web"
+    },
+    {
+      "id": "0b6c1d2e-0000-4000-8000-000000000002",
+      "label": "Bastion fixture",
+      "hostname": "bastion.fixture.test",
+      "port": 2222,
+      "username": "ops",
+      "authType": "SSH_KEY",
+      "credentialId": "fixture-key-1",
+      "group": "Prod",
+      "isFavorite": true
+    },
+    {
+      "id": "0b6c1d2e-0000-4000-8000-000000000003",
+      "label": "Certificate fixture",
+      "hostname": "cert.fixture.test",
+      "username": "admin",
+      "authType": "CERTIFICATE",
+      "credentialId": "fixture-cert-1",
+      "terminalTheme": "7d1f0c2a-5b3e-4a6d-9c8b-1e2f3a4b5c6d"
+    }
+  ],
+  "sshKeys": [
+    {
+      "id": "fixture-key-1",
+      "label": "Fixture key",
+      "keyType": "ED25519",
+      "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuIMek2W/uP4SbNqKjs93fVaAPm7ymy6RBjcJZssbhi fixture"
+    }
+  ],
+  "tunnels": [
+    {
+      "id": "fixture-tunnel-1",
+      "label": "Database",
+      "hostId": "0b6c1d2e-0000-4000-8000-000000000001",
+      "type": "LOCAL_FORWARD",
+      "localPort": 5432,
+      "remoteHost": "127.0.0.1",
+      "remotePort": 5432
+    },
+    {
+      "id": "fixture-tunnel-2",
+      "label": "Proxy",
+      "hostId": "0b6c1d2e-0000-4000-8000-000000000002",
+      "type": "DYNAMIC_SOCKS5",
+      "localPort": 1080,
+      "remoteHost": "",
+      "remotePort": 0
+    }
+  ],
+  "credentials": {
+    "fixture-cred-web": "FIXTURE-password-web",
+    "fixture-cred-bastion": "FIXTURE-password-bastion"
+  },
+  "privateKeys": {
+    "fixture-key-1": "FIXTURE-NOT-A-REAL-PRIVATE-KEY"
+  },
+  "keyPassphrases": {
+    "fixture-key-1": "FIXTURE-key-passphrase"
+  },
+  "certificates": {
+    "fixture-cert-1": "FIXTURE-NOT-A-REAL-CERTIFICATE"
+  },
+  "snippets": [
+    {
+      "id": "fixture-snippet-1",
+      "label": "Redémarrer nginx",
+      "command": "sudo systemctl restart nginx",
+      "category": "Web",
+      "hostId": "0b6c1d2e-0000-4000-8000-000000000001",
+      "createdAt": 1762000000000
+    },
+    {
+      "id": "fixture-snippet-2",
+      "label": "Disk usage",
+      "command": "df -h\n\tdu -sh /var/log",
+      "createdAt": 1762000001000
+    },
+    {
+      "id": "fixture-snippet-3",
+      "label": "Uptime",
+      "command": "uptime",
+      "category": "System",
+      "createdAt": 0
+    }
+  ],
+  "customThemes": [
+    {
+      "id": "7d1f0c2a-5b3e-4a6d-9c8b-1e2f3a4b5c6d",
+      "name": "Fixture night",
+      "background": -15724528,
+      "foreground": -2039584,
+      "cursor": -12288,
+      "selectionBg": 1157627903,
+      "ansi": [
+        -16777216, -15658735, -14540254, -13421773,
+        -12303292, -11184811, -10066330, -8947849,
+        -7829368, -6710887, -5592406, -4473925,
+        -3355444, -2236963, -1118482, -1
+      ],
+      "createdAt": 1762000002000
+    }
+  ],
+  "knownHosts": [
+    {
+      "hostPort": "ed25519.fixture.test:22",
+      "keyType": "ssh-ed25519",
+      "publicKey": "AAAAC3NzaC1lZDI1NTE5AAAAIEuIMek2W/uP4SbNqKjs93fVaAPm7ymy6RBjcJZssbhi",
+      "addedAt": 1762000003000
+    },
+    {
+      "hostPort": "rsa.fixture.test:22",
+      "keyType": "ssh-rsa",
+      "publicKey": "AAAAB3NzaC1yc2EAAAADAQABAAABgQDNmhh4FY/XCf/v+jKGsH5W0IkoTzq2g249mQKpE40R9gnDIO/Sh2DZWjGipGAyWvlHggXn1xDBd2IIfkpzhk08T/wgWz+JTg9jqS6jztQ0QKhJDdpQhEy/uS4TzI7APt56JG/M+nV8VzzWlp5+kV569inkIgJjf2UXVKLlFljXPG9JSMKY9Y4iAmeO7dMKcVPS8QcxwUnUp1iC7G5+tyffwJL+IqSHxNx3C11O54t6QgFS3PlrzeE2vrMU125rgOb1p0W6WyG4WhRZzXGN1d+YbnBNDQWHo7VqTjliSKWIZvk1/cC2Kyyp9kwrwT7VTezWV8gFuU3+ZIFwLlxeSHh9DFyAGP5XHbRaiZbYoI98ZJcmHfAULeprutfjEMuekuOuGnJNIl9D0NV/cbDdk0sJL+2+sIg277nXVPyfnPf9Ca/ljJqZW2FjuiMJRR7HW4NATra8ViapCb2TdKmYuH9Iv7g6hjSnORe13Ejsk1BGlCYldXGjpFHUTz4v8dKK0hM=",
+      "addedAt": 1762000004000
+    },
+    {
+      "hostPort": "ecdsa256.fixture.test:22",
+      "keyType": "ecdsa-sha2-nistp256",
+      "publicKey": "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBItZyn1g+M6HbsGnbGmOW3NLq4WxdDPrbrVfbNarB2k2teIzQ/ZJ3/+f+V5hNYPJ1issB5z2wkKgyaLLdkyAgqc=",
+      "addedAt": 1762000005000
+    },
+    {
+      "hostPort": "ecdsa384.fixture.test:22",
+      "keyType": "ecdsa-sha2-nistp384",
+      "publicKey": "AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBLyxHFefqGVUDDMq6WDcEfn/VMtQuGZ+GXCCoXwJV0xRZM1woN/9M57yj89RliMSSdga/A0UNCmv9UGf0RZxsot74ZlbA3Cq/YUz4S/M7UlNEieGxE7PHIiUMbFSCU6N9w==",
+      "addedAt": 1762000006000
+    },
+    {
+      "hostPort": "ecdsa521.fixture.test:2222",
+      "keyType": "ecdsa-sha2-nistp521",
+      "publicKey": "AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBAA+f7cel2r/V2sWMl34joGmLj+Xo+9DQYlBszrBLlfdBqf/BgEQbn8eqeC0lXjNuz6rrAbEc3JeUclDoJiMt9CPQwGzmfOZhIFtVYV2V2aIP2b+SGaesyEV39gYjTOnslSy9UKo1HtyUifw2tTuNZPqfLUlmygRoNYxu8cNl0IhNNeoIQ==",
+      "addedAt": 1762000007000
+    }
+  ],
+  "settings": {
+    "common": { "connectionTimeoutSeconds": 15 },
+    "android": {
+      "terminalFontSize": 28,
+      "scrollbackLines": 20000,
+      "keepAliveIntervalSeconds": 45,
+      "autoReconnect": false
+    },
+    "desktop": {
+      "terminalFontSizePx": 16,
+      "language": "FR"
+    }
+  }
+}

@@ -302,7 +302,6 @@ class SkSshSignatureOpenSshInteropTest {
         }
     }
 
-    @Suppress("DEPRECATION")
     @Test
     fun `negative control - the legacy double-prefixed layout is refused`() {
         val exes = requireSshKeygens()
@@ -312,10 +311,16 @@ class SkSshSignatureOpenSshInteropTest {
             val msgFile = messageFile(message)
             val clientDataHash = sha256(signedData("file", message.toByteArray()))
             val raw = auth.sign(auth.authData(flags, counter) + clientDataHash)
-            val signature = SkSshSignature.create(type, raw, flags, counter)
-            // Ce que SkAuthMethod envoyait avant la correction : putSignature(type, encodeInner()),
+            // Ancien encodage "inner" (retire du code de production) : string(raw) || flags || counter,
+            // la signature ECDSA restant en DER.
+            val inner = Buffer.PlainBuffer()
+                .putString(raw)
+                .putByte(flags)
+                .putUInt32(counter.toLong())
+                .compactData
+            // Ce que SkAuthMethod envoyait avant la correction : putSignature(type, inner),
             // soit string(type) || string(string(raw) || flags || counter), DER ECDSA non converti.
-            val legacy = Buffer.PlainBuffer().putSignature(type.sshName, signature.encodeInner()).compactData
+            val legacy = Buffer.PlainBuffer().putSignature(type.sshName, inner).compactData
             val legacyBlob = Buffer.PlainBuffer(legacy).readBytes()
             val sigFile = writeSignature("legacy-${type.name}.sig", auth, legacyBlob)
             for (exe in exes) {

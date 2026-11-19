@@ -4,6 +4,7 @@
 package fr.techtical.nextsh.desktop.core.ssh
 
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import net.schmizz.sshj.SSHClient
 import java.io.IOException
 import java.io.InputStream
@@ -31,39 +32,97 @@ private const val TAG = "DesktopSocks5Server"
  *  - Auth : aucune (0x00)
  *  - Commandes : CONNECT (0x01)
  *  - Types d'adresse : IPv4 (0x01), domain name (0x03)
+ *
+ * Cycle de vie en deux temps : [start] lie la socket d'écoute, [startAccepting]
+ * lance la boucle d'acceptation. Aucune panne de cette boucle n'est survécue :
+ * toute fin qui n'est pas un [stop] est signalée à l'appelant, qui décide (le
+ * manager envoie le tunnel en reconnexion, comme pour la boucle d'écoute d'un
+ * tunnel local, `runLocalForwardListener`). SSHJ fait de même : il relance toute
+ * `SocketException` d'une socket encore ouverte, donc une panne persistante ne
+ * peut pas être distinguée d'une panne passagère. Différence assumée avec
+ * Android : l'acceptation démarre après l'enregistrement du tunnel, pas dans
+ * `start`.
  */
 class DesktopSocks5Server(
     private val client: SSHClient,
     private val localPort: Int,
+    // Test seam, binds the loopback address in production.
+    private val bindServerSocket: (Int) -> ServerSocket = { port ->
+        ServerSocket(port, 50, InetAddress.getByName("127.0.0.1"))
+    },
 ) {
 
+    @Volatile
     private var serverSocket: ServerSocket? = null
 
     @Volatile
     private var running = false
 
+    /**
+     * Lie la socket d'écoute sur `127.0.0.1:localPort`, sans rien accepter. Une
+     * `BindException` (port pris) remonte à l'appelant.
+     */
     fun start() {
         running = true
-        serverSocket = ServerSocket(localPort, 50, InetAddress.getByName("127.0.0.1"))
-        thread(name = "Socks5-Accept-$localPort", isDaemon = true) {
+        serverSocket = bindServerSocket(localPort)
+    }
+
+    /**
+     * Lance la boucle d'acceptation (un fil par connexion). Ne fait rien si le
+     * serveur est déjà arrêté : un [stop] arrivé avant cet appel ne laisse aucun
+     * fil. Toute fin de boucle qui n'est pas un [stop] ferme la socket d'écoute,
+     * appelle [onUnexpectedStop] une seule fois (sur le fil d'acceptation) puis,
+     * si c'est une `Error`, la relance : on ne l'avale pas. Rien n'est journalisé
+     * ici : l'appelant connaît l'identifiant du tunnel et journalise la classe de
+     * l'exception, jamais son message.
+     */
+    fun startAccepting(onUnexpectedStop: (Throwable) -> Unit) {
+        val listening = serverSocket
+        if (!running || listening == null) return
+        try {
+            thread(name = "Socks5-Accept-$localPort", isDaemon = true) {
+                acceptLoop(listening, onUnexpectedStop)
+            }
+        } catch (t: Throwable) {
+            // The loop thread could not even be created : same signal, on the calling thread.
+            reportUnexpectedStop(listening, onUnexpectedStop, t)
+            throw t
+        }
+    }
+
+    private fun acceptLoop(listening: ServerSocket, onUnexpectedStop: (Throwable) -> Unit) {
+        val failure: Throwable = try {
             while (running) {
+                val socket = listening.accept()
                 try {
-                    val socket = serverSocket?.accept() ?: break
                     thread(name = "Socks5-Handler-$localPort", isDaemon = true) {
                         try {
                             handleConnection(socket)
                         } catch (e: Exception) {
-                            Logger.w(TAG, "SOCKS5 handler error: ${e.message}")
+                            Logger.w(TAG, "SOCKS5 handler error (${errorClass(e)})")
                         } finally {
                             try { socket.close() } catch (_: Exception) {}
                         }
                     }
-                } catch (e: IOException) {
-                    if (running) Logger.w(TAG, "SOCKS5 accept error: ${e.message}")
-                    break
+                } catch (t: Throwable) {
+                    // Nobody owns the accepted socket yet.
+                    try { socket.close() } catch (_: Exception) {}
+                    throw t
                 }
             }
+            return
+        } catch (t: Throwable) {
+            t
         }
+        reportUnexpectedStop(listening, onUnexpectedStop, failure)
+        if (failure is Error) throw failure
+    }
+
+    /** Silent when [stop] was called (`running` is cleared BEFORE the socket is closed). */
+    private fun reportUnexpectedStop(listening: ServerSocket, onUnexpectedStop: (Throwable) -> Unit, failure: Throwable) {
+        if (!running) return
+        try { listening.close() } catch (_: Exception) {}
+        onUnexpectedStop(failure)
     }
 
     fun stop() {
@@ -141,7 +200,8 @@ class DesktopSocks5Server(
         val directConnection = try {
             client.newDirectConnection(targetHost, targetPort)
         } catch (e: Exception) {
-            Logger.w(TAG, "SOCKS5: impossible d'ouvrir canal SSH vers $targetHost:$targetPort : ${e.message}")
+            // The destination is a browsing target: neither its host nor its port is logged.
+            Logger.w(TAG, "SOCKS5: impossible d'ouvrir canal SSH vers la destination demandée (${errorClass(e)})")
             sendSocksError(output, 0x05)
             return
         }

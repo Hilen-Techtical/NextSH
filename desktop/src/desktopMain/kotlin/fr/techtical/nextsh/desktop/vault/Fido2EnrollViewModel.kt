@@ -23,41 +23,35 @@ import kotlinx.coroutines.withContext
 import java.util.Base64
 
 /**
- * Message affiché quand Windows Hello verrouille l'interface HID FIDO en accès exclusif.
+ * Reason of an enrollment failure. The dialog turns it into a text in the language of the app
+ * (the texts of the two Windows cases live in the string resources: `fido2_enroll_windows_hid_locked`
+ * and `fido2_enroll_pcsc_windows_bug`).
  *
- * Sur Windows 10 1903+ / 11, le service WebAuthn/Windows Hello revendique l'interface
- * HID FIDO (usage page 0xF1D0) des YubiKey. Les applis non-élevées voient HID:0.
- * Solutions sans UAC : (a) activer CCID dans YubiKey Manager → PC/SC, (b) lecteur NFC,
- * (c) lancer NextSH en admin (contournement temporaire, non recommandé en prod).
+ * [WindowsHidLocked]: on Windows 10 1903+ / 11, the WebAuthn/Windows Hello service claims the
+ * HID FIDO interface (usage page 0xF1D0) of YubiKeys, so non-elevated apps see HID:0. Solutions
+ * without UAC: enable CCID in YubiKey Manager (PC/SC), use an NFC reader, or run NextSH as
+ * administrator (temporary workaround). On Windows, Fido2ProviderDispatcher picks the native
+ * WebAuthn API when available, which avoids the problem: this case only concerns the YubiKit fallback.
  *
- * Note : une vraie intégration Windows WebAuthn API (ms-webauthn) permettrait d'éviter
- * ce problème sans droits admin, mais représente un travail significatif (Phase 3+).
+ * [PcscWindowsBug]: the Windows + Java PC/SC bug (SCARD_E_NOT_TRANSACTED / 0x80100027) persists
+ * even after the bypass attempts of [DirectPcscSmartCardConnection]. Same remark as above: only the
+ * YubiKit fallback can end here.
  */
-internal const val WINDOWS_HID_LOCKED_MESSAGE =
-    "Aucune YubiKey détectée. Sur Windows, l'accès direct USB HID FIDO est réservé à Windows Hello.\n\n" +
-    "Solutions :\n" +
-    "  (a) Activer l'interface CCID dans YubiKey Manager pour exposer la clé en PC/SC,\n" +
-    "  (b) Brancher via un lecteur NFC USB (mode CCID natif),\n" +
-    "  (c) Lancer NextSH en tant qu'administrateur (contournement temporaire)."
+enum class Fido2EnrollError {
+    LabelRequired,
+    PinEmpty,
+    WindowsHidLocked,
+    PcscWindowsBug,
+    NoDevice,
+    TouchTimeout,
+    UserCancelled,
 
-/**
- * Message affiché quand le bug PC/SC Windows+Java (SCARD_E_NOT_TRANSACTED / 0x80100027)
- * persiste même après les tentatives de bypass via [DirectPcscSmartCardConnection].
- *
- * Cause : JDK 17 + Windows PC/SC driver gèrent les transactions CCID différemment.
- * NextSH contourne déjà ce bug en évitant beginExclusive/endExclusive : si ce message
- * s'affiche, le driver Windows est dans un état très transitoire ou la clé est monopolisée.
- *
- * Backlog : Windows WebAuthn API native (ms-webauthn), Phase 3+.
- */
-internal const val PCSC_WINDOWS_BUG_MESSAGE =
-    "L'accès PC/SC à ta YubiKey échoue avec un bug connu Windows+Java " +
-    "(SCARD_E_NOT_TRANSACTED / 0x80100027).\n\n" +
-    "Workarounds :\n" +
-    "  (a) Débrancher et rebrancher la YubiKey, puis réessayer,\n" +
-    "  (b) Utiliser un lecteur NFC USB (mode CCID natif),\n" +
-    "  (c) Lancer NextSH en tant qu'administrateur.\n\n" +
-    "Note : l'implémentation Windows WebAuthn API native est prévue dans une prochaine version."
+    Ctap,
+    Transport,
+    Detection,
+    Unexpected,
+    Fido2Unknown,
+}
 
 /**
  * États possibles du dialog d'enrôlement FIDO2.
@@ -93,9 +87,15 @@ sealed class Fido2EnrollState {
     /**
      * Erreur survenue : l'utilisateur peut réessayer.
      *
-     * @param message Message d'erreur lisible par l'utilisateur.
+     * @param reason Cause de l'erreur, traduite à l'affichage.
+     * @param detail Message technique de la bibliothèque (cause, message CTAP), jamais traduit.
+     * @param ctapCode Code CTAP, pour [Fido2EnrollError.Ctap] seulement.
      */
-    data class Error(val message: String) : Fido2EnrollState()
+    data class Error(
+        val reason: Fido2EnrollError,
+        val detail: String? = null,
+        val ctapCode: Int? = null,
+    ) : Fido2EnrollState()
 }
 
 /**
@@ -132,7 +132,7 @@ class Fido2EnrollViewModel(
      * L'UI utilise ce flag pour :
      * - Masquer le champ PIN (Hello gère nativement)
      * - Changer le texte du bouton "Brancher la clé" → "Démarrer l'enrôlement"
-     * - Afficher "Windows va te demander de toucher ta clé…" en [Fido2EnrollState.WaitingForTouch]
+     * - Afficher "Windows va vous demander de toucher votre clé…" en [Fido2EnrollState.WaitingForTouch]
      *   au lieu de l'animation pulse Gold
      */
     val isWindowsWebAuthnMode: Boolean = runCatching {
@@ -157,7 +157,7 @@ class Fido2EnrollViewModel(
      */
     fun startDetection(label: String, rpId: String) {
         if (label.isBlank()) {
-            _state.value = Fido2EnrollState.Error("Le label est requis.")
+            _state.value = Fido2EnrollState.Error(Fido2EnrollError.LabelRequired)
             return
         }
         capturedLabel = label.trim()
@@ -177,25 +177,21 @@ class Fido2EnrollViewModel(
                     startMakeCredential(pin = null)
                 }
             } catch (e: YubiKitFidoManager.FidoError.WindowsHidLocked) {
-                _state.value = Fido2EnrollState.Error(WINDOWS_HID_LOCKED_MESSAGE)
+                _state.value = Fido2EnrollState.Error(Fido2EnrollError.WindowsHidLocked)
             } catch (e: YubiKitFidoManager.FidoError.PcscWindowsBug) {
-                _state.value = Fido2EnrollState.Error(PCSC_WINDOWS_BUG_MESSAGE)
+                _state.value = Fido2EnrollState.Error(Fido2EnrollError.PcscWindowsBug)
             } catch (e: YubiKitFidoManager.FidoError.NoDeviceFound) {
-                _state.value = Fido2EnrollState.Error(
-                    "Aucun YubiKey détecté. Branche ta clé via USB ou approche-la d'un lecteur NFC, puis réessaie."
-                )
+                _state.value = Fido2EnrollState.Error(Fido2EnrollError.NoDevice)
             } catch (e: YubiKitFidoManager.FidoError.TransportError) {
                 // Affiche seulement la première ligne du message technique (évite la stack trace brute)
-                val shortMsg = e.cause?.message?.lines()?.firstOrNull() ?: "erreur de transport"
-                _state.value = Fido2EnrollState.Error("Erreur de transport : $shortMsg")
+                _state.value = Fido2EnrollState.Error(
+                    Fido2EnrollError.Transport,
+                    detail = e.cause?.message?.lines()?.firstOrNull(),
+                )
             } catch (e: YubiKitFidoManager.FidoError) {
-                _state.value = Fido2EnrollState.Error(
-                    "Erreur de détection : ${e.message ?: "erreur inconnue"}"
-                )
+                _state.value = Fido2EnrollState.Error(Fido2EnrollError.Detection, detail = e.message)
             } catch (e: Exception) {
-                _state.value = Fido2EnrollState.Error(
-                    "Erreur inattendue : ${e.message ?: "erreur inconnue"}"
-                )
+                _state.value = Fido2EnrollState.Error(Fido2EnrollError.Unexpected, detail = e.message)
             }
         }
     }
@@ -209,7 +205,7 @@ class Fido2EnrollViewModel(
      */
     fun submitPin(pin: CharArray) {
         if (pin.isEmpty()) {
-            _state.value = Fido2EnrollState.Error("Le PIN ne peut pas être vide.")
+            _state.value = Fido2EnrollState.Error(Fido2EnrollError.PinEmpty)
             return
         }
         appScope.coroutineScope.launch {
@@ -279,36 +275,26 @@ class Fido2EnrollViewModel(
 
             _state.value = Fido2EnrollState.Success(skKey)
         } catch (e: YubiKitFidoManager.FidoError.WindowsHidLocked) {
-            _state.value = Fido2EnrollState.Error(WINDOWS_HID_LOCKED_MESSAGE)
+            _state.value = Fido2EnrollState.Error(Fido2EnrollError.WindowsHidLocked)
         } catch (e: YubiKitFidoManager.FidoError.PcscWindowsBug) {
-            _state.value = Fido2EnrollState.Error(PCSC_WINDOWS_BUG_MESSAGE)
+            _state.value = Fido2EnrollState.Error(Fido2EnrollError.PcscWindowsBug)
         } catch (e: YubiKitFidoManager.FidoError.NoDeviceFound) {
-            _state.value = Fido2EnrollState.Error(
-                "Aucun YubiKey détecté. Branche ta clé via USB ou approche-la d'un lecteur NFC, puis réessaie."
-            )
+            _state.value = Fido2EnrollState.Error(Fido2EnrollError.NoDevice)
         } catch (e: YubiKitFidoManager.FidoError.TouchTimeout) {
-            _state.value = Fido2EnrollState.Error(
-                "Timeout : tu n'as pas touché la clé à temps. Réessaie."
-            )
+            _state.value = Fido2EnrollState.Error(Fido2EnrollError.TouchTimeout)
         } catch (e: YubiKitFidoManager.FidoError.UserCancelled) {
-            _state.value = Fido2EnrollState.Error(
-                "PIN incorrect ou opération annulée."
-            )
+            _state.value = Fido2EnrollState.Error(Fido2EnrollError.UserCancelled)
         } catch (e: YubiKitFidoManager.FidoError.CtapError) {
-            _state.value = Fido2EnrollState.Error(
-                "Erreur CTAP (0x${e.code.toString(16).uppercase()}) : ${e.msg}"
-            )
+            _state.value = Fido2EnrollState.Error(Fido2EnrollError.Ctap, detail = e.msg, ctapCode = e.code)
         } catch (e: YubiKitFidoManager.FidoError.TransportError) {
-            val shortMsg = e.cause?.message?.lines()?.firstOrNull() ?: "erreur de transport"
-            _state.value = Fido2EnrollState.Error("Erreur de transport : $shortMsg")
+            _state.value = Fido2EnrollState.Error(
+                Fido2EnrollError.Transport,
+                detail = e.cause?.message?.lines()?.firstOrNull(),
+            )
         } catch (e: YubiKitFidoManager.FidoError) {
-            _state.value = Fido2EnrollState.Error(
-                e.message ?: "Erreur FIDO2 inconnue"
-            )
+            _state.value = Fido2EnrollState.Error(Fido2EnrollError.Fido2Unknown, detail = e.message)
         } catch (e: Exception) {
-            _state.value = Fido2EnrollState.Error(
-                "Erreur inattendue : ${e.message ?: "erreur inconnue"}"
-            )
+            _state.value = Fido2EnrollState.Error(Fido2EnrollError.Unexpected, detail = e.message)
         }
     }
 }

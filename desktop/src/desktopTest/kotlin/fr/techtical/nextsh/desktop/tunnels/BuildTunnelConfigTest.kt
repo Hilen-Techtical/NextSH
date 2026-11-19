@@ -28,6 +28,7 @@ class BuildTunnelConfigTest {
         autoStart: Boolean = false,
         openBrowserOnConnect: Boolean = false,
         keepAliveAfterBrowserClose: Boolean = true,
+        browserPath: String = "",
     ) = TunnelConfigState(
         tunnelId = tunnelId,
         label = label,
@@ -39,6 +40,7 @@ class BuildTunnelConfigTest {
         autoStart = autoStart,
         openBrowserOnConnect = openBrowserOnConnect,
         keepAliveAfterBrowserClose = keepAliveAfterBrowserClose,
+        browserPath = browserPath,
     )
 
     private fun stored(
@@ -46,6 +48,7 @@ class BuildTunnelConfigTest {
         isFavorite: Boolean = false,
         openBrowserOnConnect: Boolean = false,
         keepAliveAfterBrowserClose: Boolean = false,
+        browserPath: String = "/",
     ) = TunnelConfig(
         id = id,
         label = "Old label",
@@ -58,6 +61,7 @@ class BuildTunnelConfigTest {
         openBrowserOnConnect = openBrowserOnConnect,
         keepAliveAfterBrowserClose = keepAliveAfterBrowserClose,
         isFavorite = isFavorite,
+        browserPath = browserPath,
     )
 
     // -- Stored fields preserved ---------------------------------------------
@@ -189,6 +193,62 @@ class BuildTunnelConfigTest {
 
         assertTrue(result.openBrowserOnConnect)
         assertFalse(result.keepAliveAfterBrowserClose)
+    }
+
+    // -- Browser start path --------------------------------------------------
+
+    @Test
+    fun `LOCAL_FORWARD stores the normalized start path`() {
+        val cases = mapOf(
+            "" to "/",
+            "   " to "/",
+            "/" to "/",
+            "admin" to "/admin",
+            "  /admin  " to "/admin",
+            "?tab=2" to "/?tab=2",
+            "/d/abc?orgId=1#top" to "/d/abc?orgId=1#top",
+        )
+        for ((typed, expected) in cases) {
+            val result = buildTunnelConfig(form(type = TunnelType.LOCAL_FORWARD, browserPath = typed), null, "new")
+
+            assertEquals(expected, result.browserPath, "typed \"$typed\"")
+        }
+    }
+
+    @Test
+    fun `edit of a LOCAL_FORWARD replaces the stored start path with the form value`() {
+        val result = buildTunnelConfig(
+            form(tunnelId = "t1", type = TunnelType.LOCAL_FORWARD, browserPath = "new"),
+            stored(browserPath = "/old"),
+            newId = "new",
+        )
+
+        assertEquals("/new", result.browserPath)
+    }
+
+    @Test
+    fun `non LOCAL_FORWARD types store the root path whatever the field holds`() {
+        for (type in listOf(TunnelType.REMOTE_FORWARD, TunnelType.DYNAMIC_SOCKS5)) {
+            val fresh = buildTunnelConfig(form(type = type, browserPath = "/admin"), stored = null, newId = "new")
+            val edited = buildTunnelConfig(
+                form(tunnelId = "t1", type = type, browserPath = "/admin"),
+                stored(browserPath = "/old"),
+                newId = "new",
+            )
+
+            assertEquals("/", fresh.browserPath, "new $type")
+            assertEquals("/", edited.browserPath, "edited $type")
+        }
+    }
+
+    @Test
+    fun `an invalid start path is never stored, the root is used instead`() {
+        // save() rejects these before building; the builder is a guard behind it.
+        for (typed in listOf("/a b", "/a%zz", "/a#b#c", "/" + "a".repeat(600))) {
+            val result = buildTunnelConfig(form(browserPath = typed), stored = null, newId = "new")
+
+            assertEquals("/", result.browserPath, "typed of length ${typed.length}")
+        }
     }
 
     // -- Id ------------------------------------------------------------------

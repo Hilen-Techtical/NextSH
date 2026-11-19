@@ -28,6 +28,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.rememberDialogState
 import fr.techtical.nextsh.desktop.core.ssh.HostKeyVerifyResult
+import fr.techtical.nextsh.desktop.generated.resources.Res
+import fr.techtical.nextsh.desktop.generated.resources.action_cancel
+import fr.techtical.nextsh.desktop.generated.resources.host_key_dialog_algorithm
+import fr.techtical.nextsh.desktop.generated.resources.host_key_dialog_fingerprint_label
+import fr.techtical.nextsh.desktop.generated.resources.host_key_dialog_host
+import fr.techtical.nextsh.desktop.generated.resources.host_key_dialog_mismatch_heading
+import fr.techtical.nextsh.desktop.generated.resources.host_key_dialog_mismatch_hint
+import fr.techtical.nextsh.desktop.generated.resources.host_key_dialog_mismatch_window_title
+import fr.techtical.nextsh.desktop.generated.resources.host_key_dialog_received_fingerprint
+import fr.techtical.nextsh.desktop.generated.resources.host_key_dialog_stored_fingerprint
+import fr.techtical.nextsh.desktop.generated.resources.host_key_dialog_trust_and_connect
+import fr.techtical.nextsh.desktop.generated.resources.host_key_dialog_understood
+import fr.techtical.nextsh.desktop.generated.resources.host_key_dialog_unknown_heading
+import fr.techtical.nextsh.desktop.generated.resources.host_key_dialog_unknown_warning
+import fr.techtical.nextsh.desktop.generated.resources.host_key_dialog_unknown_window_title
 import fr.techtical.nextsh.desktop.theme.Burgundy
 import fr.techtical.nextsh.desktop.theme.ErrorRed
 import fr.techtical.nextsh.desktop.theme.Gold
@@ -37,6 +52,7 @@ import fr.techtical.nextsh.desktop.theme.TextPrimary
 import fr.techtical.nextsh.desktop.theme.TextSecondary
 import fr.techtical.nextsh.desktop.theme.White
 import fr.techtical.nextsh.desktop.window.WindowCaptureProtection
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * TOFU dialog: first connection to a host with an unknown public key.
@@ -53,7 +69,7 @@ fun UnknownHostKeyDialog(
 ) {
     DialogWindow(
         onCloseRequest = onReject,  // closing the window = rejecting
-        title = "Hôte inconnu",
+        title = stringResource(Res.string.host_key_dialog_unknown_window_title),
         state = rememberDialogState(size = DpSize(520.dp, 340.dp)),
         resizable = false,
     ) {
@@ -68,13 +84,13 @@ fun UnknownHostKeyDialog(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                text = "Première connexion à ${prompt.hostPort}",
+                text = stringResource(Res.string.host_key_dialog_unknown_heading, prompt.hostPort),
                 color = TextPrimary,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "L'empreinte SHA-256 de la clé serveur :",
+                text = stringResource(Res.string.host_key_dialog_fingerprint_label),
                 color = TextSecondary,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -85,12 +101,12 @@ fun UnknownHostKeyDialog(
                 fontFamily = FontFamily.Monospace,
             )
             Text(
-                text = "Algorithme : ${prompt.algorithm}",
+                text = stringResource(Res.string.host_key_dialog_algorithm, prompt.algorithm),
                 color = TextSecondary,
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
-                text = "Vérifie cette empreinte auprès de l'administrateur de l'hôte avant de faire confiance. Une empreinte inattendue peut indiquer une tentative d'interception (MITM).",
+                text = stringResource(Res.string.host_key_dialog_unknown_warning),
                 color = TextSecondary,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -100,14 +116,14 @@ fun UnknownHostKeyDialog(
                 horizontalArrangement = Arrangement.End,
             ) {
                 OutlinedButton(onClick = onReject) {
-                    Text("Annuler", color = TextPrimary)
+                    Text(stringResource(Res.string.action_cancel), color = TextPrimary)
                 }
                 Spacer(Modifier.width(12.dp))
                 Button(
                     onClick = onAccept,
                     colors = ButtonDefaults.buttonColors(containerColor = Burgundy, contentColor = White),
                 ) {
-                    Text("Faire confiance et connecter")
+                    Text(stringResource(Res.string.host_key_dialog_trust_and_connect))
                 }
             }
         }
@@ -126,7 +142,7 @@ fun HostKeyMismatchAlert(
 ) {
     DialogWindow(
         onCloseRequest = onDismiss,
-        title = "Alerte : empreinte SSH changée",
+        title = stringResource(Res.string.host_key_dialog_mismatch_window_title),
         state = rememberDialogState(size = DpSize(560.dp, 380.dp)),
         resizable = false,
     ) {
@@ -139,13 +155,13 @@ fun HostKeyMismatchAlert(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "Empreinte hôte modifiée : connexion refusée",
+                text = stringResource(Res.string.host_key_dialog_mismatch_heading),
                 color = ErrorRed,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "Hôte : ${mismatch.hostPort}",
+                text = stringResource(Res.string.host_key_dialog_host, mismatch.hostPort),
                 color = TextPrimary,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -156,14 +172,14 @@ fun HostKeyMismatchAlert(
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text("Empreinte stockée :", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(Res.string.host_key_dialog_stored_fingerprint), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
                 Text(mismatch.storedFingerprint, color = Gold, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(4.dp))
-                Text("Empreinte reçue :", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(Res.string.host_key_dialog_received_fingerprint), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
                 Text(mismatch.receivedFingerprint, color = ErrorRed, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
             }
             Text(
-                text = "Si vous êtes certain que le changement est légitime (rotation de clé, reinstallation serveur), supprimez l'ancienne entrée dans Paramètres → Hôtes connus, puis reconnectez.",
+                text = stringResource(Res.string.host_key_dialog_mismatch_hint),
                 color = TextSecondary,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -176,7 +192,7 @@ fun HostKeyMismatchAlert(
                     onClick = onDismiss,
                     colors = ButtonDefaults.buttonColors(containerColor = Burgundy, contentColor = White),
                 ) {
-                    Text("J'ai compris")
+                    Text(stringResource(Res.string.host_key_dialog_understood))
                 }
             }
         }

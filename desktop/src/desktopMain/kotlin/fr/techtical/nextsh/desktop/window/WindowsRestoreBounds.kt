@@ -9,6 +9,7 @@ import com.sun.jna.platform.win32.User32
 import com.sun.jna.platform.win32.WinDef.HWND
 import com.sun.jna.platform.win32.WinUser
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import java.awt.Rectangle
@@ -115,7 +116,7 @@ object WindowsRestoreBounds {
             throw e
         } catch (e: Throwable) {
             // JNA load failure, no native peer, AWT error: never let it reach the UI.
-            Logger.w(TAG, "restore bounds not applied: ${e.message}")
+            Logger.w(TAG, "restore bounds not applied (${errorClass(e)})")
         }
     }
 
@@ -138,7 +139,12 @@ object WindowsRestoreBounds {
         val refPhysical = Rectangle(current.left, current.top, current.right - current.left, current.bottom - current.top)
         val physical = mapToPhysical(target(), refLogical, refPhysical)
         if (physical == null) {
-            Logger.w(TAG, "restore bounds not applied: unusable reference (logical=$refLogical physical=$refPhysical)")
+            // Sizes only: a Rectangle prints its position on the screen too.
+            Logger.w(
+                TAG,
+                "restore bounds not applied: unusable reference " +
+                    "(logical ${refLogical.width}x${refLogical.height}, physical ${refPhysical.width}x${refPhysical.height})",
+            )
             return true
         }
         if (physical == refPhysical) return true

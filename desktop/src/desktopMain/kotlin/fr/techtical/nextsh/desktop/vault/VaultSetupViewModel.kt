@@ -16,7 +16,7 @@ import java.util.Arrays
 
 data class VaultSetupState(
     val isSubmitting: Boolean = false,
-    val error: String? = null,
+    val error: VaultError? = null,
     /**
      * One-time recovery mnemonic produced by [VaultPinManager.setupNewVault].
      * Populated on success so the UI pass can display it for the user to write
@@ -48,11 +48,11 @@ class VaultSetupViewModel(
     fun submit(pin: CharArray, confirm: CharArray, onSuccess: () -> Unit) {
         try {
             if (pin.size < 4) {
-                _state.value = _state.value.copy(error = "La Passphrase doit contenir au moins 4 caractères")
+                _state.value = _state.value.copy(error = VaultError.PASSPHRASE_TOO_SHORT)
                 return
             }
             if (!pin.contentEquals(confirm)) {
-                _state.value = _state.value.copy(error = "Les deux Passphrases ne correspondent pas")
+                _state.value = _state.value.copy(error = VaultError.PASSPHRASE_MISMATCH)
                 return
             }
             _state.value = _state.value.copy(isSubmitting = true, error = null)
@@ -68,7 +68,7 @@ class VaultSetupViewModel(
                 } else {
                     _state.value = _state.value.copy(
                         isSubmitting = false,
-                        error = result.exceptionOrNull()?.message ?: "Échec de l'initialisation",
+                        error = VaultError.SETUP_FAILED,
                     )
                 }
             }

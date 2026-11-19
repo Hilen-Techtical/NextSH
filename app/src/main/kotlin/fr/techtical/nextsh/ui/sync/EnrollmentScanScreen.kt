@@ -9,6 +9,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -172,7 +173,11 @@ fun EnrollmentScanScreen(
                 }
 
                 is ScannedEnrollment.Error -> {
-                    ErrorContent(message = s.message, onBack = onBack, onRetry = { viewModel.retry() })
+                    ErrorContent(
+                        message = stringResource(enrollmentErrorMessageRes(s.reason), *enrollmentErrorMessageArgs(s.reason)),
+                        onBack = onBack,
+                        onRetry = { viewModel.retry() },
+                    )
                 }
             }
         }
@@ -491,6 +496,26 @@ private fun SuccessContent(
 }
 
 // ── Erreur ────────────────────────────────────────────────────────────────────
+
+/** La phrase qu'un non-technicien lit quand l'enrôlement s'est arrêté pour [reason]. */
+@StringRes
+internal fun enrollmentErrorMessageRes(reason: EnrollmentError): Int = when (reason) {
+    EnrollmentError.InvalidQr -> R.string.enrollment_error_invalid_qr
+    EnrollmentError.InvalidResponse -> R.string.enrollment_error_invalid_response
+    EnrollmentError.ConnectTimeout -> R.string.enrollment_error_connect_timeout
+    is EnrollmentError.Unreachable -> R.string.enrollment_error_unreachable
+    EnrollmentError.Refused -> R.string.enrollment_error_refused
+    EnrollmentError.ServerFailure -> R.string.enrollment_error_server
+    EnrollmentError.SubmitTimeout -> R.string.enrollment_error_submit_timeout
+    EnrollmentError.ConnectionLost -> R.string.enrollment_error_connection_lost
+    EnrollmentError.Network -> R.string.enrollment_error_network
+    EnrollmentError.VaultLocked -> R.string.enrollment_error_vault_locked
+    EnrollmentError.NotSaved -> R.string.enrollment_error_not_saved
+}
+
+/** Les arguments de [enrollmentErrorMessageRes] : l'adresse essayée, pour un Desktop injoignable. */
+internal fun enrollmentErrorMessageArgs(reason: EnrollmentError): Array<Any> =
+    if (reason is EnrollmentError.Unreachable) arrayOf<Any>(reason.host, reason.port) else emptyArray()
 
 @Composable
 private fun ErrorContent(

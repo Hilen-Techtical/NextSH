@@ -132,7 +132,7 @@ class KeePassXcImporterTest {
 
     @Test
     fun `detects xml even with leading whitespace and bom`() {
-        val xml = "﻿  \n<KeePassFile><Root><Group><Name>g</Name>" +
+        val xml = "\uFEFF  \n<KeePassFile><Root><Group><Name>g</Name>" +
             "<Entry><String><Key>Title</Key><Value>x</Value></String>" +
             "<String><Key>URL</Key><Value>x.example</Value></String></Entry>" +
             "</Group></Root></KeePassFile>"

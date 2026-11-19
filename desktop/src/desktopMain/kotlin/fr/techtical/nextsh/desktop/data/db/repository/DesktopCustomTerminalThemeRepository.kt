@@ -50,6 +50,39 @@ class DesktopCustomTerminalThemeRepository(db: NextShDatabase) : CustomTerminalT
         )
     }
 
+    /**
+     * Backup restore path, to be called inside a transaction of the caller (not a suspend function on
+     * purpose: a SQLDelight transaction is bound to its thread). NOT [save], which ticks even when the
+     * content is identical.
+     *
+     * The id is looked up tombstones included. A LIVE row that already equals [theme] is left untouched
+     * (restoring the same backup twice is not an edit). Otherwise the row is written live, with the clock
+     * stored for that id (tombstone included, `{}` for a new id) ticked by this device, so this version
+     * also wins on the peers. The backup validator guarantees 16 ANSI entries: a palette of another
+     * size is refused here instead of being padded.
+     */
+    internal fun restoreInTransaction(theme: CustomTerminalTheme) {
+        require(theme.ansi.size == CustomTerminalTheme.ANSI_SIZE) { "A restored theme needs 16 ANSI colors" }
+        val now = System.currentTimeMillis()
+        val existing = q.selectByIdIncludingDeleted(theme.id).executeAsOneOrNull()
+        if (existing != null && existing.deleted == 0L && toDomain(existing) == theme) return
+        val newClock = VectorClockCodec.decode(existing?.vectorClock ?: "{}").tick(DeviceIdentity.deviceId(), now)
+        q.insert(
+            id = theme.id,
+            name = theme.name,
+            background = theme.background.toLong(),
+            foreground = theme.foreground.toLong(),
+            cursor = theme.cursor.toLong(),
+            selectionBg = theme.selectionBg.toLong(),
+            ansi = encodeAnsi(theme.ansi),
+            createdAt = theme.createdAt,
+            vectorClock = VectorClockCodec.encode(newClock),
+            deleted = 0L,
+            deletedAt = null,
+            updatedAt = now,
+        )
+    }
+
     override suspend fun delete(id: String) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val existing = q.selectAllIncludingDeleted().executeAsList().firstOrNull { it.id == id }

@@ -15,7 +15,9 @@ import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.sftp.FileAttributes
 import net.schmizz.sshj.sftp.FileMode
 import net.schmizz.sshj.sftp.RemoteResourceInfo
+import net.schmizz.sshj.sftp.Response
 import net.schmizz.sshj.sftp.SFTPClient
+import net.schmizz.sshj.sftp.SFTPException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -113,9 +115,9 @@ class DesktopSftpManagerTest {
 
     @Test
     fun `isValidEntryName accepts ordinary names including plus and percent`() {
-        val accepted = listOf("x+y", "100%", "%2e%2e", "a%20b", "a b", "..x", "x..", "...", ".hidden")
+        val accepted = listOf("x+y", "100%", "%2e%2e", "a%20b", "a b", "..x", "x..", "...", ".hidden", "é".repeat(127))
         for ((index, name) in accepted.withIndex()) {
-            assertTrue(pureManager.isValidEntryName(name), "accepted name #$index was rejected")
+            assertTrue(isValidEntryName(name), "accepted name #$index was rejected")
         }
     }
 
@@ -124,9 +126,11 @@ class DesktopSftpManagerTest {
         val rejected = listOf(
             "", "   ", ".", "..", " .. ", "../x", "a/b", "a\\b", "/", "\\", "x/", "/x",
             "x${Char(0)}y", "x${Char(1)}y", "x${Char(10)}y", "x${Char(0x7f)}y",
+            // A C1 control (U+0085, next line) and a name of 256 bytes in 128 characters.
+            "x${Char(0x85)}y", "é".repeat(128),
         )
         for ((index, name) in rejected.withIndex()) {
-            assertFalse(pureManager.isValidEntryName(name), "rejected name #$index was accepted")
+            assertFalse(isValidEntryName(name), "rejected name #$index was accepted")
         }
     }
 
@@ -172,6 +176,8 @@ class DesktopSftpManagerTest {
         val sftp = mockk<SFTPClient>()
         val from = mutableListOf<String>()
         val to = mutableListOf<String>()
+        // The new name is looked up first, and the literal path is the only one stubbed.
+        every { sftp.lstat("/home/u/100%41") } throws SFTPException(Response.StatusCode.NO_SUCH_FILE, "No such file")
         every { sftp.rename(capture(from), capture(to)) } just Runs
         val manager = managerWith(sftp)
 
@@ -251,6 +257,8 @@ class DesktopSftpManagerTest {
     fun `createDirectory creates names with plus and percent literally`() = runTest {
         val sftp = mockk<SFTPClient>()
         val created = mutableListOf<String>()
+        // The name is looked up before the folder is made: nothing is there.
+        every { sftp.statExistence(any()) } returns null
         every { sftp.mkdir(capture(created)) } just Runs
         val manager = managerWith(sftp)
         val names = listOf("x+y", "100%", "%2e%2e", "a%20b", "..x", "x..", ".hidden", "a b")
@@ -267,6 +275,7 @@ class DesktopSftpManagerTest {
     fun `createDirectory joins the name to the parent without doubling or dropping a slash`() = runTest {
         val sftp = mockk<SFTPClient>()
         val created = mutableListOf<String>()
+        every { sftp.statExistence(any()) } returns null
         every { sftp.mkdir(capture(created)) } just Runs
         val manager = managerWith(sftp)
 

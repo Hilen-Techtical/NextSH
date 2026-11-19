@@ -7,6 +7,7 @@ import fr.techtical.nextsh.desktop.core.diagnostics.StartupTrace
 import fr.techtical.nextsh.desktop.data.preferences.DesktopSettingsStore
 import fr.techtical.nextsh.shared.util.AppScope
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -31,6 +32,12 @@ private const val STARTING_SETTLE_TIMEOUT_MS = 10_000L
 
 /** Tick interval of the network re-bind watcher (C4): see [startNetworkWatcher]. */
 private const val NETWORK_WATCH_INTERVAL_MS = 20_000L
+
+/**
+ * Name of a server state for the log. `State.toString()` is never logged: [LanSyncServer.State.Listening]
+ * carries the LAN address and [LanSyncServer.State.Error] a free text reason.
+ */
+private fun stateName(state: LanSyncServer.State): String = state::class.simpleName ?: "State"
 
 /**
  * Orchestre le démarrage et l'arrêt du [LanSyncServer] en fonction de deux conditions :
@@ -126,10 +133,10 @@ class LanSyncServerLifecycle(
         }
         val current = server.state.value
         if (current is LanSyncServer.State.Listening || current is LanSyncServer.State.Starting) {
-            Logger.d(TAG, "ensureRunning ignoré : serveur déjà actif ($current)")
+            Logger.d(TAG, "ensureRunning ignoré : serveur déjà actif (${stateName(current)})")
             return
         }
-        Logger.d(TAG, "ensureRunning : relance du serveur (état=$current)")
+        Logger.d(TAG, "ensureRunning : relance du serveur (état=${stateName(current)})")
         startWithRetry()
     }
 
@@ -163,7 +170,7 @@ class LanSyncServerLifecycle(
                 // probe or from a server call would otherwise end the loop for good, silently,
                 // and only under exactly the degraded conditions the watcher exists for.
                 runCatching { checkNetworkChange() }
-                    .onFailure { Logger.w(TAG, "Tick du watcher réseau en échec, poursuite : ${it.message}") }
+                    .onFailure { Logger.w(TAG, "Tick du watcher réseau en échec, poursuite (${errorClass(it)})") }
             }
         }
     }
@@ -187,7 +194,7 @@ class LanSyncServerLifecycle(
 
         when {
             current is LanSyncServer.State.Listening && detected != null && detected != current.addr -> {
-                Logger.d(TAG, "Changement d'IP détecté (${current.addr} → $detected) : re-bind du serveur de sync")
+                Logger.d(TAG, "Changement d'adresse LAN détecté : re-bind du serveur de sync")
                 server.stop()
                 ensureRunning()
             }
@@ -263,12 +270,12 @@ class LanSyncServerLifecycle(
                 if (attempt >= MAX_START_ATTEMPTS) {
                     Logger.w(
                         TAG,
-                        "Échec du démarrage du serveur de sync après $attempt tentatives : état laissé en $settled",
+                        "Échec du démarrage du serveur de sync après $attempt tentatives : état laissé en ${stateName(settled)}",
                     )
                     return@launch
                 }
 
-                Logger.d(TAG, "Démarrage échoué (état=$settled) : nouvelle tentative dans ${backoff}ms")
+                Logger.d(TAG, "Démarrage échoué (état=${stateName(settled)}) : nouvelle tentative dans ${backoff}ms")
                 delay(backoff)
                 backoff = (backoff * 2).coerceAtMost(MAX_BACKOFF_MS)
             }

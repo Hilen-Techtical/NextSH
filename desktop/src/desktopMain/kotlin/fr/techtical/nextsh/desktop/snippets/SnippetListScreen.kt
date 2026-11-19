@@ -67,11 +67,13 @@ import fr.techtical.nextsh.desktop.generated.resources.snippets_empty_title
 import fr.techtical.nextsh.desktop.generated.resources.snippets_filter_all
 import fr.techtical.nextsh.desktop.generated.resources.snippets_message_deleted
 import fr.techtical.nextsh.desktop.generated.resources.snippets_message_saved
+import fr.techtical.nextsh.desktop.generated.resources.snippets_error_invalid_field
 import fr.techtical.nextsh.desktop.generated.resources.snippets_error_unknown
 import fr.techtical.nextsh.desktop.generated.resources.snippets_subtitle
 import fr.techtical.nextsh.desktop.generated.resources.snippets_title
 import fr.techtical.nextsh.desktop.generated.resources.snippets_tooltip_delete
 import fr.techtical.nextsh.desktop.generated.resources.snippets_tooltip_edit
+import fr.techtical.nextsh.desktop.scope.rememberScreenViewModel
 import fr.techtical.nextsh.desktop.theme.Border1
 import fr.techtical.nextsh.desktop.theme.Border2
 import fr.techtical.nextsh.desktop.theme.Burgundy
@@ -106,7 +108,7 @@ import org.jetbrains.compose.resources.stringResource
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SnippetListScreen(onBack: () -> Unit) {
-    val viewModel = remember { SnippetListViewModel() }
+    val viewModel = rememberScreenViewModel { SnippetListViewModel() }
     val uiState by viewModel.uiState.collectAsState()
 
     // Auto-dismiss success messages after 2.5 s, errors stay until user acts
@@ -122,6 +124,7 @@ fun SnippetListScreen(onBack: () -> Unit) {
     val savedMsg = stringResource(Res.string.snippets_message_saved)
     val deletedMsg = stringResource(Res.string.snippets_message_deleted)
     val errorUnknownMsg = stringResource(Res.string.snippets_error_unknown)
+    val errorInvalidFieldMsg = stringResource(Res.string.snippets_error_invalid_field)
 
     Column(modifier = Modifier.fillMaxSize().background(NearBlack)) {
         PageHeader(
@@ -160,6 +163,7 @@ fun SnippetListScreen(onBack: () -> Unit) {
                 "snippets_message_saved" -> savedMsg
                 "snippets_message_deleted" -> deletedMsg
                 "snippets_error_unknown" -> errorUnknownMsg
+                "snippets_error_invalid_field" -> errorInvalidFieldMsg
                 else -> msg
             }
             StatusBanner(text = displayMsg, isError = isError, onDismiss = { viewModel.clearMessage() })

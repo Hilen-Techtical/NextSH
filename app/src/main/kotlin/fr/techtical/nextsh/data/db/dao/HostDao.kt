@@ -5,8 +5,6 @@ package fr.techtical.nextsh.data.db.dao
 
 import androidx.room.Dao
 import androidx.room.Delete
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import androidx.room.Upsert
@@ -28,8 +26,15 @@ interface HostDao {
     @Query("SELECT * FROM hosts WHERE id = :id AND deleted = 0")
     suspend fun getById(id: String): HostEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(host: HostEntity)
+    // Labels of the live hosts that connect with the key [keyId], for the warning shown before the
+    // key is deleted (read only). [authTypes] are the AuthType names whose credentialId is a key id:
+    // a PASSWORD host may hold a key id by mistake (1.0.0 defect) and does not use that key. NOCASE
+    // so that "alpha" comes before "Zeta" (the default BINARY collation puts every capital first).
+    @Query(
+        "SELECT label FROM hosts WHERE credentialId = :keyId AND authType IN (:authTypes) " +
+            "AND deleted = 0 ORDER BY label COLLATE NOCASE ASC, id ASC"
+    )
+    suspend fun getLabelsUsingKey(keyId: String, authTypes: List<String>): List<String>
 
     @Update
     suspend fun update(host: HostEntity)
@@ -67,7 +72,7 @@ interface HostDao {
     /**
      * Insert, or UPDATE in place on primary-key conflict. Never REPLACE a host that may exist:
      * REPLACE is delete + insert and tunnels.hostId is a CASCADE foreign key, so its tunnels
-     * would be wiped. [insert] is REPLACE: only safe for a new id.
+     * would be wiped. There is no REPLACE insert on this DAO on purpose (SyncUpsertGuardTest).
      */
     @Upsert
     suspend fun upsert(host: HostEntity)

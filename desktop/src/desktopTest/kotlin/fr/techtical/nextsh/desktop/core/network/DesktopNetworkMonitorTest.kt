@@ -97,6 +97,59 @@ class DesktopNetworkMonitorTest {
         testScope.coroutineContext[Job]?.cancel()
     }
 
+    private fun monitorOn(snapshot: () -> Set<String>) =
+        DesktopNetworkMonitor(networkPredicate = { true }, pollIntervalMs = 100L, interfaceSnapshot = snapshot)
+
+    @Test
+    fun `the interface epoch moves when an interface is added, removed or gets a new address`() {
+        var current = setOf("wlan0|192.168.1.10", "vmnet1|192.168.56.1")
+        val monitor = monitorOn { current }
+        assertEquals(0L, monitor.interfaceEpoch.value)
+
+        current = current + "eth0|10.0.0.5"
+        monitor.pollNow()
+        assertEquals(1L, monitor.interfaceEpoch.value, "added")
+
+        current = current - "wlan0|192.168.1.10"
+        monitor.pollNow()
+        assertEquals(2L, monitor.interfaceEpoch.value, "removed")
+
+        current = current + "wlan0|192.168.1.77"
+        monitor.pollNow()
+        assertEquals(3L, monitor.interfaceEpoch.value, "back with a new address")
+    }
+
+    @Test
+    fun `the interface epoch stays put when the set is the same`() {
+        var current = setOf("wlan0|192.168.1.10", "vmnet1|192.168.56.1")
+        val monitor = monitorOn { current }
+
+        monitor.pollNow()
+        // Same content, built again, in another order.
+        current = setOf("vmnet1|192.168.56.1", "wlan0|192.168.1.10")
+        monitor.pollNow()
+
+        assertEquals(0L, monitor.interfaceEpoch.value)
+    }
+
+    @Test
+    fun `an unreadable interface snapshot changes nothing`() {
+        var fail = false
+        val monitor = monitorOn { if (fail) throw IllegalStateException("boom") else setOf("wlan0|192.168.1.10") }
+
+        fail = true
+        monitor.pollNow()
+        fail = false
+        monitor.pollNow()
+
+        assertEquals(0L, monitor.interfaceEpoch.value, "the previous snapshot was kept")
+    }
+
+    @Test
+    fun `defaultInterfaceSnapshot does not throw on real network`() {
+        DesktopNetworkMonitor.defaultInterfaceSnapshot()
+    }
+
     @Test
     fun `defaultPredicate does not throw on real network`() {
         // Smoke test: the default predicate is allowed to return true or false,

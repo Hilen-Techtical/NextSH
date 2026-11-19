@@ -3,6 +3,11 @@
 
 package fr.techtical.nextsh.desktop.data.preferences
 
+import fr.techtical.nextsh.desktop.core.vault.BackupSettingsAccess
+import fr.techtical.nextsh.desktop.core.vault.BackupSettingsApplyResult
+import fr.techtical.nextsh.shared.core.backup.BackupCommonSettings
+import fr.techtical.nextsh.shared.core.backup.BackupDesktopSettings
+import fr.techtical.nextsh.shared.core.backup.BackupSettings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,7 +21,9 @@ enum class LanguagePref { SYSTEM, FR, EN }
  * in the user registry on Windows, ~/.java/.userPrefs on Linux/macOS).
  * Mirrors the keys and defaults of the Android SettingsDataStore.
  */
-class DesktopSettingsStore {
+class DesktopSettingsStore(
+    private val prefs: Preferences = Preferences.userRoot().node("fr/techtical/nextsh"),
+) : BackupSettingsAccess {
 
     /**
      * Window geometry persisted between sessions. Sentinel value -1 means
@@ -68,8 +75,6 @@ class DesktopSettingsStore {
          */
         val windowGeometry: WindowGeometry = WindowGeometry(),
     )
-
-    private val prefs: Preferences = Preferences.userRoot().node("fr/techtical/nextsh")
 
     private val _settings = MutableStateFlow(load())
     val settings: StateFlow<Settings> = _settings.asStateFlow()
@@ -133,6 +138,55 @@ class DesktopSettingsStore {
         _settings.value = _settings.value.copy(windowGeometry = geometry)
     }
 
+    // ── Backup (.nextsh) ──────────────────────────────────────────────────────
+
+    /**
+     * The allow-list written into a backup: the connection timeout (`common`) and the font size and
+     * the language (`desktop`; the tray toggle is not carried). A stored value outside the domain the backup
+     * format accepts is left out rather than exported (the importer would only count it as invalid).
+     * The security settings are never part of it.
+     */
+    override fun snapshot(): BackupSettings {
+        val s = _settings.value
+        return BackupSettings(
+            common = BackupCommonSettings(
+                connectionTimeoutSeconds = s.connectionTimeout.takeIf { it in BACKUP_TIMEOUTS },
+            ),
+            desktop = BackupDesktopSettings(
+                terminalFontSizePx = s.terminalFontSize.takeIf { it in BACKUP_FONT_SIZES },
+                language = s.languagePreference.name,
+            ),
+        )
+    }
+
+    /**
+     * Applies the `common` and `desktop` sections of a backup, nothing else. Each value is checked against
+     * its domain again (no clamping): the importer already validated, this is the last line of defence.
+     * The language only takes effect at the next start.
+     */
+    override fun apply(settings: BackupSettings?): BackupSettingsApplyResult {
+        if (settings == null) return BackupSettingsApplyResult(applied = 0, languageChanged = false)
+        var applied = 0
+        var languageChanged = false
+
+        settings.common?.connectionTimeoutSeconds?.takeIf { it in BACKUP_TIMEOUTS }?.let {
+            updateConnectionTimeout(it)
+            applied++
+        }
+        settings.desktop?.let { desktop ->
+            desktop.terminalFontSizePx?.takeIf { it in BACKUP_FONT_SIZES }?.let {
+                updateTerminalFontSize(it)
+                applied++
+            }
+            desktop.language?.let { name -> LanguagePref.entries.firstOrNull { it.name == name } }?.let { language ->
+                languageChanged = language != _settings.value.languagePreference
+                updateLanguagePreference(language)
+                applied++
+            }
+        }
+        return BackupSettingsApplyResult(applied = applied, languageChanged = languageChanged)
+    }
+
     private fun load(): Settings = Settings(
         terminalFontSize = prefs.getInt(KEY_FONT_SIZE, 14),
         connectionTimeout = prefs.getInt(KEY_CONNECTION_TIMEOUT, 10),
@@ -153,6 +207,10 @@ class DesktopSettingsStore {
     )
 
     private companion object {
+        /** Domains of the backed-up settings (same as the validator of the shared backup format). */
+        val BACKUP_TIMEOUTS = setOf(5, 10, 15, 20, 25, 30)
+        val BACKUP_FONT_SIZES = 10..20
+
         const val KEY_FONT_SIZE = "terminal_font_size"
         const val KEY_CONNECTION_TIMEOUT = "connection_timeout"
         const val KEY_CLIPBOARD_CLEAR = "clipboard_clear_timeout"

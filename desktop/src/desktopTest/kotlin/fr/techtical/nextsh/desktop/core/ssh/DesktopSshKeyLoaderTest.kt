@@ -105,6 +105,23 @@ class DesktopSshKeyLoaderTest {
     }
 
     @Test
+    fun `cert blob announcing a huge length is an unreadable certificate, never an Error`() = runTest {
+        val (pem, _) = keyManager.generateKeyPair(SshKeyType.ECDSA_256, "owner")
+        // One string of the blob announces about 2 GiB that the blob does not hold: SSHJ may refuse it or
+        // try to allocate it. Either way the caller must get an exception, not an OutOfMemoryError.
+        val blob = byteArrayOf(0x7F, -1, -1, -16) + ByteArray(16)
+        val line = "ssh-ed25519-cert-v01@openssh.com " + java.util.Base64.getEncoder().encodeToString(blob)
+
+        val failure = runCatching {
+            DesktopSshKeyLoader.loadKeyProviderWithCertificate(pem, certificatePem = line, passphrase = null)
+        }.exceptionOrNull()
+
+        assertNotNull(failure)
+        assertTrue(failure is Exception, "an Error must not escape")
+        assertFalse(failure.message.orEmpty().contains("AAAA"), "no content in the error")
+    }
+
+    @Test
     fun `cert parser rejects malformed certificate line`() = runTest {
         val (pem, _) = keyManager.generateKeyPair(SshKeyType.ECDSA_256, "owner")
         // Single-token line: SSHJ cert format requires at least algo + base64 data

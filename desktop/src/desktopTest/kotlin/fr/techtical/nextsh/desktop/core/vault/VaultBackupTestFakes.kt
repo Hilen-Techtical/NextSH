@@ -3,11 +3,21 @@
 
 package fr.techtical.nextsh.desktop.core.vault
 
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import fr.techtical.nextsh.desktop.core.ssh.DesktopKnownHostsStore
+import fr.techtical.nextsh.desktop.core.ssh.StoredKnownHost
+import fr.techtical.nextsh.desktop.db.NextShDatabase
+import fr.techtical.nextsh.shared.core.backup.BackupPlatform
+import fr.techtical.nextsh.shared.core.backup.BackupSettings
 import fr.techtical.nextsh.shared.core.sync.SyncEntry
+import fr.techtical.nextsh.shared.domain.model.CustomTerminalTheme
 import fr.techtical.nextsh.shared.domain.model.Host
+import fr.techtical.nextsh.shared.domain.model.Snippet
 import fr.techtical.nextsh.shared.domain.model.SshKey
 import fr.techtical.nextsh.shared.domain.model.TunnelConfig
+import fr.techtical.nextsh.shared.domain.repository.CustomTerminalThemeRepository
 import fr.techtical.nextsh.shared.domain.repository.HostRepository
+import fr.techtical.nextsh.shared.domain.repository.SnippetRepository
 import fr.techtical.nextsh.shared.domain.repository.SshKeyRepository
 import fr.techtical.nextsh.shared.domain.repository.TunnelRepository
 import fr.techtical.nextsh.shared.domain.vault.VaultManager
@@ -81,6 +91,146 @@ internal class FakeTunnelRepositoryMem(initial: List<TunnelConfig> = emptyList()
     override suspend fun getAllSyncEntries(): List<SyncEntry<TunnelConfig>> = emptyList()
     override suspend fun upsertSyncEntry(entry: SyncEntry<TunnelConfig>) = Unit
     override suspend fun hardDelete(id: String) = delete(id)
+}
+
+/**
+ * Restore store over in-memory repositories, one write at a time: NOT atomic, for tests that only need
+ * "what ends up in the repositories". It applies the same availability rule as the real store (a tunnel is
+ * written only if its host is live once the hosts of the backup are written). The application wires
+ * `DesktopVaultRestoreStore`; its transaction and skip behaviour are tested against a real database in
+ * [DesktopVaultImporterRestoreTest].
+ */
+internal class RepositoryVaultRestoreStore(
+    private val sshKeyRepository: SshKeyRepository,
+    private val hostRepository: HostRepository,
+    private val tunnelRepository: TunnelRepository,
+    private val snippetRepository: SnippetRepository = FakeSnippetRepositoryMem(),
+    private val customThemeRepository: CustomTerminalThemeRepository = FakeCustomThemeRepositoryMem(),
+) : VaultRestoreStore {
+
+    /** Every known host handed to the store, in order (the fake does not model the insertion-only rule). */
+    val receivedKnownHosts = mutableListOf<StoredKnownHost>()
+
+    override suspend fun liveSshKeys(ids: Collection<String>): Map<String, SshKey> =
+        buildMap { ids.forEach { id -> sshKeyRepository.getById(id)?.let { put(id, it) } } }
+
+    override suspend fun restore(
+        hosts: List<Host>,
+        sshKeys: List<SshKey>,
+        tunnels: List<TunnelConfig>,
+        snippets: List<Snippet>,
+        customThemes: List<CustomTerminalTheme>,
+        knownHosts: List<StoredKnownHost>,
+    ): VaultRestoreResult {
+        customThemes.forEach { customThemeRepository.save(it) }
+        snippets.forEach { snippetRepository.save(it) }
+        hosts.forEach { hostRepository.save(it) }
+        sshKeys.forEach { sshKeyRepository.save(it) }
+        var skipped = 0
+        tunnels.forEach { tunnel ->
+            if (hostRepository.getById(tunnel.hostId) != null) tunnelRepository.save(tunnel) else skipped++
+        }
+        receivedKnownHosts += knownHosts
+        return VaultRestoreResult(
+            restoredTunnels = tunnels.size - skipped,
+            skippedTunnels = skipped,
+            knownHostsAdded = knownHosts.size,
+        )
+    }
+}
+
+/** An importer writing into in-memory fakes (see [RepositoryVaultRestoreStore]). */
+internal fun importerOver(
+    vault: VaultManager,
+    sshKeys: SshKeyRepository,
+    hosts: HostRepository,
+    tunnels: TunnelRepository,
+    snippets: SnippetRepository = FakeSnippetRepositoryMem(),
+    customThemes: CustomTerminalThemeRepository = FakeCustomThemeRepositoryMem(),
+    settings: BackupSettingsAccess = FakeBackupSettings(),
+): DesktopVaultImporter =
+    DesktopVaultImporter(vault, RepositoryVaultRestoreStore(sshKeys, hosts, tunnels, snippets, customThemes), settings)
+
+/** An exporter reading in-memory fakes. The known hosts come from a real in-memory database. */
+internal fun exporterOver(
+    vault: VaultManager,
+    sshKeys: SshKeyRepository = FakeSshKeyRepositoryMem(),
+    hosts: HostRepository = FakeHostRepositoryMem(),
+    tunnels: TunnelRepository = FakeTunnelRepositoryMem(),
+    snippets: SnippetRepository = FakeSnippetRepositoryMem(),
+    customThemes: CustomTerminalThemeRepository = FakeCustomThemeRepositoryMem(),
+    knownHosts: DesktopKnownHostsStore = inMemoryKnownHostsStore(),
+    settings: BackupSettingsAccess = FakeBackupSettings(),
+): DesktopVaultExporter =
+    DesktopVaultExporter(vault, sshKeys, hosts, tunnels, snippets, customThemes, knownHosts, settings)
+
+/**
+ * A known-hosts store over a fresh in-memory database. The driver is left open on purpose: the database
+ * dies with the test JVM and the tests never share one.
+ */
+internal fun inMemoryKnownHostsStore(nowMs: () -> Long = { 1_700_000_000_000L }): DesktopKnownHostsStore {
+    val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+    NextShDatabase.Schema.create(driver)
+    return DesktopKnownHostsStore(NextShDatabase(driver), nowMs)
+}
+
+internal class FakeSnippetRepositoryMem(initial: List<Snippet> = emptyList()) : SnippetRepository {
+    private val state = MutableStateFlow(initial)
+    override fun observeAll(): Flow<List<Snippet>> = state.asStateFlow()
+    override fun observeForHost(hostId: String): Flow<List<Snippet>> =
+        MutableStateFlow(state.value.filter { it.hostId == hostId || it.hostId == null }).asStateFlow()
+    override fun observeCategories(): Flow<List<String>> =
+        MutableStateFlow(state.value.mapNotNull { it.category }.distinct()).asStateFlow()
+    override suspend fun getById(id: String): Snippet? = state.value.firstOrNull { it.id == id }
+    override suspend fun save(snippet: Snippet) {
+        state.value = state.value.filterNot { it.id == snippet.id } + snippet
+    }
+    override suspend fun update(snippet: Snippet) = save(snippet)
+    override suspend fun delete(id: String) {
+        state.value = state.value.filterNot { it.id == id }
+    }
+    override suspend fun getAllSyncEntries(): List<SyncEntry<Snippet>> = emptyList()
+    override suspend fun upsertSyncEntry(entry: SyncEntry<Snippet>) = Unit
+    override suspend fun hardDelete(id: String) = delete(id)
+}
+
+internal class FakeCustomThemeRepositoryMem(
+    initial: List<CustomTerminalTheme> = emptyList(),
+) : CustomTerminalThemeRepository {
+    private val state = MutableStateFlow(initial)
+    override fun observeAll(): Flow<List<CustomTerminalTheme>> = state.asStateFlow()
+    override suspend fun getById(id: String): CustomTerminalTheme? = state.value.firstOrNull { it.id == id }
+    override suspend fun save(theme: CustomTerminalTheme) {
+        state.value = state.value.filterNot { it.id == theme.id } + theme
+    }
+    override suspend fun delete(id: String) {
+        state.value = state.value.filterNot { it.id == id }
+    }
+    override suspend fun getAllSyncEntries(): List<SyncEntry<CustomTerminalTheme>> = emptyList()
+    override suspend fun upsertSyncEntry(entry: SyncEntry<CustomTerminalTheme>) = Unit
+    override suspend fun hardDelete(id: String) = delete(id)
+}
+
+/**
+ * Settings of a backup, in memory: [snapshotValue] is what an export reads, [applied] records the last
+ * settings an import handed over (null when none was handed over).
+ */
+internal class FakeBackupSettings(
+    var snapshotValue: BackupSettings = BackupSettings(),
+) : BackupSettingsAccess {
+    var applied: BackupSettings? = null
+    var applyCalls = 0
+
+    override fun snapshot(): BackupSettings = snapshotValue
+
+    override fun apply(settings: BackupSettings?): BackupSettingsApplyResult {
+        applyCalls++
+        applied = settings
+        return BackupSettingsApplyResult(
+            applied = settings?.countFor(BackupPlatform.DESKTOP) ?: 0,
+            languageChanged = settings?.desktop?.language != null,
+        )
+    }
 }
 
 /**

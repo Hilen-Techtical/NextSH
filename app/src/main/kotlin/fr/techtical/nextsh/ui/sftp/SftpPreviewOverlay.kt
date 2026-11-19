@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,7 +53,7 @@ import fr.techtical.nextsh.ui.theme.*
  * Chrome :
  *  - TopAppBar Surface : ← back + nom fichier (mono 13sp), action ✕.
  *  - Texte : LazyColumn numéros Gold mono 11sp.
- *  - Image : Skia decode + pinch-to-zoom 0.5×–8×.
+ *  - Image : Skia decode + pinch-to-zoom de 0.5× à 8×.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -202,7 +203,7 @@ private fun PreviewTextContent(content: ByteArray) {
         }
         item {
             Text(
-                text       = stringResource(R.string.sftp_preview_line_count, lines.size),
+                text       = pluralStringResource(R.plurals.sftp_preview_line_count, lines.size, lines.size),
                 fontFamily = JetBrainsMonoFamily,
                 fontSize   = 10.sp,
                 color      = TextDisabled,
@@ -276,6 +277,7 @@ private fun PreviewImageContent(content: ByteArray) {
 
 @Composable
 private fun PreviewUnknownContent(file: fr.techtical.nextsh.domain.model.SftpFile) {
+    val formatSize = rememberSizeFormatter()
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Spacing.Md),
@@ -309,7 +311,7 @@ private fun PreviewUnknownContent(file: fr.techtical.nextsh.domain.model.SftpFil
         )
         if (file.size > 0L) {
             Text(
-                text       = formatFileSize(file.size),
+                text       = formatSize(file.size),
                 fontFamily = JetBrainsMonoFamily,
                 fontSize   = 11.sp,
                 color      = TextSecondary,
@@ -368,11 +370,4 @@ private fun PreviewErrorContent(error: String, onDismiss: () -> Unit) {
             )
         }
     }
-}
-
-private fun formatFileSize(bytes: Long): String = when {
-    bytes < 1_024L         -> "$bytes B"
-    bytes < 1_048_576L     -> "${"%.1f".format(bytes / 1_024.0)} KB"
-    bytes < 1_073_741_824L -> "${"%.1f".format(bytes / 1_048_576.0)} MB"
-    else                   -> "${"%.1f".format(bytes / 1_073_741_824.0)} GB"
 }

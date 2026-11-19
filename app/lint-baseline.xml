@@ -2,39 +2,6 @@
 <issues format="6" by="lint 8.9.3" type="baseline" client="gradle" dependencies="false" name="AGP (8.9.3)" variant="all" version="8.9.3">
 
     <issue
-        id="DefaultLocale"
-        message="Implicitly using the default locale is a common source of bugs: Use `String.format(Locale, ...)` instead"
-        errorLine1="    bytes &lt; 1_048_576L               -> String.format(&quot;%.1f KB&quot;, bytes / 1_024.0)"
-        errorLine2="                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/kotlin/fr/techtical/nextsh/ui/sftp/SftpFileItem.kt"
-            line="215"
-            column="41"/>
-    </issue>
-
-    <issue
-        id="DefaultLocale"
-        message="Implicitly using the default locale is a common source of bugs: Use `String.format(Locale, ...)` instead"
-        errorLine1="    bytes &lt; 1_073_741_824L           -> String.format(&quot;%.1f MB&quot;, bytes / 1_048_576.0)"
-        errorLine2="                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/kotlin/fr/techtical/nextsh/ui/sftp/SftpFileItem.kt"
-            line="216"
-            column="41"/>
-    </issue>
-
-    <issue
-        id="DefaultLocale"
-        message="Implicitly using the default locale is a common source of bugs: Use `String.format(Locale, ...)` instead"
-        errorLine1="    else                             -> String.format(&quot;%.2f GB&quot;, bytes / 1_073_741_824.0)"
-        errorLine2="                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/kotlin/fr/techtical/nextsh/ui/sftp/SftpFileItem.kt"
-            line="217"
-            column="41"/>
-    </issue>
-
-    <issue
         id="FullBackupContent"
         message="`nextsh.db` is not in an included path"
         errorLine1="        &lt;exclude domain=&quot;database&quot; path=&quot;nextsh.db&quot;/>"
@@ -46,78 +13,12 @@
     </issue>
 
     <issue
-        id="AndroidGradlePluginVersion"
-        message="A newer version of com.android.application than 8.9.3 is available: 9.4.0"
-        errorLine1="agp                     = &quot;8.9.3&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="8"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="AndroidGradlePluginVersion"
-        message="A newer version of com.android.application than 8.9.3 is available: 9.4.0"
-        errorLine1="agp                     = &quot;8.9.3&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="8"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="AndroidGradlePluginVersion"
-        message="A newer version of com.android.application than 8.9.3 is available: 9.4.0"
-        errorLine1="agp                     = &quot;8.9.3&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="8"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="AndroidGradlePluginVersion"
-        message="A newer version of com.android.library than 8.9.3 is available: 9.4.0"
-        errorLine1="agp                     = &quot;8.9.3&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="8"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="AndroidGradlePluginVersion"
-        message="A newer version of com.android.library than 8.9.3 is available: 9.4.0"
-        errorLine1="agp                     = &quot;8.9.3&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="8"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="AndroidGradlePluginVersion"
-        message="A newer version of com.android.library than 8.9.3 is available: 9.4.0"
-        errorLine1="agp                     = &quot;8.9.3&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="8"
-            column="27"/>
-    </issue>
-
-    <issue
         id="GradleDependency"
         message="A newer version of androidx.camera:camera-camera2 than 1.4.2 is available: 1.6.2"
         errorLine1="cameraX                 = &quot;1.4.2&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="4"
             column="27"/>
     </issue>
@@ -128,7 +29,7 @@
         errorLine1="cameraX                 = &quot;1.4.2&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="4"
             column="27"/>
     </issue>
@@ -139,7 +40,7 @@
         errorLine1="cameraX                 = &quot;1.4.2&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="4"
             column="27"/>
     </issue>
@@ -150,7 +51,7 @@
         errorLine1="cameraX                 = &quot;1.4.2&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="4"
             column="27"/>
     </issue>
@@ -161,7 +62,7 @@
         errorLine1="cameraX                 = &quot;1.4.2&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="4"
             column="27"/>
     </issue>
@@ -172,7 +73,7 @@
         errorLine1="cameraX                 = &quot;1.4.2&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="4"
             column="27"/>
     </issue>
@@ -183,7 +84,7 @@
         errorLine1="cameraX                 = &quot;1.4.2&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="4"
             column="27"/>
     </issue>
@@ -194,7 +95,7 @@
         errorLine1="cameraX                 = &quot;1.4.2&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="4"
             column="27"/>
     </issue>
@@ -205,7 +106,7 @@
         errorLine1="cameraX                 = &quot;1.4.2&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="4"
             column="27"/>
     </issue>
@@ -216,7 +117,7 @@
         errorLine1="cameraX                 = &quot;1.4.2&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="4"
             column="27"/>
     </issue>
@@ -227,7 +128,7 @@
         errorLine1="cameraX                 = &quot;1.4.2&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="4"
             column="27"/>
     </issue>
@@ -238,51 +139,18 @@
         errorLine1="cameraX                 = &quot;1.4.2&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="4"
             column="27"/>
     </issue>
 
     <issue
         id="GradleDependency"
-        message="A newer version of androidx.compose:compose-bom than 2024.05.00 is available: 2026.08.00"
-        errorLine1="composeBom              = &quot;2024.05.00&quot;"
-        errorLine2="                          ~~~~~~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="29"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.compose:compose-bom than 2024.05.00 is available: 2026.08.00"
-        errorLine1="composeBom              = &quot;2024.05.00&quot;"
-        errorLine2="                          ~~~~~~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="29"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.compose:compose-bom than 2024.05.00 is available: 2026.08.00"
-        errorLine1="composeBom              = &quot;2024.05.00&quot;"
-        errorLine2="                          ~~~~~~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="29"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
         message="A newer version of androidx.activity:activity-compose than 1.9.0 is available: 1.13.0"
         errorLine1="activityCompose         = &quot;1.9.0&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="30"
             column="27"/>
     </issue>
@@ -293,7 +161,7 @@
         errorLine1="activityCompose         = &quot;1.9.0&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="30"
             column="27"/>
     </issue>
@@ -304,84 +172,18 @@
         errorLine1="activityCompose         = &quot;1.9.0&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="30"
             column="27"/>
     </issue>
 
     <issue
         id="GradleDependency"
-        message="A newer version of androidx.navigation:navigation-compose than 2.7.7 is available: 2.10.0"
-        errorLine1="navigationCompose       = &quot;2.7.7&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="31"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.navigation:navigation-compose than 2.7.7 is available: 2.10.0"
-        errorLine1="navigationCompose       = &quot;2.7.7&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="31"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.navigation:navigation-compose than 2.7.7 is available: 2.10.0"
-        errorLine1="navigationCompose       = &quot;2.7.7&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="31"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.core:core-ktx than 1.13.1 is available: 1.19.0"
-        errorLine1="coreKtx                 = &quot;1.13.1&quot;"
-        errorLine2="                          ~~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="34"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.core:core-ktx than 1.13.1 is available: 1.19.0"
-        errorLine1="coreKtx                 = &quot;1.13.1&quot;"
-        errorLine2="                          ~~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="34"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.core:core-ktx than 1.13.1 is available: 1.19.0"
-        errorLine1="coreKtx                 = &quot;1.13.1&quot;"
-        errorLine2="                          ~~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="34"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
         message="A newer version of androidx.core:core-splashscreen than 1.0.1 is available: 1.2.0"
         errorLine1="coreSplashscreen        = &quot;1.0.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="35"
             column="27"/>
     </issue>
@@ -392,7 +194,7 @@
         errorLine1="coreSplashscreen        = &quot;1.0.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="35"
             column="27"/>
     </issue>
@@ -403,7 +205,7 @@
         errorLine1="coreSplashscreen        = &quot;1.0.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="35"
             column="27"/>
     </issue>
@@ -414,7 +216,7 @@
         errorLine1="lifecycleKtx            = &quot;2.8.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="36"
             column="27"/>
     </issue>
@@ -425,7 +227,7 @@
         errorLine1="lifecycleKtx            = &quot;2.8.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="36"
             column="27"/>
     </issue>
@@ -436,7 +238,7 @@
         errorLine1="lifecycleKtx            = &quot;2.8.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="36"
             column="27"/>
     </issue>
@@ -447,7 +249,7 @@
         errorLine1="lifecycleKtx            = &quot;2.8.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="36"
             column="27"/>
     </issue>
@@ -458,7 +260,7 @@
         errorLine1="lifecycleKtx            = &quot;2.8.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="36"
             column="27"/>
     </issue>
@@ -469,271 +271,18 @@
         errorLine1="lifecycleKtx            = &quot;2.8.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="36"
             column="27"/>
     </issue>
 
     <issue
         id="GradleDependency"
-        message="A newer version of androidx.security:security-crypto than 1.1.0-alpha06 is available: 1.1.0"
-        errorLine1="securityCrypto          = &quot;1.1.0-alpha06&quot;"
-        errorLine2="                          ~~~~~~~~~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="38"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.security:security-crypto than 1.1.0-alpha06 is available: 1.1.0"
-        errorLine1="securityCrypto          = &quot;1.1.0-alpha06&quot;"
-        errorLine2="                          ~~~~~~~~~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="38"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.security:security-crypto than 1.1.0-alpha06 is available: 1.1.0"
-        errorLine1="securityCrypto          = &quot;1.1.0-alpha06&quot;"
-        errorLine2="                          ~~~~~~~~~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="38"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.room:room-compiler than 2.6.1 is available: 2.8.4"
-        errorLine1="room                    = &quot;2.6.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="39"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.room:room-compiler than 2.6.1 is available: 2.8.4"
-        errorLine1="room                    = &quot;2.6.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="39"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.room:room-compiler than 2.6.1 is available: 2.8.4"
-        errorLine1="room                    = &quot;2.6.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="39"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.room:room-ktx than 2.6.1 is available: 2.8.4"
-        errorLine1="room                    = &quot;2.6.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="39"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.room:room-ktx than 2.6.1 is available: 2.8.4"
-        errorLine1="room                    = &quot;2.6.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="39"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.room:room-ktx than 2.6.1 is available: 2.8.4"
-        errorLine1="room                    = &quot;2.6.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="39"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.room:room-runtime than 2.6.1 is available: 2.8.4"
-        errorLine1="room                    = &quot;2.6.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="39"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.room:room-runtime than 2.6.1 is available: 2.8.4"
-        errorLine1="room                    = &quot;2.6.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="39"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.room:room-runtime than 2.6.1 is available: 2.8.4"
-        errorLine1="room                    = &quot;2.6.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="39"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.datastore:datastore-preferences than 1.1.1 is available: 1.2.1"
-        errorLine1="datastore               = &quot;1.1.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="40"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.datastore:datastore-preferences than 1.1.1 is available: 1.2.1"
-        errorLine1="datastore               = &quot;1.1.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="40"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.datastore:datastore-preferences than 1.1.1 is available: 1.2.1"
-        errorLine1="datastore               = &quot;1.1.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="40"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.credentials:credentials than 1.3.0 is available: 1.6.0"
-        errorLine1="credentials             = &quot;1.3.0&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="41"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.credentials:credentials than 1.3.0 is available: 1.6.0"
-        errorLine1="credentials             = &quot;1.3.0&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="41"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.credentials:credentials than 1.3.0 is available: 1.6.0"
-        errorLine1="credentials             = &quot;1.3.0&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="41"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.credentials:credentials-play-services-auth than 1.3.0 is available: 1.6.0"
-        errorLine1="credentials             = &quot;1.3.0&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="41"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.credentials:credentials-play-services-auth than 1.3.0 is available: 1.6.0"
-        errorLine1="credentials             = &quot;1.3.0&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="41"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.credentials:credentials-play-services-auth than 1.3.0 is available: 1.6.0"
-        errorLine1="credentials             = &quot;1.3.0&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="41"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of com.yubico.yubikit:android than 2.4.0 is available: 3.2.0"
+        message="A newer version of com.yubico.yubikit:fido than 2.4.0 is available: 2.8.1"
         errorLine1="yubikit                 = &quot;2.4.0&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="42"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of com.yubico.yubikit:android than 2.4.0 is available: 3.2.0"
-        errorLine1="yubikit                 = &quot;2.4.0&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="42"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of com.yubico.yubikit:android than 2.4.0 is available: 3.2.0"
-        errorLine1="yubikit                 = &quot;2.4.0&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="42"
             column="27"/>
     </issue>
@@ -744,7 +293,7 @@
         errorLine1="yubikit                 = &quot;2.4.0&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="42"
             column="27"/>
     </issue>
@@ -755,18 +304,7 @@
         errorLine1="yubikit                 = &quot;2.4.0&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="42"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of com.yubico.yubikit:fido than 2.4.0 is available: 2.8.1"
-        errorLine1="yubikit                 = &quot;2.4.0&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="42"
             column="27"/>
     </issue>
@@ -777,7 +315,7 @@
         errorLine1="hiltNavCompose          = &quot;1.2.0&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="47"
             column="27"/>
     </issue>
@@ -788,7 +326,7 @@
         errorLine1="hiltNavCompose          = &quot;1.2.0&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="47"
             column="27"/>
     </issue>
@@ -799,7 +337,7 @@
         errorLine1="hiltNavCompose          = &quot;1.2.0&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="47"
             column="27"/>
     </issue>
@@ -810,7 +348,7 @@
         errorLine1="bouncycastle            = &quot;1.78.1&quot;"
         errorLine2="                          ~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="51"
             column="27"/>
     </issue>
@@ -821,7 +359,7 @@
         errorLine1="bouncycastle            = &quot;1.78.1&quot;"
         errorLine2="                          ~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="51"
             column="27"/>
     </issue>
@@ -832,7 +370,7 @@
         errorLine1="bouncycastle            = &quot;1.78.1&quot;"
         errorLine2="                          ~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="51"
             column="27"/>
     </issue>
@@ -843,7 +381,7 @@
         errorLine1="bouncycastle            = &quot;1.78.1&quot;"
         errorLine2="                          ~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="51"
             column="27"/>
     </issue>
@@ -854,7 +392,7 @@
         errorLine1="bouncycastle            = &quot;1.78.1&quot;"
         errorLine2="                          ~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="51"
             column="27"/>
     </issue>
@@ -865,51 +403,18 @@
         errorLine1="bouncycastle            = &quot;1.78.1&quot;"
         errorLine2="                          ~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="51"
             column="27"/>
     </issue>
 
     <issue
         id="GradleDependency"
-        message="A newer version of androidx.work:work-runtime-ktx than 2.9.1 is available: 2.11.2"
-        errorLine1="workManager             = &quot;2.9.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="59"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.work:work-runtime-ktx than 2.9.1 is available: 2.11.2"
-        errorLine1="workManager             = &quot;2.9.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="59"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.work:work-runtime-ktx than 2.9.1 is available: 2.11.2"
-        errorLine1="workManager             = &quot;2.9.1&quot;"
-        errorLine2="                          ~~~~~~~">
-        <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
-            line="59"
-            column="27"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
         message="A newer version of org.junit.jupiter:junit-jupiter-api than 5.10.2 is available: 5.11.2"
         errorLine1="junit5                  = &quot;5.10.2&quot;"
         errorLine2="                          ~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="62"
             column="27"/>
     </issue>
@@ -920,7 +425,7 @@
         errorLine1="junit5                  = &quot;5.10.2&quot;"
         errorLine2="                          ~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="62"
             column="27"/>
     </issue>
@@ -931,7 +436,7 @@
         errorLine1="junit5                  = &quot;5.10.2&quot;"
         errorLine2="                          ~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="62"
             column="27"/>
     </issue>
@@ -942,7 +447,7 @@
         errorLine1="junit5                  = &quot;5.10.2&quot;"
         errorLine2="                          ~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="62"
             column="27"/>
     </issue>
@@ -953,7 +458,7 @@
         errorLine1="junit5                  = &quot;5.10.2&quot;"
         errorLine2="                          ~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="62"
             column="27"/>
     </issue>
@@ -964,7 +469,7 @@
         errorLine1="junit5                  = &quot;5.10.2&quot;"
         errorLine2="                          ~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="62"
             column="27"/>
     </issue>
@@ -975,7 +480,7 @@
         errorLine1="espresso                = &quot;3.5.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="64"
             column="27"/>
     </issue>
@@ -986,7 +491,7 @@
         errorLine1="espresso                = &quot;3.5.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="64"
             column="27"/>
     </issue>
@@ -997,7 +502,7 @@
         errorLine1="espresso                = &quot;3.5.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="64"
             column="27"/>
     </issue>
@@ -1008,7 +513,7 @@
         errorLine1="testExtJunit            = &quot;1.1.5&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="65"
             column="27"/>
     </issue>
@@ -1019,7 +524,7 @@
         errorLine1="testExtJunit            = &quot;1.1.5&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="65"
             column="27"/>
     </issue>
@@ -1030,7 +535,7 @@
         errorLine1="testExtJunit            = &quot;1.1.5&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="65"
             column="27"/>
     </issue>
@@ -1041,7 +546,7 @@
         errorLine1="yubikit-fido                    = { group = &quot;com.yubico.yubikit&quot;,          name = &quot;fido&quot;,                              version.ref = &quot;yubikit&quot; }"
         errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="93"
             column="36"/>
     </issue>
@@ -1052,7 +557,7 @@
         errorLine1="yubikit-fido                    = { group = &quot;com.yubico.yubikit&quot;,          name = &quot;fido&quot;,                              version.ref = &quot;yubikit&quot; }"
         errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="93"
             column="36"/>
     </issue>
@@ -1063,7 +568,7 @@
         errorLine1="yubikit-fido                    = { group = &quot;com.yubico.yubikit&quot;,          name = &quot;fido&quot;,                              version.ref = &quot;yubikit&quot; }"
         errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="93"
             column="36"/>
     </issue>
@@ -1074,7 +579,7 @@
         errorLine1="yubikit-fido-desktop            = { group = &quot;com.yubico.yubikit&quot;,          name = &quot;fido&quot;,                              version.ref = &quot;yubikit-desktop&quot; }"
         errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="96"
             column="36"/>
     </issue>
@@ -1085,7 +590,7 @@
         errorLine1="yubikit-fido-desktop            = { group = &quot;com.yubico.yubikit&quot;,          name = &quot;fido&quot;,                              version.ref = &quot;yubikit-desktop&quot; }"
         errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="96"
             column="36"/>
     </issue>
@@ -1096,7 +601,7 @@
         errorLine1="yubikit-fido-desktop            = { group = &quot;com.yubico.yubikit&quot;,          name = &quot;fido&quot;,                              version.ref = &quot;yubikit-desktop&quot; }"
         errorLine2="                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="96"
             column="36"/>
     </issue>
@@ -1168,56 +673,12 @@
     </issue>
 
     <issue
-        id="Typos"
-        message="&quot;exemple&quot; is a common misspelling; did you mean &quot;example&quot;?"
-        errorLine1="    &lt;string name=&quot;host_import_format_info_copy_example&quot;>Copier l\&apos;exemple&lt;/string>"
-        errorLine2="                                                                  ^">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="217"
-            column="67"/>
-    </issue>
-
-    <issue
-        id="Typos"
-        message="&quot;Exemple&quot; is a common misspelling; did you mean &quot;Example&quot;?"
-        errorLine1="    &lt;string name=&quot;host_import_format_info_copied&quot;>Exemple copié&lt;/string>"
-        errorLine2="                                                  ^">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="218"
-            column="51"/>
-    </issue>
-
-    <issue
-        id="Typos"
-        message="&quot;trafic&quot; is a common misspelling; did you mean &quot;traffic&quot;?"
-        errorLine1="    &lt;string name=&quot;dialog_external_nav_warning&quot;>Le trafic ne sera plus protégé par le tunnel SSH.&lt;/string>"
-        errorLine2="                                                  ^">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="278"
-            column="51"/>
-    </issue>
-
-    <issue
         id="PluralsCandidate"
         message="Formatting %d followed by words (&quot;custom&quot;): This should probably be a plural rather than a string"
         errorLine1="    &lt;string name=&quot;themes_subtitle_many&quot;>%1$d custom themes&lt;/string>"
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-en/strings.xml"
-            line="90"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;thèmes&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;themes_subtitle_many&quot;>%1$d thèmes personnalisés&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
             line="90"
             column="5"/>
     </issue>
@@ -1235,45 +696,12 @@
 
     <issue
         id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;hôtes&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;host_import_found&quot;>%1$d hôtes trouvés&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="199"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
         message="Formatting %d followed by words (&quot;imported&quot;): This should probably be a plural rather than a string"
         errorLine1="    &lt;string name=&quot;host_import_result&quot;>%1$d imported, %2$d skipped.&lt;/string>"
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-en/strings.xml"
             line="203"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;importés&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;host_import_result&quot;>%1$d importés, %2$d ignorés.&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="203"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;Mio&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;host_import_error_too_large&quot;>Ce fichier dépasse la taille maximale autorisée (%1$d Mio) pour un import.&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="206"
             column="5"/>
     </issue>
 
@@ -1290,17 +718,6 @@
 
     <issue
         id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;mots&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;label_passwords_stored_plural&quot;>%d mots de passe stockés&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="253"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
         message="Formatting %d followed by words (&quot;lines&quot;): This should probably be a plural rather than a string"
         errorLine1="    &lt;string name=&quot;settings_scrollback_lines&quot;>%d lines&lt;/string>"
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
@@ -1312,155 +729,12 @@
 
     <issue
         id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;lignes&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;settings_scrollback_lines&quot;>%d lignes&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="324"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;selected&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;sftp_selection_count&quot;>%1$d selected&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values-en/strings.xml"
-            line="410"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;item&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;sftp_dialog_multi_delete_title&quot;>Delete %1$d item(s)?&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values-en/strings.xml"
-            line="413"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;sélectionné&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;sftp_selection_count&quot;>%1$d sélectionné(s)&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="413"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;élément&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;sftp_dialog_multi_delete_title&quot;>Supprimer %1$d élément(s) ?&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="416"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;lines&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;sftp_preview_line_count&quot;>%1$d lines&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values-en/strings.xml"
-            line="424"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;lignes&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;sftp_preview_line_count&quot;>%1$d lignes&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="427"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
         message="Formatting %d followed by words (&quot;pending&quot;): This should probably be a plural rather than a string"
         errorLine1="    &lt;string name=&quot;sync_subtitle_conflicts_many&quot;>%1$d pending conflicts&lt;/string>"
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-en/strings.xml"
             line="462"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;conflits&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;sync_subtitle_conflicts_many&quot;>%1$d conflits en attente&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="465"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;pending&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;sync_pending_conflicts&quot;>%1$d pending conflict(s)&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values-en/strings.xml"
-            line="465"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;conflit&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;sync_pending_conflicts&quot;>%1$d conflit(s) en attente&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="468"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;conflict&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;conflict_banner_pending&quot;>%1$d conflict(s) to resolve&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values-en/strings.xml"
-            line="480"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;conflit&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;conflict_banner_pending&quot;>%1$d conflit(s) à résoudre&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="483"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="PluralsCandidate"
-        message="Formatting %d followed by words (&quot;sur&quot;): This should probably be a plural rather than a string"
-        errorLine1="    &lt;string name=&quot;firstlaunch_step_count&quot;>Étape %1$d sur %2$d&lt;/string>"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="555"
             column="5"/>
     </issue>
 
@@ -1521,7 +795,7 @@
         errorLine1="yubikit-desktop         = &quot;2.8.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="43"
             column="27"/>
     </issue>
@@ -1532,7 +806,7 @@
         errorLine1="yubikit-desktop         = &quot;2.8.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="43"
             column="27"/>
     </issue>
@@ -1543,7 +817,7 @@
         errorLine1="yubikit-desktop         = &quot;2.8.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="43"
             column="27"/>
     </issue>
@@ -1554,7 +828,7 @@
         errorLine1="yubikit-desktop         = &quot;2.8.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="43"
             column="27"/>
     </issue>
@@ -1565,7 +839,7 @@
         errorLine1="yubikit-desktop         = &quot;2.8.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="43"
             column="27"/>
     </issue>
@@ -1576,20 +850,9 @@
         errorLine1="yubikit-desktop         = &quot;2.8.1&quot;"
         errorLine2="                          ~~~~~~~">
         <location
-            file="$HOME/ProjetDev/NextSH/gradle/libs.versions.toml"
+            file="../gradle/libs.versions.toml"
             line="43"
             column="27"/>
-    </issue>
-
-    <issue
-        id="ObsoleteSdkInt"
-        message="Unnecessary; `SDK_INT` is always >= 29"
-        errorLine1="            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {"
-        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/kotlin/fr/techtical/nextsh/ui/sessions/SessionViewModel.kt"
-            line="547"
-            column="17"/>
     </issue>
 
     <issue
@@ -1755,28 +1018,6 @@
 
     <issue
         id="UnusedResources"
-        message="The resource `R.string.action_trust_host` appears to be unused"
-        errorLine1="    &lt;string name=&quot;action_trust_host&quot;>Faire confiance&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="29"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.action_reject` appears to be unused"
-        errorLine1="    &lt;string name=&quot;action_reject&quot;>Refuser&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="30"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
         message="The resource `R.string.action_cancel_connection` appears to be unused"
         errorLine1="    &lt;string name=&quot;action_cancel_connection&quot;>Annuler la connexion&lt;/string>"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
@@ -1794,39 +1035,6 @@
         <location
             file="src/main/res/values/strings.xml"
             line="33"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.action_stop` appears to be unused"
-        errorLine1="    &lt;string name=&quot;action_stop&quot;>Arrêter&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="43"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.action_start` appears to be unused"
-        errorLine1="    &lt;string name=&quot;action_start&quot;>Démarrer&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="44"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.shortcut_disabled_message` appears to be unused"
-        errorLine1="    &lt;string name=&quot;shortcut_disabled_message&quot;>Raccourci non disponible&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="56"
             column="13"/>
     </issue>
 
@@ -1854,17 +1062,6 @@
 
     <issue
         id="UnusedResources"
-        message="The resource `R.string.dialog_host_verification_title` appears to be unused"
-        errorLine1="    &lt;string name=&quot;dialog_host_verification_title&quot;>Vérification de l\&apos;hôte&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="269"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
         message="The resource `R.string.dialog_host_key_changed_title` appears to be unused"
         errorLine1="    &lt;string name=&quot;dialog_host_key_changed_title&quot;>⚠ Clé de l\&apos;hôte modifiée&lt;/string>"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
@@ -1882,17 +1079,6 @@
         <location
             file="src/main/res/values/strings.xml"
             line="271"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.dialog_trust_host_question` appears to be unused"
-        errorLine1="    &lt;string name=&quot;dialog_trust_host_question&quot;>Voulez-vous faire confiance à cet hôte ?&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="272"
             column="13"/>
     </issue>
 
@@ -2019,17 +1205,6 @@
 
     <issue
         id="UnusedResources"
-        message="The resource `R.string.fido2_pin_required_no_ui` appears to be unused"
-        errorLine1="    &lt;string name=&quot;fido2_pin_required_no_ui&quot;>Cette clé exige un PIN mais l\&apos;interface PIN n\&apos;est pas disponible.&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="310"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
         message="The resource `R.string.settings_app_credit` appears to be unused"
         errorLine1="    &lt;string name=&quot;settings_app_credit&quot;>NextSH by Techtical&lt;/string>"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
@@ -2063,39 +1238,6 @@
 
     <issue
         id="UnusedResources"
-        message="The resource `R.string.sftp_error_connection` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sftp_error_connection&quot;>Connexion SFTP perdue&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="370"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.sftp_error_permission` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sftp_error_permission&quot;>Permission refusée&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="371"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.sftp_error_not_found` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sftp_error_not_found&quot;>Fichier ou dossier introuvable&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="372"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
         message="The resource `R.string.sftp_error_generic` appears to be unused"
         errorLine1="    &lt;string name=&quot;sftp_error_generic&quot;>Erreur SFTP : %1$s&lt;/string>"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
@@ -2113,72 +1255,6 @@
         <location
             file="src/main/res/values/strings.xml"
             line="384"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.sftp_success_mkdir` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sftp_success_mkdir&quot;>Dossier créé&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="400"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.sftp_success_rename` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sftp_success_rename&quot;>Fichier renommé&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="401"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.sftp_success_chmod` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sftp_success_chmod&quot;>Permissions modifiées&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="402"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.sftp_success_delete` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sftp_success_delete&quot;>Élément supprimé&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="403"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.sftp_error_name_empty` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sftp_error_name_empty&quot;>Le nom ne peut pas être vide&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="404"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.sftp_error_name_invalid` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sftp_error_name_invalid&quot;>Nom de fichier invalide&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="405"
             column="13"/>
     </issue>
 
@@ -2206,17 +1282,6 @@
 
     <issue
         id="UnusedResources"
-        message="The resource `R.string.sftp_preview_too_large` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sftp_preview_too_large&quot;>Fichier trop volumineux pour l\&apos;aperçu (%1$s). Téléchargez-le pour le visualiser.&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="425"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
         message="The resource `R.string.sftp_reconnecting` appears to be unused"
         errorLine1="    &lt;string name=&quot;sftp_reconnecting&quot;>Reconnexion…&lt;/string>"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
@@ -2239,17 +1304,6 @@
 
     <issue
         id="UnusedResources"
-        message="The resource `R.string.sftp_transfer_failed` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sftp_transfer_failed&quot;>Échec du transfert&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="439"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
         message="The resource `R.string.sftp_transfer_cancelled` appears to be unused"
         errorLine1="    &lt;string name=&quot;sftp_transfer_cancelled&quot;>Transfert annulé&lt;/string>"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
@@ -2261,78 +1315,12 @@
 
     <issue
         id="UnusedResources"
-        message="The resource `R.string.sync_pending_conflicts` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sync_pending_conflicts&quot;>%1$d conflit(s) en attente&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="468"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
         message="The resource `R.string.label_sftp_pane` appears to be unused"
         errorLine1="    &lt;string name=&quot;label_sftp_pane&quot;>SFTP : %s&lt;/string>"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
             line="502"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.enrolled_host_label` appears to be unused"
-        errorLine1="    &lt;string name=&quot;enrolled_host_label&quot;>Hôte : %1$s&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="514"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.enrolled_ecdh_label` appears to be unused"
-        errorLine1="    &lt;string name=&quot;enrolled_ecdh_label&quot;>ECDH : %1$s&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="515"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.enrolled_tls_label` appears to be unused"
-        errorLine1="    &lt;string name=&quot;enrolled_tls_label&quot;>TLS : %1$s…&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="516"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.enrolled_enrolled_label` appears to be unused"
-        errorLine1="    &lt;string name=&quot;enrolled_enrolled_label&quot;>Enrôlé %1$s&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="517"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.enrolled_last_sync_label` appears to be unused"
-        errorLine1="    &lt;string name=&quot;enrolled_last_sync_label&quot;>Dernière sync : %1$s&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="518"
             column="13"/>
     </issue>
 
@@ -2640,17 +1628,6 @@
             file="src/main/kotlin/fr/techtical/nextsh/core/vault/VaultMigration.kt"
             line="104"
             column="26"/>
-    </issue>
-
-    <issue
-        id="ConstantLocale"
-        message="Assigning `Locale.getDefault()` to a final static field is suspicious; this code will not work correctly if the user changes locale while the app is running"
-        errorLine1="private val DATE_FORMATTER = DateTimeFormatter.ofPattern(&quot;dd MMM yyyy&quot;, Locale.getDefault())"
-        errorLine2="                                                                        ~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/kotlin/fr/techtical/nextsh/ui/sftp/SftpFileItem.kt"
-            line="201"
-            column="73"/>
     </issue>
 
 </issues>

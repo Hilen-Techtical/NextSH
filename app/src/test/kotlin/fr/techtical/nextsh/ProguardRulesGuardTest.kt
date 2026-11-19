@@ -3,9 +3,9 @@
 
 package fr.techtical.nextsh
 
+import fr.techtical.nextsh.testutil.ProjectFiles
 import net.i2p.crypto.eddsa.EdDSASecurityProvider
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.lang.reflect.Modifier
@@ -27,30 +27,13 @@ import java.lang.reflect.Modifier
  * and passes its path in the `proguardRules` system property. Without that, a change that only
  * deletes the rule leaves the classes untouched and the task stays UP-TO-DATE or FROM-CACHE, so
  * the guard would never run. When the property is set, a missing file FAILS the test. The
- * directory walk is only a fallback for runners that do not set it (IDE), and it skips instead.
+ * fallback for runners that do not set it (IDE) is [ProjectFiles], which fails on a miss too.
  */
 class ProguardRulesGuardTest {
 
     private companion object {
         const val EDDSA_PACKAGE = "net.i2p.crypto.eddsa."
         const val PATH_PROPERTY = "proguardRules"
-    }
-
-    /**
-     * Locates `app/proguard-rules.pro` by walking up from the test's working directory, which
-     * Gradle sets to the module directory (`app/`) but which other runners may point at the
-     * repository root.
-     */
-    private fun walkToProguardRules(): File? {
-        val fromModuleRoot = "proguard-rules.pro"
-        val fromRepoRoot = "app/$fromModuleRoot"
-        var dir: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
-        while (dir != null) {
-            File(dir, fromModuleRoot).takeIf { it.isFile }?.let { return it }
-            File(dir, fromRepoRoot).takeIf { it.isFile }?.let { return it }
-            dir = dir.parentFile
-        }
-        return null
     }
 
     private fun locateProguardRules(): File {
@@ -64,12 +47,7 @@ class ProguardRulesGuardTest {
             )
             return file
         }
-        val walked = walkToProguardRules()
-        assumeTrue(
-            walked != null,
-            "proguard-rules.pro not found from working dir ${System.getProperty("user.dir")}: guard skipped",
-        )
-        return walked!!
+        return ProjectFiles.appFile("proguard-rules.pro")
     }
 
     /** The directives of the file, without comment lines (a commented-out rule must not count). */

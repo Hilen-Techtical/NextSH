@@ -24,7 +24,7 @@ plugins {
 // le même produit et répond « déjà installé » au lieu de mettre à jour.
 // L'upgradeUuid (voir bloc `windows {}`) reste lui STABLE entre les releases.
 // ─────────────────────────────────────────────────────────────────────────
-val desktopVersion = "1.0.1"
+val desktopVersion = "1.1.0"
 
 // X11 WM_CLASS the running Compose/AWT window reports. AWT derives it from
 // the main class FQN (fr.techtical.nextsh.desktop.MainKt → dots become
@@ -500,7 +500,7 @@ tasks.register("packagePortableWindows") {
                 "--no-man-pages",
                 "--no-header-files",
                 // `--compress=2` was removed in JDK 21+. Modern syntax is
-                // `--compress=zip-N` (N=0–9). zip-6 = sane default that
+                // `--compress=zip-N` (N=0-9). zip-6 = sane default that
                 // gives ~30 % smaller JRE without significant unzip cost.
                 "--compress=zip-6",
                 "--output", jreDir.absolutePath,

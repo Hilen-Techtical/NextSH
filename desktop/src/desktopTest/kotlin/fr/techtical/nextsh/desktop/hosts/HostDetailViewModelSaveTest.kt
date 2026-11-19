@@ -4,6 +4,8 @@
 package fr.techtical.nextsh.desktop.hosts
 
 import fr.techtical.nextsh.desktop.data.db.repository.DesktopHostFolderRepository
+import fr.techtical.nextsh.desktop.service.DesktopTunnelService
+import fr.techtical.nextsh.shared.core.backup.BackupFieldProblem
 import fr.techtical.nextsh.shared.core.sync.SyncEntry
 import fr.techtical.nextsh.shared.domain.model.AuthType
 import fr.techtical.nextsh.shared.domain.model.CustomTerminalTheme
@@ -26,6 +28,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -66,6 +69,9 @@ class HostDetailViewModelSaveTest {
         val saved = mutableListOf<Host>()
         val updated = mutableListOf<Host>()
 
+        /** When set, save and update throw it, like a database that refuses the write. */
+        var writeFailure: Exception? = null
+
         fun remove(id: String) {
             hosts.value = hosts.value.filterNot { it.id == id }
         }
@@ -80,11 +86,13 @@ class HostDetailViewModelSaveTest {
         override suspend fun getById(id: String): Host? = hosts.value.find { it.id == id }
 
         override suspend fun save(host: Host) {
+            writeFailure?.let { throw it }
             saved += host
             hosts.value = hosts.value + host
         }
 
         override suspend fun update(host: Host) {
+            writeFailure?.let { throw it }
             updated += host
             replace(host)
         }
@@ -121,6 +129,7 @@ class HostDetailViewModelSaveTest {
         val viewModel: HostDetailViewModel,
         val repository: FakeHostRepository,
         val vaultManager: VaultManager,
+        val tunnelService: DesktopTunnelService,
     )
 
     private fun newEnv(hosts: List<Host>, keys: List<SshKey> = emptyList()): Env {
@@ -133,6 +142,7 @@ class HostDetailViewModelSaveTest {
         val themeRepository = mockk<CustomTerminalThemeRepository>()
         every { themeRepository.observeAll() } returns flowOf(emptyList<CustomTerminalTheme>())
         val vaultManager = mockk<VaultManager>(relaxed = true)
+        val tunnelService = mockk<DesktopTunnelService>(relaxed = true)
         val viewModel = HostDetailViewModel(
             repository = repository,
             sshKeyRepository = sshKeyRepository,
@@ -140,8 +150,9 @@ class HostDetailViewModelSaveTest {
             vaultManager = vaultManager,
             customThemeRepository = themeRepository,
             appScope = TestAppScope(testScope),
+            tunnelService = tunnelService,
         )
-        return Env(viewModel, repository, vaultManager)
+        return Env(viewModel, repository, vaultManager, tunnelService)
     }
 
     private fun passwordHost() = Host(
@@ -235,7 +246,7 @@ class HostDetailViewModelSaveTest {
         assertTrue(env.repository.saved.isEmpty())
         coVerify(exactly = 0) { env.vaultManager.storePassword(any(), any()) }
         coVerify(exactly = 0) { env.vaultManager.storeCertificate(any(), any()) }
-        assertEquals("Cet hôte a été supprimé entre-temps, rien n'a été enregistré.", env.viewModel.state.value.error)
+        assertEquals(HostFormError.HOST_DELETED, env.viewModel.state.value.error)
         assertFalse(env.viewModel.state.value.isSaving)
         assertTrue(password.all { it == '\u0000' }, "password must be wiped on the early exit")
     }
@@ -255,7 +266,7 @@ class HostDetailViewModelSaveTest {
         assertFalse(done)
         assertTrue(env.repository.updated.isEmpty())
         coVerify(exactly = 0) { env.vaultManager.storeCertificate(any(), any()) }
-        assertEquals("Cet hôte a été supprimé entre-temps, rien n'a été enregistré.", env.viewModel.state.value.error)
+        assertEquals(HostFormError.HOST_DELETED, env.viewModel.state.value.error)
         assertFalse(env.viewModel.state.value.isSaving)
     }
 
@@ -273,6 +284,374 @@ class HostDetailViewModelSaveTest {
         assertEquals("Prod renamed", env.repository.updated.single().label)
         coVerify(exactly = 1) { env.vaultManager.storePassword("cred-1", any()) }
         assertTrue(password.all { it == '\u0000' }, "password must be wiped after the save")
+    }
+
+    // -- Save refused by the data layer -----------------------------------------
+
+    /** A new PASSWORD host with every required field filled. */
+    private fun filledNewHost(env: Env) {
+        env.viewModel.load(null)
+        env.viewModel.onLabel("New")
+        env.viewModel.onHostname("new.example")
+        env.viewModel.onUsername("admin")
+    }
+
+    @Test
+    fun `a refused host write gives a typed error, wipes the password and does not leave the form saving`() {
+        val env = newEnv(listOf(passwordHost()))
+        env.viewModel.load("h1")
+        env.repository.writeFailure = IllegalStateException("disk I/O error")
+
+        env.viewModel.onLabel("Prod renamed")
+        val password = "s3cret".toCharArray()
+        var done = false
+        env.viewModel.save(password) { done = true }
+
+        assertFalse(done)
+        assertFalse(env.viewModel.state.value.isSaving, "the Save button must come back")
+        assertEquals(HostSaveError.SAVE_FAILED, env.viewModel.state.value.saveError)
+        assertNull(env.viewModel.state.value.error, "the legacy hard-coded message field is not used for this")
+        coVerify(exactly = 0) { env.vaultManager.storePassword(any(), any()) }
+        assertTrue(password.all { it == '\u0000' }, "password must be wiped when the write fails")
+    }
+
+    @Test
+    fun `a refused write of a new host leaves it new, so a retry saves it once`() {
+        val env = newEnv(emptyList())
+        filledNewHost(env)
+        env.repository.writeFailure = IllegalStateException("disk I/O error")
+
+        env.viewModel.save(password = null) { }
+
+        assertEquals(HostSaveError.SAVE_FAILED, env.viewModel.state.value.saveError)
+        assertNull(env.viewModel.state.value.hostId, "nothing was written: still a new host")
+
+        env.repository.writeFailure = null
+        var done = false
+        env.viewModel.save(password = null) { done = true }
+
+        assertTrue(done)
+        assertEquals(1, env.repository.saved.size)
+        assertTrue(env.repository.updated.isEmpty())
+        assertNull(env.viewModel.state.value.saveError)
+    }
+
+    // -- Host name restorable from a backup (BackupValidator.isValidHostName) -----
+
+    @Test
+    fun `a host name with an inner space is refused and nothing is written`() {
+        val env = newEnv(emptyList())
+        filledNewHost(env)
+        env.viewModel.onHostname("my host")
+        val password = "s3cret".toCharArray()
+        var done = false
+
+        env.viewModel.save(password) { done = true }
+
+        assertTrue(env.viewModel.state.value.hostnameInvalid)
+        assertFalse(done)
+        assertTrue(env.repository.saved.isEmpty())
+        assertFalse(env.viewModel.state.value.isSaving)
+        assertTrue(password.all { it == '\u0000' }, "password must be wiped on the refusal")
+    }
+
+    @Test
+    fun `a host name with an invisible character is refused`() {
+        val env = newEnv(emptyList())
+        filledNewHost(env)
+        env.viewModel.onHostname("prod" + Char(0x200B) + ".example")
+
+        env.viewModel.save(password = null) { }
+
+        assertTrue(env.viewModel.state.value.hostnameInvalid)
+        assertTrue(env.repository.saved.isEmpty())
+    }
+
+    @Test
+    fun `a host name over 255 characters is refused`() {
+        val env = newEnv(emptyList())
+        filledNewHost(env)
+        env.viewModel.onHostname("a".repeat(256))
+
+        env.viewModel.save(password = null) { }
+
+        assertTrue(env.viewModel.state.value.hostnameInvalid)
+        assertTrue(env.repository.saved.isEmpty())
+    }
+
+    @Test
+    fun `a host name surrounded by spaces is accepted and saved trimmed`() {
+        val env = newEnv(emptyList())
+        filledNewHost(env)
+        env.viewModel.onHostname("  new.example  ")
+        var done = false
+
+        env.viewModel.save(password = null) { done = true }
+
+        assertFalse(env.viewModel.state.value.hostnameInvalid)
+        assertTrue(done)
+        assertEquals("new.example", env.repository.saved.single().hostname)
+    }
+
+    @Test
+    fun `an empty host name is not flagged under the field, the required check handles it`() {
+        val env = newEnv(emptyList())
+        filledNewHost(env)
+        env.viewModel.onHostname("   ")
+
+        assertFalse(env.viewModel.state.value.hostnameInvalid)
+    }
+
+    // -- User name restorable from a backup (no control character) -----
+
+    @Test
+    fun `a user name with a control character is refused and nothing is written`() {
+        val env = newEnv(emptyList())
+        filledNewHost(env)
+        env.viewModel.onUsername("ro" + Char(0x01) + "ot")
+        val password = "s3cret".toCharArray()
+        var done = false
+
+        env.viewModel.save(password) { done = true }
+
+        assertEquals(BackupFieldProblem.CONTROL_CHARACTER, env.viewModel.state.value.usernameProblem)
+        assertFalse(done)
+        assertTrue(env.repository.saved.isEmpty())
+        assertFalse(env.viewModel.state.value.isSaving)
+        assertTrue(password.all { it == '\u0000' }, "password must be wiped on the refusal")
+    }
+
+    @Test
+    fun `a user name with a tab inside is refused, a tab around it is trimmed and accepted`() {
+        val env = newEnv(emptyList())
+        filledNewHost(env)
+
+        env.viewModel.onUsername("ro\tot")
+        assertEquals(BackupFieldProblem.CONTROL_CHARACTER, env.viewModel.state.value.usernameProblem)
+
+        env.viewModel.onUsername("\troot\t")
+        assertNull(env.viewModel.state.value.usernameProblem)
+        env.viewModel.save(password = null) { }
+        assertEquals("root", env.repository.saved.single().username)
+    }
+
+    @Test
+    fun `a user name over 4096 characters is refused with the length reason`() {
+        val env = newEnv(emptyList())
+        filledNewHost(env)
+        env.viewModel.onUsername("u".repeat(4097))
+
+        env.viewModel.save(password = null) { }
+
+        assertEquals(BackupFieldProblem.TOO_LONG, env.viewModel.state.value.usernameProblem)
+        assertTrue(env.repository.saved.isEmpty())
+    }
+
+    @Test
+    fun `a plain or an empty user name is not flagged under the field`() {
+        val env = newEnv(emptyList())
+        filledNewHost(env)
+
+        env.viewModel.onUsername("deploy")
+        assertNull(env.viewModel.state.value.usernameProblem)
+        env.viewModel.onUsername("   ")
+        assertNull(env.viewModel.state.value.usernameProblem, "the required check handles an empty field")
+    }
+
+    @Test
+    fun `a vault failure after the host of a new host was saved says so and the retry updates it`() {
+        val env = newEnv(emptyList())
+        filledNewHost(env)
+        coEvery { env.vaultManager.storePassword(any(), any()) } throws IllegalStateException("vault locked")
+
+        env.viewModel.save("s3cret".toCharArray()) { }
+
+        val saved = env.repository.saved.single()
+        assertEquals(HostSaveError.VAULT_FAILED, env.viewModel.state.value.saveError)
+        assertFalse(env.viewModel.state.value.isSaving)
+        assertEquals(saved.id, env.viewModel.state.value.hostId, "the form now edits the host that was saved")
+
+        // Retry once the vault works: it must go through update, not create a duplicate host.
+        coEvery { env.vaultManager.storePassword(any(), any()) } returns Unit
+        var done = false
+        env.viewModel.save("s3cret".toCharArray()) { done = true }
+
+        assertTrue(done)
+        assertEquals(1, env.repository.saved.size, "no second host")
+        assertEquals(saved.id, env.repository.updated.single().id)
+        assertNull(env.viewModel.state.value.saveError)
+        coVerify(exactly = 2) { env.vaultManager.storePassword(saved.credentialId, any()) }
+    }
+
+    @Test
+    fun `the typed password is kept after a vault failure on a new host and stored by the retry`() {
+        val env = newEnv(emptyList())
+        filledNewHost(env)
+        val stored = mutableListOf<String>()
+        coEvery { env.vaultManager.storePassword(any(), any()) } coAnswers {
+            // The view model wipes the array once the call returns: keep a copy of what it was given.
+            stored += secondArg<CharArray>().concatToString()
+            throw IllegalStateException("vault locked")
+        }
+        // What the screen does: the field is cleared by the success callback only.
+        var passwordField = "s3cret"
+        var done = false
+
+        env.viewModel.saveForm(passwordField) { passwordField = ""; done = true }
+
+        assertFalse(done)
+        assertEquals("s3cret", passwordField, "a refused save must not lose the typed password")
+        assertEquals(HostSaveError.VAULT_FAILED, env.viewModel.state.value.saveError)
+        assertEquals(listOf("s3cret"), stored)
+
+        // The form is now an existing-host form (hostId set): the retry must still carry the password.
+        coEvery { env.vaultManager.storePassword(any(), any()) } coAnswers {
+            stored += secondArg<CharArray>().concatToString()
+        }
+        env.viewModel.saveForm(passwordField) { passwordField = ""; done = true }
+
+        assertTrue(done)
+        assertEquals("", passwordField, "the field is cleared once the save succeeded")
+        assertEquals(listOf("s3cret", "s3cret"), stored)
+        assertEquals(1, env.repository.saved.size, "no duplicate host")
+        assertEquals(1, env.repository.updated.size)
+    }
+
+    @Test
+    fun `the typed password is kept after a refused host write and stored by the retry`() {
+        val env = newEnv(listOf(passwordHost()))
+        env.viewModel.load("h1")
+        env.repository.writeFailure = IllegalStateException("disk I/O error")
+        val stored = mutableListOf<String>()
+        coEvery { env.vaultManager.storePassword(any(), any()) } coAnswers {
+            stored += secondArg<CharArray>().concatToString()
+        }
+        var passwordField = "n3w-s3cret"
+        var done = false
+
+        env.viewModel.saveForm(passwordField) { passwordField = ""; done = true }
+
+        assertFalse(done)
+        assertEquals("n3w-s3cret", passwordField)
+        assertEquals(HostSaveError.SAVE_FAILED, env.viewModel.state.value.saveError)
+        assertTrue(stored.isEmpty(), "nothing reached the vault")
+
+        env.repository.writeFailure = null
+        env.viewModel.saveForm(passwordField) { passwordField = ""; done = true }
+
+        assertTrue(done)
+        assertEquals("", passwordField)
+        assertEquals(listOf("n3w-s3cret"), stored)
+    }
+
+    @Test
+    fun `a validation failure does not lose the typed password either`() {
+        val env = newEnv(emptyList())
+        env.viewModel.load(null) // label, hostname and username still empty
+        var passwordField = "s3cret"
+        var done = false
+
+        env.viewModel.saveForm(passwordField) { passwordField = ""; done = true }
+
+        assertFalse(done)
+        assertEquals("s3cret", passwordField)
+        assertEquals(HostFormError.LABEL_REQUIRED, env.viewModel.state.value.error)
+    }
+
+    @Test
+    fun `an empty password field passes no password, so the stored one is kept`() {
+        val env = newEnv(listOf(passwordHost()))
+        env.viewModel.load("h1")
+
+        var done = false
+        env.viewModel.saveForm("") { done = true }
+
+        assertTrue(done)
+        coVerify(exactly = 0) { env.vaultManager.storePassword(any(), any()) }
+    }
+
+    @Test
+    fun `typing in the password field clears the save error`() {
+        val env = newEnv(listOf(passwordHost()))
+        env.viewModel.load("h1")
+        env.repository.writeFailure = IllegalStateException("disk I/O error")
+        env.viewModel.saveForm("s3cret") { }
+        assertEquals(HostSaveError.SAVE_FAILED, env.viewModel.state.value.saveError)
+
+        env.viewModel.onPasswordEdited()
+
+        assertNull(env.viewModel.state.value.saveError)
+    }
+
+    @Test
+    fun `a vault failure on an existing host is reported as a vault failure`() {
+        val env = newEnv(listOf(passwordHost()))
+        env.viewModel.load("h1")
+        coEvery { env.vaultManager.storePassword(any(), any()) } throws IllegalStateException("vault locked")
+
+        env.viewModel.onLabel("Prod renamed")
+        var done = false
+        env.viewModel.save("s3cret".toCharArray()) { done = true }
+
+        assertFalse(done)
+        assertFalse(env.viewModel.state.value.isSaving)
+        assertEquals(HostSaveError.VAULT_FAILED, env.viewModel.state.value.saveError)
+        assertEquals("Prod renamed", env.repository.updated.single().label)
+    }
+
+    @Test
+    fun `editing the form clears the save error`() {
+        val env = newEnv(emptyList())
+        filledNewHost(env)
+        env.repository.writeFailure = IllegalStateException("disk I/O error")
+        env.viewModel.save(password = null) { }
+        assertEquals(HostSaveError.SAVE_FAILED, env.viewModel.state.value.saveError)
+
+        env.viewModel.onLabel("Other")
+
+        assertNull(env.viewModel.state.value.saveError)
+    }
+
+    @Test
+    fun `a cancellation is not reported as a save failure`() {
+        val env = newEnv(emptyList())
+        filledNewHost(env)
+        env.repository.writeFailure = kotlinx.coroutines.CancellationException("scope cancelled")
+
+        env.viewModel.save(password = null) { }
+
+        assertNull(env.viewModel.state.value.saveError, "cancellation must propagate, not become an error banner")
+    }
+
+    @Test
+    fun `deleting a host stops its running tunnels first, then deletes the host`() {
+        val env = newEnv(listOf(passwordHost()))
+        env.viewModel.load("h1")
+        var hostStillThereWhenStopped: Boolean? = null
+        coEvery { env.tunnelService.stopTunnelsOfHost("h1") } coAnswers {
+            hostStillThereWhenStopped = env.repository.getById("h1") != null
+        }
+
+        var done = false
+        env.viewModel.delete { done = true }
+
+        assertTrue(done)
+        coVerify(exactly = 1) { env.tunnelService.stopTunnelsOfHost("h1") }
+        assertEquals(true, hostStillThereWhenStopped, "tunnels must be stopped before the host is deleted")
+        assertNull(runBlocking { env.repository.getById("h1") })
+    }
+
+    @Test
+    fun `deleting a host goes on with the delete when stopping its tunnels fails`() {
+        val env = newEnv(listOf(passwordHost()))
+        env.viewModel.load("h1")
+        coEvery { env.tunnelService.stopTunnelsOfHost("h1") } throws IllegalStateException("socket error")
+
+        var done = false
+        env.viewModel.delete { done = true }
+
+        assertTrue(done)
+        assertNull(runBlocking { env.repository.getById("h1") })
     }
 
     @Test

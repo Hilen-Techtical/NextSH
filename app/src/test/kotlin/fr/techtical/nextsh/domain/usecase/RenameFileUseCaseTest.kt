@@ -3,6 +3,9 @@
 
 package fr.techtical.nextsh.domain.usecase
 
+import fr.techtical.nextsh.core.ssh.SFTP_ENTRY_NAME_INVALID_MESSAGE
+import fr.techtical.nextsh.core.ssh.SFTP_NAME_EMPTY_MESSAGE
+import fr.techtical.nextsh.core.ssh.SFTP_NAME_EXISTS_MESSAGE
 import fr.techtical.nextsh.core.ssh.SftpManager
 import fr.techtical.nextsh.domain.model.SshErrorCode
 import fr.techtical.nextsh.shared.domain.model.SshResult
@@ -38,30 +41,25 @@ class RenameFileUseCaseTest {
         val oldPath = "/home/user/oldfile.txt"
         val newName = "newfile.txt"
 
-        coEvery { sftpManager.sanitizeFilename(newName) } returns newName
         coEvery { sftpManager.rename(sessionId, oldPath, newName) } returns SshResult.Success(Unit)
 
         val result = renameFileUseCase(sessionId, oldPath, newName)
 
         assertTrue(result is SshResult.Success)
-        coVerify { sftpManager.rename(sessionId, oldPath, newName) }
+        coVerify(exactly = 1) { sftpManager.rename(sessionId, oldPath, newName) }
     }
 
     @Test
-    fun `invoke sanitizes new name before renaming`() = runTest {
+    fun `invoke removes the spaces around the new name, and only those`() = runTest {
         val sessionId = "session-1"
         val oldPath = "/home/user/oldfile.txt"
-        val newNameUnsafe = "new\\file.txt"  // Backslash should be removed
-        val newNameSanitized = "newfile.txt"
 
-        coEvery { sftpManager.sanitizeFilename(newNameUnsafe) } returns newNameSanitized
-        coEvery { sftpManager.rename(sessionId, oldPath, newNameSanitized) } returns SshResult.Success(Unit)
+        coEvery { sftpManager.rename(sessionId, oldPath, "newfile.txt") } returns SshResult.Success(Unit)
 
-        val result = renameFileUseCase(sessionId, oldPath, newNameUnsafe)
+        val result = renameFileUseCase(sessionId, oldPath, "  newfile.txt  ")
 
         assertTrue(result is SshResult.Success)
-        coVerify { sftpManager.sanitizeFilename(newNameUnsafe) }
-        coVerify { sftpManager.rename(sessionId, oldPath, newNameSanitized) }
+        coVerify(exactly = 1) { sftpManager.rename(sessionId, oldPath, "newfile.txt") }
     }
 
     @Test
@@ -70,7 +68,6 @@ class RenameFileUseCaseTest {
         val oldPath = "/oldfile.txt"
         val newName = "newfile.txt"
 
-        coEvery { sftpManager.sanitizeFilename(newName) } returns newName
         coEvery { sftpManager.rename(sessionId, oldPath, newName) } returns SshResult.Success(Unit)
 
         val result = renameFileUseCase(sessionId, oldPath, newName)
@@ -85,12 +82,23 @@ class RenameFileUseCaseTest {
         val oldPath = "/home/user/file.txt"
         val newNameWithSpecial = "file (1).txt"
 
-        coEvery { sftpManager.sanitizeFilename(newNameWithSpecial) } returns newNameWithSpecial
         coEvery { sftpManager.rename(sessionId, oldPath, newNameWithSpecial) } returns SshResult.Success(Unit)
 
         val result = renameFileUseCase(sessionId, oldPath, newNameWithSpecial)
 
         assertTrue(result is SshResult.Success)
+    }
+
+    @Test
+    fun `invoke gives the manager a name with a plus, a percent or an encoded slash exactly as typed`() = runTest {
+        listOf("x+y", "100%", "a%2Fb", "..%2F..%2Ftmp%2Fx", "..x", "x..", "...", ".hidden").forEach { newName ->
+            coEvery { sftpManager.rename("session-1", "/home/user/old", newName) } returns SshResult.Success(Unit)
+
+            val result = renameFileUseCase("session-1", "/home/user/old", newName)
+
+            assertTrue(result is SshResult.Success, newName)
+            coVerify(exactly = 1) { sftpManager.rename("session-1", "/home/user/old", newName) }
+        }
     }
 
     // ── Error cases ──────────────────────────────────────────────────────────────
@@ -105,7 +113,8 @@ class RenameFileUseCaseTest {
 
         assertTrue(result is SshResult.Error)
         assertEquals(SshErrorCode.UNKNOWN, (result as SshResult.Error).code)
-        assertEquals("Le nom ne peut pas être vide", result.message)
+        assertEquals(SFTP_NAME_EMPTY_MESSAGE, result.message)
+        coVerify(exactly = 0) { sftpManager.rename(any(), any(), any()) }
     }
 
     @Test
@@ -118,7 +127,19 @@ class RenameFileUseCaseTest {
 
         assertTrue(result is SshResult.Error)
         assertEquals(SshErrorCode.UNKNOWN, (result as SshResult.Error).code)
-        assertEquals("Le nom ne peut pas être vide", result.message)
+        assertEquals(SFTP_NAME_EMPTY_MESSAGE, result.message)
+        coVerify(exactly = 0) { sftpManager.rename(any(), any(), any()) }
+    }
+
+    @Test
+    fun `invoke refuses a backslash instead of renaming without it`() = runTest {
+        // The name used to be cleaned: "new\file.txt" became "newfile.txt", a name nobody asked for.
+        val result = renameFileUseCase("session-1", "/home/user/oldfile.txt", "new\\file.txt")
+
+        assertTrue(result is SshResult.Error)
+        assertEquals(SshErrorCode.UNKNOWN, (result as SshResult.Error).code)
+        assertEquals(SFTP_ENTRY_NAME_INVALID_MESSAGE, result.message)
+        coVerify(exactly = 0) { sftpManager.rename(any(), any(), any()) }
     }
 
     @Test
@@ -127,13 +148,12 @@ class RenameFileUseCaseTest {
         val oldPath = "/home/user/oldfile.txt"
         val badName = "path/to/newfile.txt"
 
-        coEvery { sftpManager.sanitizeFilename(badName) } returns null
-
         val result = renameFileUseCase(sessionId, oldPath, badName)
 
         assertTrue(result is SshResult.Error)
         assertEquals(SshErrorCode.UNKNOWN, (result as SshResult.Error).code)
-        assertEquals("Nom de fichier invalide", result.message)
+        assertEquals(SFTP_ENTRY_NAME_INVALID_MESSAGE, result.message)
+        coVerify(exactly = 0) { sftpManager.rename(any(), any(), any()) }
     }
 
     @Test
@@ -142,12 +162,49 @@ class RenameFileUseCaseTest {
         val oldPath = "/home/user/oldfile.txt"
         val badName = "/\\\u0000"
 
-        coEvery { sftpManager.sanitizeFilename(badName) } returns null
-
         val result = renameFileUseCase(sessionId, oldPath, badName)
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Nom de fichier invalide", (result as SshResult.Error).message)
+        assertEquals(SFTP_ENTRY_NAME_INVALID_MESSAGE, (result as SshResult.Error).message)
+        coVerify(exactly = 0) { sftpManager.rename(any(), any(), any()) }
+    }
+
+    @Test
+    fun `invoke returns error when new name is only control characters`() = runTest {
+        val sessionId = "session-1"
+        val oldPath = "/home/user/oldfile.txt"
+        val newName = "\u0000\u0001"  // Only control characters
+
+        val result = renameFileUseCase(sessionId, oldPath, newName)
+
+        assertTrue(result is SshResult.Error)
+        assertEquals(SFTP_ENTRY_NAME_INVALID_MESSAGE, (result as SshResult.Error).message)
+        coVerify(exactly = 0) { sftpManager.rename(any(), any(), any()) }
+    }
+
+    @Test
+    fun `invoke refuses every name that is not a bare name and asks the manager nothing`() = runTest {
+        val refused = listOf(
+            "a/b",
+            "/x",
+            "x/",
+            "../x",
+            ".",
+            "..",
+            " .. ",
+            "a\tb",
+            "x\u007Fy",
+            "x\u0085y",
+            "a".repeat(256),
+        )
+
+        refused.forEach { newName ->
+            val result = renameFileUseCase("session-1", "/home/user/oldfile.txt", newName)
+
+            assertTrue(result is SshResult.Error, newName)
+            assertEquals(SFTP_ENTRY_NAME_INVALID_MESSAGE, (result as SshResult.Error).message, newName)
+        }
+        coVerify(exactly = 0) { sftpManager.rename(any(), any(), any()) }
     }
 
     @Test
@@ -156,14 +213,13 @@ class RenameFileUseCaseTest {
         val oldPath = "/home/user/oldfile.txt"
         val newName = "existing.txt"
 
-        coEvery { sftpManager.sanitizeFilename(newName) } returns newName
         coEvery { sftpManager.rename(sessionId, oldPath, newName) } returns
-            SshResult.Error(SshErrorCode.UNKNOWN, "Un fichier portant ce nom existe déjà")
+            SshResult.Error(SshErrorCode.UNKNOWN, SFTP_NAME_EXISTS_MESSAGE)
 
         val result = renameFileUseCase(sessionId, oldPath, newName)
 
         assertTrue(result is SshResult.Error)
-        assertEquals("Un fichier portant ce nom existe déjà", (result as SshResult.Error).message)
+        assertEquals(SFTP_NAME_EXISTS_MESSAGE, (result as SshResult.Error).message)
     }
 
     @Test
@@ -172,7 +228,6 @@ class RenameFileUseCaseTest {
         val oldPath = "/root/oldfile.txt"
         val newName = "newfile.txt"
 
-        coEvery { sftpManager.sanitizeFilename(newName) } returns newName
         coEvery { sftpManager.rename(sessionId, oldPath, newName) } returns
             SshResult.Error(SshErrorCode.UNKNOWN, "Permission refusée")
 
@@ -183,26 +238,11 @@ class RenameFileUseCaseTest {
     }
 
     @Test
-    fun `invoke handles sanitizeFilename returning empty string after trimming`() = runTest {
-        val sessionId = "session-1"
-        val oldPath = "/home/user/oldfile.txt"
-        val newName = "\u0000\u0001"  // Only control characters
-
-        coEvery { sftpManager.sanitizeFilename(newName) } returns null
-
-        val result = renameFileUseCase(sessionId, oldPath, newName)
-
-        assertTrue(result is SshResult.Error)
-        assertEquals("Nom de fichier invalide", (result as SshResult.Error).message)
-    }
-
-    @Test
     fun `invoke preserves path with multiple segments`() = runTest {
         val sessionId = "session-1"
         val oldPath = "/home/user/deep/nested/file.txt"
         val newName = "renamed.txt"
 
-        coEvery { sftpManager.sanitizeFilename(newName) } returns newName
         coEvery { sftpManager.rename(sessionId, oldPath, newName) } returns SshResult.Success(Unit)
 
         val result = renameFileUseCase(sessionId, oldPath, newName)
@@ -217,7 +257,6 @@ class RenameFileUseCaseTest {
         val oldPath = "/home/user/oldfile.txt"
         val newName = "newfile.txt"
 
-        coEvery { sftpManager.sanitizeFilename(newName) } returns newName
         coEvery { sftpManager.rename(sessionId, oldPath, newName) } returns
             SshResult.Error(SshErrorCode.UNKNOWN, "Connexion SFTP perdue")
 

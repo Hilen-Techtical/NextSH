@@ -46,12 +46,14 @@ class DesktopTunnelRepositorySyncUpsertTest {
     @Test
     fun `syncing an existing tunnel keeps its createdAt and writes every synced column`() = runTest {
         db.insertHostRow("h2")
-        db.insertTunnelRow("t1", hostId = "h1")
+        // Seeded as SOCKS5 so that the type change to LOCAL_FORWARD (the only type with a start path) is
+        // written too.
+        db.insertTunnelRow("t1", hostId = "h1", type = "DYNAMIC_SOCKS5")
         val remote = TunnelConfig(
             id = "t1",
             label = "Remote label",
             hostId = "h2",
-            type = TunnelType.DYNAMIC_SOCKS5,
+            type = TunnelType.LOCAL_FORWARD,
             localPort = 1080,
             remoteHost = "remote.internal",
             remotePort = 3128,
@@ -59,6 +61,8 @@ class DesktopTunnelRepositorySyncUpsertTest {
             openBrowserOnConnect = true,
             keepAliveAfterBrowserClose = false,
             isFavorite = true,
+            // Not the default "/" the seed row holds, so the in-place update must really write it.
+            browserPath = "/admin?tab=2#top",
         )
 
         repository.upsertSyncEntry(
@@ -100,6 +104,7 @@ class DesktopTunnelRepositorySyncUpsertTest {
                 localPort = 9000,
                 remoteHost = "localhost",
                 remotePort = 90,
+                browserPath = "/grafana/d/abc?orgId=1",
             ),
             clock = clockOf(6L),
             updatedAt = REMOTE_UPDATED_AT,
@@ -138,6 +143,32 @@ class DesktopTunnelRepositorySyncUpsertTest {
         assertNull(row.deletedAt)
         assertEquals(SEED_CREATED_AT, row.createdAt)
         assertEquals("Back from the dead", assertNotNull(repository.getById("t1")).label)
+    }
+
+    @Test
+    fun `a revived tombstone takes the browserPath of the live entry`() = runTest {
+        db.insertTunnelRow("t1", hostId = "h1", browserPath = "/old")
+        repository.delete("t1")
+
+        repository.upsertSyncEntry(
+            SyncEntry(
+                id = "t1",
+                payload = TunnelConfig(
+                    id = "t1",
+                    label = "Revived",
+                    hostId = "h1",
+                    type = TunnelType.LOCAL_FORWARD,
+                    localPort = 8080,
+                    remoteHost = "localhost",
+                    remotePort = 80,
+                    browserPath = "/new",
+                ),
+                clock = clockOf(6L),
+                updatedAt = REMOTE_UPDATED_AT,
+            ),
+        )
+
+        assertEquals("/new", assertNotNull(repository.getById("t1")).browserPath)
     }
 
     @Test

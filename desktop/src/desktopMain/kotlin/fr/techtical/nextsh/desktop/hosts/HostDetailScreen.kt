@@ -85,6 +85,7 @@ import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.TriangleAlert
 import com.composables.icons.lucide.X
 import fr.techtical.nextsh.desktop.components.ConfirmDeleteDialog
+import fr.techtical.nextsh.desktop.scope.rememberScreenViewModel
 import fr.techtical.nextsh.desktop.sessions.ThemePickerDialog
 import fr.techtical.nextsh.desktop.theme.Border1
 import fr.techtical.nextsh.desktop.theme.Border2
@@ -107,6 +108,8 @@ import fr.techtical.nextsh.desktop.theme.TextPrimary
 import fr.techtical.nextsh.desktop.theme.TextSecondary
 import fr.techtical.nextsh.desktop.theme.WarningAmber
 import fr.techtical.nextsh.desktop.theme.White
+import fr.techtical.nextsh.shared.core.backup.BackupFieldProblem
+import fr.techtical.nextsh.shared.core.backup.BackupLimits
 import fr.techtical.nextsh.shared.domain.model.AuthType
 import fr.techtical.nextsh.shared.domain.model.SshKey
 import java.awt.FileDialog
@@ -122,6 +125,18 @@ import fr.techtical.nextsh.desktop.generated.resources.host_detail_auth_type_fid
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_auth_type_password
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_auth_type_ssh_key
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_cert_dialog_title
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_error_biometric_unsupported
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_error_cert_required
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_error_fido2_key_missing
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_error_fido2_key_required
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_error_host_deleted
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_error_host_not_found
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_error_hostname_required
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_error_key_missing
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_error_key_required
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_error_label_required
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_error_port_range
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_error_username_required
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_cert_kept
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_cert_label
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_cert_none
@@ -140,6 +155,9 @@ import fr.techtical.nextsh.desktop.generated.resources.host_detail_field_hide
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_field_show
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_group_optional
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_group_placeholder
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_hostname_invalid
+import fr.techtical.nextsh.desktop.generated.resources.backup_field_control_character
+import fr.techtical.nextsh.desktop.generated.resources.backup_field_too_long_text
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_hostname_label
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_key_empty
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_key_pick
@@ -151,6 +169,8 @@ import fr.techtical.nextsh.desktop.generated.resources.host_detail_password_curr
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_password_keep_hint
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_password_new
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_save
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_save_error_failed
+import fr.techtical.nextsh.desktop.generated.resources.host_detail_save_error_vault_failed
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_save_loading
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_section_auth
 import fr.techtical.nextsh.desktop.generated.resources.host_detail_section_connection
@@ -191,7 +211,7 @@ fun HostDetailScreen(
     hostId: String?,
     onBack: () -> Unit,
 ) {
-    val viewModel = remember { HostDetailViewModel() }
+    val viewModel = rememberScreenViewModel { HostDetailViewModel() }
     val state by viewModel.state.collectAsState()
 
     LaunchedEffect(hostId) { viewModel.load(hostId) }
@@ -252,7 +272,8 @@ fun HostDetailScreen(
                     .padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(Spacing.Md),
             ) {
-                state.error?.let { ErrorBanner(it) }
+                state.error?.let { ErrorBanner(it.message()) }
+                state.saveError?.let { ErrorBanner(it.message()) }
 
                 IdentitySection(state, viewModel)
                 ConnectionSection(state, viewModel)
@@ -260,7 +281,10 @@ fun HostDetailScreen(
                     state = state,
                     viewModel = viewModel,
                     passwordInput = passwordInput,
-                    onPasswordInput = { passwordInput = it },
+                    onPasswordInput = {
+                        passwordInput = it
+                        viewModel.onPasswordEdited()
+                    },
                     passwordVisible = passwordVisible,
                     onTogglePasswordVisible = { passwordVisible = !passwordVisible },
                 )
@@ -275,11 +299,12 @@ fun HostDetailScreen(
                 isSaving = state.isSaving,
                 onCancel = onBack,
                 onSave = {
-                    val pinChars = if (state.authType == AuthType.PASSWORD && passwordInput.isNotEmpty()) {
-                        passwordInput.toCharArray()
-                    } else null
-                    passwordInput = ""
-                    viewModel.save(pinChars, onBack)
+                    // The typed password stays in the field until the save went through: a refused save
+                    // must not lose it (see HostDetailViewModel.saveForm).
+                    viewModel.saveForm(passwordInput) {
+                        passwordInput = ""
+                        onBack()
+                    }
                 },
             )
         }
@@ -435,7 +460,16 @@ private fun ConnectionSection(state: HostDetailFormState, viewModel: HostDetailV
                     value = state.hostname,
                     onValueChange = viewModel::onHostname,
                     placeholder = "192.168.1.10",
+                    isError = state.hostnameInvalid,
                 )
+                // The reason stays under the field: a host saved here must be restorable from a backup.
+                if (state.hostnameInvalid) {
+                    Text(
+                        text = stringResource(Res.string.host_detail_hostname_invalid, BackupLimits.MAX_HOST_LENGTH),
+                        color = ErrorRed,
+                        fontSize = 10.sp,
+                    )
+                }
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.Xs)) {
                 FieldLabel("Port")
@@ -452,7 +486,22 @@ private fun ConnectionSection(state: HostDetailFormState, viewModel: HostDetailV
                 value = state.username,
                 onValueChange = viewModel::onUsername,
                 placeholder = "root",
+                isError = state.usernameProblem != null,
             )
+            // The reason stays under the field: a host saved here must be restorable from a backup.
+            when (state.usernameProblem) {
+                BackupFieldProblem.TOO_LONG -> Text(
+                    text = stringResource(Res.string.backup_field_too_long_text, BackupLimits.MAX_FREE_TEXT_LENGTH),
+                    color = ErrorRed,
+                    fontSize = 10.sp,
+                )
+                BackupFieldProblem.CONTROL_CHARACTER -> Text(
+                    text = stringResource(Res.string.backup_field_control_character),
+                    color = ErrorRed,
+                    fontSize = 10.sp,
+                )
+                else -> Unit
+            }
         }
     }
 }
@@ -725,6 +774,30 @@ private fun HelperText(text: String, warn: Boolean = false) {
     }
 }
 
+/** Localized, non-technical message for a save the data layer refused. */
+@Composable
+private fun HostSaveError.message(): String = when (this) {
+    HostSaveError.SAVE_FAILED -> stringResource(Res.string.host_detail_save_error_failed)
+    HostSaveError.VAULT_FAILED -> stringResource(Res.string.host_detail_save_error_vault_failed)
+}
+
+/** Localized message for a form the validation refused. */
+@Composable
+private fun HostFormError.message(): String = when (this) {
+    HostFormError.HOST_NOT_FOUND -> stringResource(Res.string.host_detail_error_host_not_found)
+    HostFormError.HOST_DELETED -> stringResource(Res.string.host_detail_error_host_deleted)
+    HostFormError.LABEL_REQUIRED -> stringResource(Res.string.host_detail_error_label_required)
+    HostFormError.HOSTNAME_REQUIRED -> stringResource(Res.string.host_detail_error_hostname_required)
+    HostFormError.PORT_OUT_OF_RANGE -> stringResource(Res.string.host_detail_error_port_range)
+    HostFormError.USERNAME_REQUIRED -> stringResource(Res.string.host_detail_error_username_required)
+    HostFormError.KEY_REQUIRED -> stringResource(Res.string.host_detail_error_key_required)
+    HostFormError.KEY_MISSING -> stringResource(Res.string.host_detail_error_key_missing)
+    HostFormError.CERT_REQUIRED -> stringResource(Res.string.host_detail_error_cert_required)
+    HostFormError.FIDO2_KEY_REQUIRED -> stringResource(Res.string.host_detail_error_fido2_key_required)
+    HostFormError.FIDO2_KEY_MISSING -> stringResource(Res.string.host_detail_error_fido2_key_missing)
+    HostFormError.BIOMETRIC_UNSUPPORTED -> stringResource(Res.string.host_detail_error_biometric_unsupported)
+}
+
 @Composable
 private fun ErrorBanner(message: String) {
     Row(
@@ -757,10 +830,12 @@ private fun TechticalTextField(
     modifier: Modifier = Modifier,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     trailingIcon: @Composable (() -> Unit)? = null,
+    isError: Boolean = false,
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
+        isError = isError,
         placeholder = {
             Text(text = placeholder, color = TextDisabled, fontSize = 12.sp)
         },
@@ -1000,6 +1075,7 @@ private fun CertificatePickerRow(
     val statusText = pendingFileName
         ?: stringResource(if (certAlreadyStored) Res.string.host_detail_cert_kept else Res.string.host_detail_cert_none)
     val hasCert = pendingFileName != null || certAlreadyStored
+    val certDialogTitle = stringResource(Res.string.host_detail_cert_dialog_title)
 
     Row(
         modifier = Modifier
@@ -1026,7 +1102,7 @@ private fun CertificatePickerRow(
         )
         BtnSecondarySm(
             onClick = {
-                val picked = pickCertificateFile()
+                val picked = pickCertificateFile(certDialogTitle)
                 if (picked != null) {
                     onCertLoaded(picked.readText(Charsets.UTF_8), picked.name)
                 }
@@ -1174,8 +1250,8 @@ private fun AuthType.displayName(): String = stringResource(when (this) {
  * l'AWT event thread, OK dans un click handler Compose. Même approche que
  * SFTP upload/download (pas de SwingPanel punch-through).
  */
-private fun pickCertificateFile(): File? {
-    val dialog = FileDialog(null as Frame?, "Sélectionner le certificat OpenSSH", FileDialog.LOAD).apply {
+private fun pickCertificateFile(title: String): File? {
+    val dialog = FileDialog(null as Frame?, title, FileDialog.LOAD).apply {
         isMultipleMode = false
         setFilenameFilter { _, name -> name.endsWith("-cert.pub") || name.endsWith(".pub") }
         isVisible = true

@@ -3,6 +3,7 @@
 
 package fr.techtical.nextsh.domain.usecase
 
+import fr.techtical.nextsh.core.vault.VaultExport
 import fr.techtical.nextsh.core.vault.VaultExporter
 import javax.inject.Inject
 
@@ -13,7 +14,7 @@ import javax.inject.Inject
 class ExportVaultUseCase @Inject constructor(
     private val vaultExporter: VaultExporter,
 ) {
-    suspend operator fun invoke(passphrase: CharArray): Result<ByteArray> {
+    suspend operator fun invoke(passphrase: CharArray): Result<VaultExport> {
         return try {
             val data = vaultExporter.export(passphrase)
             Result.success(data)

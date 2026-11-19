@@ -100,6 +100,7 @@ class TunnelBrowserViewModelTest {
         id: String = "t1",
         localPort: Int = 8081,
         keepAlive: Boolean = true,
+        browserPath: String = "/",
     ) = TunnelConfig(
         id = id,
         label = "Test tunnel",
@@ -109,10 +110,16 @@ class TunnelBrowserViewModelTest {
         remoteHost = "127.0.0.1",
         remotePort = 80,
         keepAliveAfterBrowserClose = keepAlive,
+        browserPath = browserPath,
     )
 
-    private fun loadTunnel(id: String = "t1", localPort: Int = 8081, keepAlive: Boolean = true) {
-        configs[id] = makeConfig(id, localPort, keepAlive)
+    private fun loadTunnel(
+        id: String = "t1",
+        localPort: Int = 8081,
+        keepAlive: Boolean = true,
+        browserPath: String = "/",
+    ) {
+        configs[id] = makeConfig(id, localPort, keepAlive, browserPath)
         viewModel.loadTunnel(id)
     }
 
@@ -714,7 +721,7 @@ class TunnelBrowserViewModelTest {
 
         viewModel.onWebViewReleased()
 
-        assertEquals("http://127.0.0.1:8081", viewModel.uiState.value.initialUrl)
+        assertEquals("http://127.0.0.1:8081/", viewModel.uiState.value.initialUrl)
         assertNotNull(viewModel.uiState.value.tunnelConfig)
     }
 
@@ -772,7 +779,7 @@ class TunnelBrowserViewModelTest {
 
         assertEquals(1, responder.cancelCount)
         assertNull(viewModel.uiState.value.authPrompt)
-        assertEquals("http://127.0.0.1:9090", viewModel.uiState.value.initialUrl)
+        assertEquals("http://127.0.0.1:9090/", viewModel.uiState.value.initialUrl)
     }
 
     @Test
@@ -832,6 +839,70 @@ class TunnelBrowserViewModelTest {
 
         assertEquals(1, responders.sumOf { it.proceeded.size })
         assertEquals(count - 1, responders.sumOf { it.cancelCount })
+    }
+
+    // ── Start URL of the tunnel (per-tunnel start path) ──────────────────────
+
+    @Test
+    fun `the default start path opens the site root with a trailing slash`() {
+        loadTunnel(localPort = 8081)
+
+        assertEquals("http://127.0.0.1:8081/", viewModel.uiState.value.initialUrl)
+        assertEquals("http://127.0.0.1:8081/", viewModel.uiState.value.currentUrl)
+    }
+
+    @Test
+    fun `a stored start path is appended after the loopback authority`() {
+        loadTunnel(localPort = 3000, browserPath = "/admin/login?next=%2Fhome#top")
+
+        assertEquals("http://127.0.0.1:3000/admin/login?next=%2Fhome#top", viewModel.uiState.value.initialUrl)
+        assertEquals(viewModel.uiState.value.initialUrl, viewModel.uiState.value.currentUrl)
+    }
+
+    @Test
+    fun `a stored start path without leading slash is normalized`() {
+        loadTunnel(localPort = 3000, browserPath = "admin")
+
+        assertEquals("http://127.0.0.1:3000/admin", viewModel.uiState.value.initialUrl)
+    }
+
+    @Test
+    fun `a stored start path failing validation falls back to the site root`() {
+        // Stored values may come from a sync peer or an old backup: never trust them.
+        loadTunnel(localPort = 3000, browserPath = "/has space")
+
+        assertEquals("http://127.0.0.1:3000/", viewModel.uiState.value.initialUrl)
+    }
+
+    @Test
+    fun `a start path cannot change the host of the opened URL`() {
+        val hostile = listOf("//evil.example/x", "/@evil.example/", "\\\\evil.example", "@evil.example", "/\\evil.example")
+
+        hostile.forEach { path ->
+            loadTunnel(id = "t-$path", localPort = 3000, browserPath = path)
+
+            val url = viewModel.uiState.value.initialUrl
+            assertEquals("127.0.0.1", java.net.URI(url).host, "host of the URL built for a hostile path")
+            assertEquals(3000, java.net.URI(url).port)
+        }
+    }
+
+    @Test
+    fun `an auth challenge on a page below the start path shows the tunnel port`() {
+        loadTunnel(localPort = 8081, browserPath = "/admin?token=abc#frag")
+
+        challenge(FakeResponder(), url = viewModel.uiState.value.initialUrl)
+
+        assertEquals("127.0.0.1:8081", prompt().origin)
+    }
+
+    @Test
+    fun `an auth challenge on the site root with a trailing slash shows the tunnel port`() {
+        loadTunnel(localPort = 8081)
+
+        challenge(FakeResponder(), url = viewModel.uiState.value.initialUrl)
+
+        assertEquals("127.0.0.1:8081", prompt().origin)
     }
 
     // ── Realm in the prompt ───────────────────────────────────────────────────

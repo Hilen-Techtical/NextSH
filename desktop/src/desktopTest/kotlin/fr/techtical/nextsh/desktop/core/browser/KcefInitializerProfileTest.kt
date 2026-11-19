@@ -99,8 +99,7 @@ class KcefInitializerProfileTest {
         initializer.initialize()
 
         val failed = awaitFailed(initializer)
-        assertEquals("Le dossier du profil du navigateur n'a pas pu être déterminé.", failed.reason)
-        assertEquals("Impossible d'initialiser Chromium", failed.title)
+        assertEquals(KcefFailure.ProfileUnknown, failed.failure)
         assertEquals(0, lockCalls.get())
         assertFalse(chromiumStarted.get(), "Chromium must not start without a profile directory")
     }
@@ -112,13 +111,7 @@ class KcefInitializerProfileTest {
         initializer.initialize()
 
         val failed = awaitFailed(initializer)
-        assertEquals(
-            "Le navigateur intégré est déjà utilisé par une autre instance de NextSH, " +
-                "peut-être réduite dans la zone de notification. " +
-                "Quittez-la, puis rouvrez le navigateur.",
-            failed.reason,
-        )
-        assertEquals("Navigateur intégré indisponible", failed.title)
+        assertEquals(KcefFailure.ProfileBusy, failed.failure)
         assertFalse(chromiumStarted.get(), "Chromium must not start while the profile is busy")
     }
 
@@ -141,7 +134,7 @@ class KcefInitializerProfileTest {
         val failedAgain = awaitFailed(initializer)
 
         assertEquals(2, lockCalls.get())
-        assertEquals("Navigateur intégré indisponible", failedAgain.title)
+        assertEquals(KcefFailure.ProfileBusy, failedAgain.failure)
         assertFalse(chromiumStarted.get(), "Chromium must not start while the profile is busy")
     }
 

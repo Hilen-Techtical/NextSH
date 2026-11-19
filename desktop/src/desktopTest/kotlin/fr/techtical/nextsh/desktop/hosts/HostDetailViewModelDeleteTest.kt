@@ -5,6 +5,7 @@ package fr.techtical.nextsh.desktop.hosts
 
 import fr.techtical.nextsh.desktop.core.vault.FakeVaultManagerMem
 import fr.techtical.nextsh.desktop.data.db.repository.DesktopHostFolderRepository
+import fr.techtical.nextsh.desktop.service.DesktopTunnelService
 import fr.techtical.nextsh.shared.domain.model.AuthType
 import fr.techtical.nextsh.shared.domain.model.Host
 import fr.techtical.nextsh.shared.domain.repository.CustomTerminalThemeRepository
@@ -73,6 +74,8 @@ class HostDetailViewModelDeleteTest {
             vaultManager = vault,
             customThemeRepository = customThemeRepository,
             appScope = TestAppScope(scope),
+            // The delete stops the host's tunnels first: never fall back on the real container.
+            tunnelService = mockk<DesktopTunnelService>(relaxed = true),
         )
         viewModel.load(host.id)
         var done = false

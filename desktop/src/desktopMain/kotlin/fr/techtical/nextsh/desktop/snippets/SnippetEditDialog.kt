@@ -55,8 +55,11 @@ import com.composables.icons.lucide.ChevronDown
 import com.composables.icons.lucide.Lucide
 import fr.techtical.nextsh.desktop.generated.resources.Res
 import fr.techtical.nextsh.desktop.generated.resources.action_cancel
-import fr.techtical.nextsh.desktop.generated.resources.snippets_error_command_empty
-import fr.techtical.nextsh.desktop.generated.resources.snippets_error_label_empty
+import fr.techtical.nextsh.desktop.generated.resources.backup_field_control_character
+import fr.techtical.nextsh.desktop.generated.resources.backup_field_empty
+import fr.techtical.nextsh.desktop.generated.resources.backup_field_invisible_format
+import fr.techtical.nextsh.desktop.generated.resources.backup_field_too_long_command
+import fr.techtical.nextsh.desktop.generated.resources.backup_field_too_long_text
 import fr.techtical.nextsh.desktop.generated.resources.snippets_field_category
 import fr.techtical.nextsh.desktop.generated.resources.snippets_field_command
 import fr.techtical.nextsh.desktop.generated.resources.snippets_field_host
@@ -82,6 +85,8 @@ import fr.techtical.nextsh.desktop.theme.TextPrimary
 import fr.techtical.nextsh.desktop.theme.TextSecondary
 import fr.techtical.nextsh.desktop.theme.White
 import fr.techtical.nextsh.desktop.window.WindowCaptureProtection
+import fr.techtical.nextsh.shared.core.backup.BackupFieldProblem
+import fr.techtical.nextsh.shared.core.backup.BackupLimits
 import fr.techtical.nextsh.shared.domain.model.Host
 import fr.techtical.nextsh.shared.domain.model.Snippet
 import org.jetbrains.compose.resources.stringResource
@@ -121,10 +126,13 @@ fun SnippetEditDialog(
         var command by remember { mutableStateOf(snippet?.command ?: "") }
         var category by remember { mutableStateOf(snippet?.category ?: "") }
         var selectedHostId by remember { mutableStateOf<String?>(snippet?.hostId) }
-        var localError by remember { mutableStateOf<String?>(null) }
+        // An empty required field is only reported once the user has touched it.
+        var labelTouched by remember { mutableStateOf(snippet != null) }
+        var commandTouched by remember { mutableStateOf(snippet != null) }
 
-        val labelErrorText = stringResource(Res.string.snippets_error_label_empty)
-        val commandErrorText = stringResource(Res.string.snippets_error_command_empty)
+        val problems = snippetFieldProblems(label, command, category)
+        val labelProblem = problems.label?.takeIf { it != BackupFieldProblem.EMPTY || labelTouched }
+        val commandProblem = problems.command?.takeIf { it != BackupFieldProblem.EMPTY || commandTouched }
         val globalLabel = stringResource(Res.string.snippets_field_host_global)
 
         val selectedHostLabel = hosts.find { it.id == selectedHostId }?.label ?: globalLabel
@@ -180,23 +188,26 @@ fun SnippetEditDialog(
                 SnippetFieldGroup(stringResource(Res.string.snippets_field_label)) {
                     OutlinedTextField(
                         value = label,
-                        onValueChange = { label = it; localError = null },
+                        onValueChange = { label = it; labelTouched = true },
                         placeholder = { Text("git pull --rebase", color = TextDisabled, fontSize = 12.sp) },
                         singleLine = true,
+                        isError = labelProblem != null,
                         textStyle = TextStyle(fontSize = 12.sp, color = TextPrimary),
                         colors = snippetTextFieldColors(),
                         shape = RoundedCornerShape(Radii.Md),
                         modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
                     )
+                    FieldProblemText(labelProblem, FieldLimit.TEXT)
                 }
 
                 // Command field (multiline)
                 SnippetFieldGroup(stringResource(Res.string.snippets_field_command)) {
                     OutlinedTextField(
                         value = command,
-                        onValueChange = { command = it; localError = null },
+                        onValueChange = { command = it; commandTouched = true },
                         placeholder = { Text("git pull --rebase origin main", color = TextDisabled, fontSize = 12.sp) },
                         singleLine = false,
+                        isError = commandProblem != null,
                         minLines = 4,
                         textStyle = TextStyle(
                             fontSize = 12.sp,
@@ -207,6 +218,7 @@ fun SnippetEditDialog(
                         shape = RoundedCornerShape(Radii.Md),
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    FieldProblemText(commandProblem, FieldLimit.COMMAND)
                 }
 
                 // Category field
@@ -216,11 +228,13 @@ fun SnippetEditDialog(
                         onValueChange = { category = it },
                         placeholder = { Text("git, docker, system…", color = TextDisabled, fontSize = 12.sp) },
                         singleLine = true,
+                        isError = problems.category != null,
                         textStyle = TextStyle(fontSize = 12.sp, color = TextPrimary),
                         colors = snippetTextFieldColors(),
                         shape = RoundedCornerShape(Radii.Md),
                         modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
                     )
+                    FieldProblemText(problems.category, FieldLimit.TEXT)
                 }
 
                 // Host scope dropdown
@@ -230,15 +244,6 @@ fun SnippetEditDialog(
                         hosts = hosts,
                         globalLabel = globalLabel,
                         onSelect = { selectedHostId = it },
-                    )
-                }
-
-                // Error message
-                if (localError != null) {
-                    Text(
-                        text = localError!!,
-                        color = ErrorRed,
-                        fontSize = 11.sp,
                     )
                 }
             }
@@ -256,10 +261,8 @@ fun SnippetEditDialog(
                 Spacer(Modifier.width(Spacing.Sm))
                 SnippetBtnPrimary(
                     onClick = {
-                        when {
-                            label.isBlank() -> localError = labelErrorText
-                            command.isBlank() -> localError = commandErrorText
-                            else -> onSave(
+                        if (!problems.hasAny) {
+                            onSave(
                                 label.trim(),
                                 command.trim(),
                                 category.trim().takeIf { it.isNotBlank() },
@@ -267,11 +270,36 @@ fun SnippetEditDialog(
                             )
                         }
                     },
+                    enabled = !problems.hasAny,
                     label = if (isNew) stringResource(Res.string.snippets_action_add)
                     else stringResource(Res.string.snippets_action_edit),
                 )
             }
         }
+    }
+}
+
+// ── Raisons de refus d'un champ (partagées avec l'éditeur de thèmes) ─────────
+
+/** Which limit a [BackupFieldProblem.TOO_LONG] reason names. */
+internal enum class FieldLimit { TEXT, COMMAND }
+
+/** The localized reason under a field refused by [fr.techtical.nextsh.shared.core.backup.BackupFieldRules]. */
+@Composable
+internal fun BackupFieldProblem.reasonText(limit: FieldLimit): String = when (this) {
+    BackupFieldProblem.EMPTY -> stringResource(Res.string.backup_field_empty)
+    BackupFieldProblem.TOO_LONG -> when (limit) {
+        FieldLimit.TEXT -> stringResource(Res.string.backup_field_too_long_text, BackupLimits.MAX_TEXT_LENGTH)
+        FieldLimit.COMMAND -> stringResource(Res.string.backup_field_too_long_command, BackupLimits.MAX_COMMAND_BYTES / 1024)
+    }
+    BackupFieldProblem.CONTROL_CHARACTER -> stringResource(Res.string.backup_field_control_character)
+    BackupFieldProblem.INVISIBLE_FORMAT -> stringResource(Res.string.backup_field_invisible_format)
+}
+
+@Composable
+private fun FieldProblemText(problem: BackupFieldProblem?, limit: FieldLimit) {
+    if (problem != null) {
+        Text(text = problem.reasonText(limit), color = ErrorRed, fontSize = 10.sp)
     }
 }
 
@@ -377,12 +405,15 @@ private fun SnippetBtnGhost(onClick: () -> Unit, label: String) {
 }
 
 @Composable
-private fun SnippetBtnPrimary(onClick: () -> Unit, label: String) {
+private fun SnippetBtnPrimary(onClick: () -> Unit, label: String, enabled: Boolean = true) {
     Button(
         onClick = onClick,
+        enabled = enabled,
         colors = ButtonDefaults.buttonColors(
             containerColor = Burgundy,
             contentColor = White,
+            disabledContainerColor = Burgundy.copy(alpha = 0.4f),
+            disabledContentColor = White.copy(alpha = 0.6f),
         ),
         shape = RoundedCornerShape(Radii.Md),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),

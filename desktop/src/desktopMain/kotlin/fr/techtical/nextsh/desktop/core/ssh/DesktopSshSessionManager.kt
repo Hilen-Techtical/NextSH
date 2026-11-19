@@ -5,7 +5,6 @@ package fr.techtical.nextsh.desktop.core.ssh
 
 import fr.techtical.nextsh.desktop.core.auth.fido2.Fido2Signer
 import fr.techtical.nextsh.desktop.core.auth.fido2.YubiKitFidoManager
-import fr.techtical.nextsh.desktop.core.ssh.fido2.SkKeyAlgorithm
 import fr.techtical.nextsh.desktop.core.ssh.fido2.SkKeyHandle
 import fr.techtical.nextsh.shared.core.ssh.fido2.SkAuthMethod
 import fr.techtical.nextsh.shared.core.ssh.fido2.SkSshSignature
@@ -19,12 +18,14 @@ import fr.techtical.nextsh.shared.domain.model.SshResult
 import fr.techtical.nextsh.shared.domain.model.SshSession
 import fr.techtical.nextsh.shared.domain.ssh.SshSessionManager
 import fr.techtical.nextsh.shared.util.randomUuid
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
-import net.schmizz.keepalive.KeepAliveProvider
 import net.schmizz.sshj.DefaultConfig
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.userauth.UserAuthException
@@ -44,8 +45,9 @@ class DesktopSshSessionManager(
      * sur le réglage « Timeout de connexion » (Settings, 5-30 s). Le défaut
      * ci-dessous ne sert qu'aux appels non câblés (tests, previews).
      *
-     * Distinct de `host.keepAliveSeconds` : ce dernier pilote UNIQUEMENT le
-     * `keepAliveInterval` post-connexion, pas le délai de connexion.
+     * Distinct de `host.keepAliveSeconds`, qui n'est pas utilisé sur Desktop :
+     * le keepalive de SSHJ n'est jamais armé, la vivacité est assurée par la
+     * sonde `keepalive@openssh.com` de [DesktopSshTerminalSession] (15 s).
      */
     private val connectTimeoutMsProvider: () -> Int = { 10_000 },
 ) : SshSessionManager {
@@ -61,7 +63,7 @@ class DesktopSshSessionManager(
         password: CharArray,
     ): SshResult<SshSession> = withContext(Dispatchers.IO) {
         try {
-            val config = DefaultConfig().apply { keepAliveProvider = KeepAliveProvider.HEARTBEAT }
+            val config = DefaultConfig()
             val sshClient = SSHClient(config).apply {
                 // Phase 1.x: fingerprint pinning / known_hosts not wired yet (Wave 4 target).
                 addHostKeyVerifier(hostKeyVerifier)
@@ -70,7 +72,6 @@ class DesktopSshSessionManager(
                 timeout = 30_000
             }
             sshClient.connect(host.hostname, host.port)
-            sshClient.connection.keepAlive.keepAliveInterval = host.keepAliveSeconds.coerceIn(5, 300)
             try {
                 sshClient.authPassword(host.username, password)
             } finally {
@@ -157,7 +158,7 @@ class DesktopSshSessionManager(
         val handle = try {
             DesktopSshKeyLoader.loadSkKeyHandle(skKey)
         } catch (e: IllegalArgumentException) {
-            return@withContext SshResult.Error(SshErrorCode.AUTH_FAILED, fido2KeyInvalidMessage(e.message))
+            return@withContext SshResult.Error(SshErrorCode.AUTH_FAILED, fido2KeyInvalidMessage())
         }
 
         // SkAuthMethod utilise un challengeHandler suspend → appel Fido2Signer.signChallenge
@@ -168,11 +169,9 @@ class DesktopSshSessionManager(
         )
 
         try {
-            val config = DefaultConfig().apply {
-                keepAliveProvider = KeepAliveProvider.HEARTBEAT
-                // Enregistrer le KeyAlgorithm sk-* pour la négociation KEXINIT
-                SkKeyAlgorithm.registerIn(this)
-            }
+            // Config SSHJ standard : SkAuthMethod écrit lui-même le nom d'algorithme sk-* et le
+            // blob de signature, il n'y a aucun KeyAlgorithm sk-* à enregistrer.
+            val config = DefaultConfig()
             val sshClient = SSHClient(config).apply {
                 addHostKeyVerifier(hostKeyVerifier)
                 connectTimeout = connectTimeoutMsProvider()
@@ -187,7 +186,6 @@ class DesktopSshSessionManager(
                     "Clé hôte non approuvée : ${e.message ?: "rejet utilisateur"}",
                 )
             }
-            sshClient.connection.keepAlive.keepAliveInterval = host.keepAliveSeconds.coerceIn(5, 300)
 
             // Auth via SkAuthMethod (pas authPublickey : on bypasse le KeyAlgorithm standard)
             sshClient.auth(host.username, listOf(skAuthMethod))
@@ -252,7 +250,7 @@ class DesktopSshSessionManager(
                 }
             }
 
-            val config = DefaultConfig().apply { keepAliveProvider = KeepAliveProvider.HEARTBEAT }
+            val config = DefaultConfig()
             val sshClient = SSHClient(config).apply {
                 addHostKeyVerifier(hostKeyVerifier)
                 connectTimeout = connectTimeoutMsProvider()
@@ -267,7 +265,6 @@ class DesktopSshSessionManager(
                     "Clé hôte non approuvée : ${e.message ?: "rejet utilisateur"}",
                 )
             }
-            sshClient.connection.keepAlive.keepAliveInterval = host.keepAliveSeconds.coerceIn(5, 300)
             sshClient.authPublickey(host.username, keyProvider)
 
             val session = sshClient.startSession()
@@ -324,6 +321,31 @@ class DesktopSshSessionManager(
         removeSession(sessionId)
     }
 
+    /**
+     * Disconnects every session, tab or no tab: the net under the tab-driven closes, for the vault wipe. The
+     * disconnects run in parallel (a close that waits on a dead route does not hold the others), a session
+     * that fails to close does not stop them. Returns when each disconnect call returned; note that
+     * [disconnect] returns at once for a session whose transport another coroutine already took to shut
+     * down, so a caller that must wait for those joins them itself.
+     */
+    suspend fun disconnectAll() {
+        val ids = _sessions.value.map { it.id }
+        coroutineScope {
+            for (id in ids) {
+                launch {
+                    try {
+                        disconnect(id)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // Best effort: the entry is dropped, whatever the transport said.
+                        removeSession(id)
+                    }
+                }
+            }
+        }
+    }
+
     override suspend fun getSession(sessionId: String): SshSession? =
         _sessions.value.firstOrNull { it.id == sessionId }
 
@@ -357,8 +379,15 @@ internal fun fido2ChallengeHandler(
         throw UserAuthException("FIDO2_USER_CANCELLED: ${e.message}", e)
     } catch (e: YubiKitFidoManager.FidoError.TouchTimeout) {
         throw UserAuthException("FIDO2_TIMEOUT: ${e.message}", e)
+    } catch (e: YubiKitFidoManager.FidoError.PcscWindowsBug) {
+        throw UserAuthException("FIDO2_PCSC_BUG", e)
+    } catch (e: YubiKitFidoManager.FidoError.WindowsHidLocked) {
+        throw UserAuthException("FIDO2_HID_LOCKED", e)
+    } catch (e: YubiKitFidoManager.FidoError.TransportError) {
+        throw UserAuthException("FIDO2_TRANSPORT", e)
     } catch (e: YubiKitFidoManager.FidoError) {
-        throw UserAuthException("FIDO2_ERROR: ${e.message}", e)
+        // No detail in the text: it reaches the user through fido2AuthErrorResult, which shows a translated one.
+        throw UserAuthException("FIDO2_ERROR", e)
     }
     // Extraire flags et counter depuis authData CTAP2 / Windows WebAuthn
     val authData = assertion.authData

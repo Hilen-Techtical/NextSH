@@ -3,63 +3,51 @@
 
 package fr.techtical.nextsh.ui.sessions
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
-import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import fr.techtical.nextsh.core.auth.HardwareKeyAuthenticator
-import fr.techtical.nextsh.core.auth.HwKeyResult
-import fr.techtical.nextsh.core.ssh.Fido2ChallengeRequest
-import fr.techtical.nextsh.core.ssh.Fido2ChallengeResponse
-import fr.techtical.nextsh.core.ssh.HostKeyVerifyResult
+import fr.techtical.nextsh.R
+import fr.techtical.nextsh.core.AppVisibility
+import fr.techtical.nextsh.core.ssh.SessionHandoff
 import fr.techtical.nextsh.core.ssh.SshSessionManager
 import fr.techtical.nextsh.core.ssh.SshTerminalSession
-import fr.techtical.nextsh.shared.core.ssh.fido2.SkSshSignature
 import fr.techtical.nextsh.data.preferences.SettingsDataStore
+import fr.techtical.nextsh.data.preferences.nearestScrollbackStep
 import fr.techtical.nextsh.domain.model.Host
 import fr.techtical.nextsh.domain.model.SessionStatus
 import fr.techtical.nextsh.domain.model.Snippet
-import fr.techtical.nextsh.domain.model.SshErrorCode
 import fr.techtical.nextsh.shared.domain.model.SshResult
 import fr.techtical.nextsh.domain.repository.HostRepository
 import fr.techtical.nextsh.domain.repository.SnippetRepository
 import fr.techtical.nextsh.domain.usecase.ConnectSessionUseCase
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
+import fr.techtical.nextsh.service.TerminalServiceController
+import fr.techtical.nextsh.shared.util.LogId
+import kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
+import net.schmizz.sshj.connection.channel.direct.Session
 import timber.log.Timber
 import javax.inject.Inject
 
 // ── Modèles d'état ─────────────────────────────────────────────────────────────
 
-data class SessionTab(
-    val sessionId: String,
-    val host: Host,
-    val terminalSession: SshTerminalSession,
-    val status: SessionStatus = SessionStatus.CONNECTING,
-)
-
+/**
+ * Ce que l'écran du terminal affiche : les onglets, l'onglet actif et le split viennent de
+ * [TerminalTabStore] (ils survivent à l'écran), [isConnecting] et [error] sont propres au
+ * [SessionViewModel] (transitoires, liés à l'écran).
+ */
 data class SessionUiState(
     val tabs: List<SessionTab> = emptyList(),
     val activeTabIndex: Int = 0,
@@ -67,6 +55,45 @@ data class SessionUiState(
     val error: String? = null,
     val splitState: SplitState? = null,
 )
+
+/** La part de [SessionUiState] qui n'appartient qu'à l'écran. */
+private data class ScreenState(
+    val isConnecting: Boolean = false,
+    val error: String? = null,
+)
+
+private fun mergeUiState(tabs: TerminalTabsState, screen: ScreenState) = SessionUiState(
+    tabs           = tabs.tabs,
+    activeTabIndex = tabs.activeTabIndex,
+    isConnecting   = screen.isConnecting,
+    error          = screen.error,
+    splitState     = tabs.splitState,
+)
+
+/**
+ * [SessionUiState] assemblé depuis le store et l'état de l'écran. Sa [value] se calcule à la
+ * lecture : elle est à jour dès que l'appel qui vient de changer l'un des deux est rendu, ce
+ * qu'un `combine(...).stateIn(...)` ne garantit pas (la propagation passe par un canal et par le
+ * dispatcher du collecteur).
+ */
+@OptIn(ExperimentalForInheritanceCoroutinesApi::class)
+private class SessionUiStateFlow(
+    private val tabs: StateFlow<TerminalTabsState>,
+    private val screen: StateFlow<ScreenState>,
+) : StateFlow<SessionUiState> {
+
+    override val value: SessionUiState
+        get() = mergeUiState(tabs.value, screen.value)
+
+    override val replayCache: List<SessionUiState>
+        get() = listOf(value)
+
+    override suspend fun collect(collector: FlowCollector<SessionUiState>): Nothing {
+        combine(tabs, screen, ::mergeUiState).distinctUntilChanged().collect(collector)
+        // Les deux sources sont des StateFlow, elles ne se terminent jamais.
+        awaitCancellation()
+    }
+}
 
 /**
  * État du dialogue de vérification de clé hôte.
@@ -85,19 +112,14 @@ data class HostKeyDialogState(
     val storedFingerprint: String? = null,
 )
 
-/**
- * État du BottomSheet de challenge FIDO2.
- * Affiché lorsqu'une clé de sécurité doit être touchée pendant la connexion.
- */
-data class Fido2ChallengeUiState(
-    val rpId: String,
-    val signingData: ByteArray,
-    val keyType: fr.techtical.nextsh.shared.core.ssh.fido2.SkKeyType = fr.techtical.nextsh.shared.core.ssh.fido2.SkKeyType.SK_ECDSA_256,
-    val allowedCredentialIds: List<ByteArray> = emptyList(),
-)
-
 // ── ViewModel ──────────────────────────────────────────────────────────────────
 
+/**
+ * Façade de l'écran du terminal. Les onglets, le split et leurs références SSH appartiennent à
+ * [TerminalTabStore], un singleton d'app : ce ViewModel ouvre les connexions et les onglets, puis
+ * les lui remet. Il meurt avec l'écran (entrée de navigation `Sessions`) sans rien fermer, voir
+ * [onCleared].
+ */
 @HiltViewModel
 class SessionViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -107,24 +129,17 @@ class SessionViewModel @Inject constructor(
     private val customThemeRepository: fr.techtical.nextsh.domain.repository.CustomTerminalThemeRepository,
     private val connectSession: ConnectSessionUseCase,
     private val settingsDataStore: SettingsDataStore,
-    private val hardwareKeyAuthenticator: HardwareKeyAuthenticator,
+    private val sessionHandoff: SessionHandoff,
+    private val tabStore: TerminalTabStore,
+    private val terminalService: TerminalServiceController,
+    private val appVisibility: AppVisibility,
 ) : ViewModel() {
 
-    private val clipboardManager =
-        context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-
-    private var clipboardClearJob: Job? = null
-
-    private val _uiState = MutableStateFlow(SessionUiState())
-    val uiState: StateFlow<SessionUiState> = _uiState.asStateFlow()
+    private val screenState = MutableStateFlow(ScreenState())
+    val uiState: StateFlow<SessionUiState> = SessionUiStateFlow(tabStore.state, screenState)
 
     val terminalFontSize: StateFlow<Int> = settingsDataStore.terminalFontSizeFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 24)
-
-    private val clipboardClearTimeout: StateFlow<Int> =
-        settingsDataStore.settingsFlow
-            .map { it.clipboardClearTimeout }
-            .stateIn(viewModelScope, SharingStarted.Eagerly, 60)
 
     /** Liste des hôtes exposée pour le host picker in-terminal. */
     val hosts: StateFlow<List<Host>> = hostRepository.observeAll()
@@ -138,196 +153,302 @@ class SessionViewModel @Inject constructor(
     // Note : `hostKeyDialog` (state + accept/reject) déplacés vers
     // `HostKeyPromptCoordinator` (Singleton) : le dialogue est rendu au
     // niveau MainActivity pour fonctionner depuis n'importe quel écran.
+    // Même chose pour la demande de clé FIDO2 : `Fido2PromptCoordinator`
+    // (Singleton), feuille rendue par MainActivity (`Fido2PromptHost`).
 
-    /** État du BottomSheet de challenge FIDO2. */
-    private val _fido2ChallengeState = MutableStateFlow<Fido2ChallengeUiState?>(null)
-    val fido2ChallengeState: StateFlow<Fido2ChallengeUiState?> = _fido2ChallengeState.asStateFlow()
+    /** Sessions en cours de reprise par [attachToSession] (thread principal uniquement). */
+    private val attachingSessionIds = mutableSetOf<String>()
 
-    @Volatile
-    private var fido2Response: CompletableDeferred<Fido2ChallengeResponse?>? = null
+    /** Sessions des onglets en cours de reconnexion par [reconnectTab] (thread principal uniquement). */
+    private val reconnectingSessionIds = mutableSetOf<String>()
 
     /**
-     * Event émis quand la fenêtre d'auth vault a expiré pendant une connexion.
-     * L'UI doit observer ce flow, afficher un BiometricPrompt, puis appeler
-     * [connectToHost] à nouveau avec le même hostId.
+     * Construit la [SshTerminalSession] d'un shell ouvert. Remplaçable dans les tests : la vraie
+     * s'appuie sur un Handler Android, absent d'un test unitaire.
      */
-    private val _authRequiredEvent = MutableSharedFlow<String>(extraBufferCapacity = 1)
-    val authRequiredEvent: SharedFlow<String> = _authRequiredEvent.asSharedFlow()
-
-    /** Expose HardwareKeyAuthenticator pour le BottomSheet FIDO2. */
-    val hardwareKeyAuth: HardwareKeyAuthenticator get() = hardwareKeyAuthenticator
-
-    /** Scope dédié au nettoyage : survit à l'annulation de viewModelScope */
-    private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    init {
-        // Note Phase 3.2 : le callback `hostKeyVerificationCallback` est
-        // désormais wiré au niveau App (`App.onCreate`) via le singleton
-        // `HostKeyPromptCoordinator`, pour qu'il soit toujours disponible
-        // même quand on tape Connect depuis HostListScreen sans avoir
-        // navigué dans Sessions au préalable. On ne l'installe plus ici.
-
-        // Installer le callback FIDO2 pour les connexions sk-*.
-        sshSessionManager.fido2ChallengeCallback = { request ->
-            val deferred = CompletableDeferred<Fido2ChallengeResponse?>()
-            fido2Response = deferred
-
-            _fido2ChallengeState.value = Fido2ChallengeUiState(
-                rpId = request.rpId,
-                signingData = request.signingData,
-                keyType = request.keyType,
-                allowedCredentialIds = request.allowedCredentialIds,
+    @androidx.annotation.VisibleForTesting
+    internal var terminalSessionFactory: (Session.Shell, String, TerminalSessionClient, Int) -> SshTerminalSession =
+        { shell, label, client, scrollbackRows ->
+            SshTerminalSession(
+                sshShell       = shell,
+                sessionLabel   = label,
+                client         = client,
+                transcriptRows = scrollbackRows,
             )
-
-            // Attendre la réponse avec timeout de 60 secondes.
-            // Le BottomSheet UI déclenchera hardwareKeyAuthenticator et résoudra le deferred.
-            withTimeoutOrNull(60_000L) { deferred.await() }
-                ?: run {
-                    _fido2ChallengeState.value?.signingData?.fill(0)
-                    _fido2ChallengeState.value = null
-                    null
-                }
         }
-    }
+
+    // Note : les callbacks interactifs du SshSessionManager (clé hôte, signature FIDO2, empreinte)
+    // sont installés une seule fois par `App.onCreate`, via `HostKeyPromptCoordinator`,
+    // `Fido2PromptCoordinator` et `BiometricPromptCoordinator`. Ce ViewModel n'en installe aucun :
+    // une connexion lancée depuis la liste d'hôtes, le SFTP ou un tunnel ne le crée jamais, et un
+    // callback accroché à un ViewModel détruit pointerait dans le vide.
 
     // ── API publique ──────────────────────────────────────────────────────────────
 
     /**
      * Connecte à un hôte et crée un nouvel onglet terminal.
      * Enchaîne : connexion SSH → ouverture shell → création SshTerminalSession.
+     * Si le shell ne s'ouvre pas, l'erreur est affichée et la session SSH est fermée.
      *
-     * Pour les hôtes BIOMETRIC_KEY, l'appelant doit d'abord déclencher
-     * BiometricPrompt avec CryptoObject et passer le Signature authentifié.
+     * Les invites de l'authentification (clé hôte inconnue, clé de sécurité FIDO2, empreinte d'une
+     * clé biométrique) ne sont pas l'affaire de ce ViewModel : voir la note plus haut. Toute erreur
+     * de connexion, y compris une authentification expirée, est affichée comme les autres.
+     *
+     * Une connexion en cours s'annule avec l'écran. Une fois l'onglet ajouté au [TerminalTabStore],
+     * il ne dépend plus de l'écran.
      */
-    fun connectToHost(hostId: String, authenticatedSignature: java.security.Signature? = null) {
+    fun connectToHost(hostId: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isConnecting = true, error = null) }
-
-            val host = hostRepository.getById(hostId)
-            if (host == null) {
-                _uiState.update {
-                    it.copy(isConnecting = false, error = "Hôte introuvable : $hostId")
-                }
-                return@launch
+            screenState.update { it.copy(isConnecting = true, error = null) }
+            connectInto(hostId) { tab ->
+                tabStore.addTab(tab)
+                true
             }
+        }
+    }
 
-            // 1. Connexion SSH
-            val sshResult = connectSession(host, authenticatedSignature)
-            if (sshResult is SshResult.Error) {
-                if (sshResult.code == SshErrorCode.AUTH_EXPIRED) {
-                    _uiState.update { it.copy(isConnecting = false) }
-                    _authRequiredEvent.tryEmit(hostId)
-                    return@launch
-                }
-                _uiState.update {
-                    it.copy(isConnecting = false, error = sshResult.message)
-                }
-                return@launch
+    /**
+     * Les étapes communes à [connectToHost] et [reconnectTab] : connexion SSH, ouverture du shell,
+     * création de la [SshTerminalSession], puis [place] met l'onglet construit dans le
+     * [TerminalTabStore] et dit si elle l'a pris (faux : il n'a pas trouvé sa place). Une erreur,
+     * quelle que soit l'étape, est affichée par le canal `error` et ne touche à aucun onglet.
+     *
+     * La connexion rend la session avec une référence, la nôtre, jusqu'à ce qu'un onglet la porte.
+     * Sans onglet à la fin (le shell ne s'ouvre pas, ou l'écran est quitté et la coroutine annulée
+     * pendant l'ouverture), personne d'autre ne la possède : on la rend au lieu de laisser la
+     * session ouverte, invisible, jusqu'à la fin du processus. La libération ne suspend pas, elle
+     * va au bout même dans une coroutine déjà annulée. Un onglet construit qui n'a pas été pris
+     * part au store pour être fermé ([TerminalTabStore.discard]) : son shell, puis la référence.
+     *
+     * Aucune suspension entre la construction de l'onglet et [place] : l'annulation de l'écran ne
+     * peut pas tomber entre les deux.
+     */
+    private suspend fun connectInto(hostId: String, place: (SessionTab) -> Boolean) {
+        val host = hostRepository.getById(hostId)
+        if (host == null) {
+            screenState.update {
+                it.copy(isConnecting = false, error = "Hôte introuvable : $hostId")
             }
-            val sshSession = (sshResult as SshResult.Success).data
+            return
+        }
 
-            // 2. Ouverture du shell
-            val shellResult = sshSessionManager.openShell(sshSession.id)
-            if (shellResult is SshResult.Error) {
-                _uiState.update {
-                    it.copy(isConnecting = false, error = shellResult.message)
-                }
-                return@launch
+        // 1. Connexion SSH
+        val sshResult = connectSession(host)
+        if (sshResult is SshResult.Error) {
+            screenState.update {
+                it.copy(isConnecting = false, error = sshResult.message)
             }
-            val shell = (shellResult as SshResult.Success).data
+            return
+        }
+        val sshSession = (sshResult as SshResult.Success).data
 
-            // 3. Création de la SshTerminalSession (bridge terminal)
-            val terminalSession = SshTerminalSession(
-                sshShell       = shell,
-                sessionLabel   = host.label,
-                client         = buildSessionClient(sshSession.id),
-                transcriptRows = 2000,
-            )
+        // 2 + 3. Ouverture du shell et création de l'onglet
+        // Vrai dès que la référence a un autre propriétaire que cette fonction : l'onglet placé, ou
+        // l'onglet sans place confié au store pour fermeture.
+        var referenceHandedOver = false
+        try {
+            when (val built = buildTab(sshSession.id, host)) {
+                is SshResult.Error -> screenState.update {
+                    it.copy(isConnecting = false, error = built.message)
+                }
+                is SshResult.Success -> {
+                    if (place(built.data)) {
+                        referenceHandedOver = true
+                        onTabAdded()
+                    } else {
+                        // Pas de place : le shell construit se ferme avant que la référence soit
+                        // rendue, comme à la fermeture d'un onglet.
+                        tabStore.discard(built.data)
+                        referenceHandedOver = true
+                        screenState.update { it.copy(isConnecting = false) }
+                    }
+                }
+            }
+        } finally {
+            if (!referenceHandedOver) sshSessionManager.release(sshSession.id)
+        }
+    }
 
-            val tab = SessionTab(
-                sessionId       = sshSession.id,
+    /**
+     * Ouvre un onglet terminal sur la session [sessionId] que la liste d'hôtes vient de connecter
+     * pour [hostId], sans se reconnecter : une seule authentification par tap, et la session de la
+     * liste devient celle de l'onglet au lieu de rester ouverte, orpheline, à côté d'une seconde.
+     *
+     * La liste a proposé la session à [SessionHandoff] avant d'annoncer l'événement : la reprendre
+     * ([SessionHandoff.claim]) donne ce terminal propriétaire de la référence de la liste, qu'il
+     * garde pour son onglet et qu'il rend à la fermeture de l'onglet. Rien à reprendre (le délai est
+     * passé, la session n'a jamais été proposée) : il ne possède rien et ne rend rien.
+     *
+     * Si la session n'existe plus ou n'est plus connectée, ou si l'ouverture du shell échoue, la
+     * référence reprise est rendue puis le terminal se connecte lui-même, une seule fois
+     * ([connectToHost] ne reprend jamais de session, il n'y a donc aucune boucle possible).
+     *
+     * Un second appel pour une session déjà affichée ou en cours de reprise est sans effet : jamais
+     * deux onglets ni deux shells pour la même session.
+     */
+    fun attachToSession(sessionId: String, hostId: String) {
+        if (tabStore.hasSession(sessionId)) return
+        if (!attachingSessionIds.add(sessionId)) return
+
+        viewModelScope.launch {
+            screenState.update { it.copy(isConnecting = true, error = null) }
+
+            val claimed = sessionHandoff.claim(sessionId)
+            var attached = false
+            try {
+                attached = claimed && tryAttach(sessionId, hostId)
+            } finally {
+                attachingSessionIds.remove(sessionId)
+                if (claimed && !attached) {
+                    // Échec, session disparue, ou écran quitté pendant la reprise (coroutine annulée) :
+                    // la référence reprise n'a plus de propriétaire, on la rend. L'appel ne suspend
+                    // pas, il tourne jusqu'au bout même dans une coroutine déjà annulée.
+                    sshSessionManager.release(sessionId)
+                }
+            }
+            if (!attached) connectToHost(hostId)
+        }
+    }
+
+    /** Vrai si un onglet a été ouvert sur la session [sessionId] de l'hôte [hostId]. */
+    private suspend fun tryAttach(sessionId: String, hostId: String): Boolean {
+        val host = hostRepository.getById(hostId)
+        if (host == null) {
+            Timber.w("Host of the session to take over is gone: ${LogId.of(hostId)}")
+            return false
+        }
+        val session = sshSessionManager.getSession(sessionId)
+        if (session == null || session.host.id != hostId || !sshSessionManager.isConnected(sessionId)) {
+            Timber.w("Session to take over is gone: ${LogId.of(sessionId)}, connecting again")
+            return false
+        }
+        val shellError = openTab(sessionId, host)
+        if (shellError != null) {
+            Timber.w("Shell on the session to take over failed: ${LogId.of(sessionId)}, connecting again")
+            return false
+        }
+        return true
+    }
+
+    /**
+     * Ouvre le shell sur la session connectée [sessionId], crée la [SshTerminalSession] et
+     * l'onglet de [host], qu'il remet au [TerminalTabStore]. Retourne l'erreur d'ouverture du
+     * shell, null si l'onglet est affiché. Étapes de [attachToSession], celles de [connectToHost]
+     * passent par [connectInto].
+     *
+     * Une fois l'onglet dans le store, il tient la référence SSH de l'appelant : plus aucune
+     * suspension ne sépare l'ajout du retour de cette fonction, donc l'annulation de l'écran ne
+     * peut pas tomber entre les deux et laisser la référence sans propriétaire.
+     */
+    private suspend fun openTab(sessionId: String, host: Host): SshResult.Error? {
+        val built = buildTab(sessionId, host)
+        if (built is SshResult.Error) return built
+        tabStore.addTab((built as SshResult.Success).data)
+        onTabAdded()
+        return null
+    }
+
+    /**
+     * Ouvre le shell sur la session connectée [sessionId] et construit l'onglet de [host] sur sa
+     * [SshTerminalSession] (le pont terminal), sans le donner au store : l'appelant choisit s'il
+     * l'ajoute ou s'il remplace un onglet. Retourne l'erreur d'ouverture du shell.
+     *
+     * L'onglet construit tient déjà la référence de l'appelant sur la session, mais tant que le
+     * store ne l'a pas pris c'est à l'appelant de la rendre.
+     */
+    private suspend fun buildTab(sessionId: String, host: Host): SshResult<SessionTab> {
+        // 2. Ouverture du shell
+        val shellResult = sshSessionManager.openShell(sessionId)
+        if (shellResult is SshResult.Error) return shellResult
+        val shell = (shellResult as SshResult.Success).data
+
+        // 3. Création de la SshTerminalSession (bridge terminal)
+        // Le réglage vaut pour les nouveaux onglets et les reconnexions, pas pour les onglets ouverts.
+        val scrollbackRows = nearestScrollbackStep(settingsDataStore.settingsFlow.first().scrollbackLines)
+        val terminalSession = terminalSessionFactory(shell, host.label, tabStore.buildSessionClient(sessionId), scrollbackRows)
+
+        return SshResult.Success(
+            SessionTab(
+                sessionId       = sessionId,
                 host            = host,
                 terminalSession = terminalSession,
                 status          = SessionStatus.CONNECTED,
             )
+        )
+    }
 
-            _uiState.update { state ->
-                val newTabs = state.tabs + tab
-                state.copy(
-                    tabs           = newTabs,
-                    activeTabIndex = newTabs.lastIndex,
-                    isConnecting   = false,
-                )
-            }
+    /**
+     * Après l'ajout, ou le remplacement, d'un onglet connecté : le service au premier plan est
+     * demandé, et la connexion est terminée.
+     *
+     * Un refus du système est annoncé par le canal d'erreur : l'onglet est ouvert, mais la session
+     * risque de se couper si l'utilisateur quitte NextSH. Il ne l'est que si l'app est visible : la
+     * connexion a pu durer plus longtemps que le séjour de l'utilisateur dans l'app, et le refus
+     * est alors normal (le système interdit ce démarrage en arrière-plan) et sans personne pour
+     * lire le message, qui apparaîtrait à son retour sans rapport avec ce qu'il vient de faire.
+     * `MainActivity` redemande le service à ce retour (voir `resumeTerminalService`).
+     */
+    private fun onTabAdded() {
+        val serviceRefused = !terminalService.ensureRunning()
+        val warn = serviceRefused && appVisibility.isVisible()
+        screenState.update {
+            it.copy(
+                isConnecting = false,
+                error = if (warn) context.getString(R.string.terminal_service_start_refused) else it.error,
+            )
         }
     }
 
     /** Sélectionne l'onglet actif. */
-    fun selectTab(index: Int) {
-        _uiState.update { state ->
-            if (index in state.tabs.indices) state.copy(activeTabIndex = index)
-            else state
-        }
+    fun selectTab(index: Int) = tabStore.selectTab(index)
+
+    /**
+     * Affiche l'onglet déjà ouvert sur l'hôte [hostId], s'il y en a un. Faux si l'hôte n'a aucun
+     * onglet : l'appelant se connecte alors.
+     */
+    fun selectTabOfHost(hostId: String): Boolean = tabStore.selectTabOfHost(hostId)
+
+    /**
+     * Ferme un onglet : son shell, puis la référence qu'il tient sur la session. La session ne se
+     * ferme qu'avec sa dernière référence : un tunnel, un explorateur SFTP ou un transfert qui
+     * l'utilisent la gardent ouverte. C'est l'action explicite de l'utilisateur, la seule avec
+     * « Tout fermer » de la notification : quitter l'écran ne ferme aucun onglet.
+     */
+    fun closeTab(index: Int) {
+        tabStore.closeTab(index)
+        // La commande en attente visait la session focalisée, qui peut être celle qui vient de fermer.
+        _pendingSnippet.value = null
     }
 
-    /** Ferme un onglet et déconnecte la session associée. */
-    fun closeTab(index: Int) {
-        // Capture tab reference for async cleanup before state mutation
-        val tab = _uiState.value.tabs.getOrNull(index) ?: return
+    private val _pendingSnippet = MutableStateFlow<Snippet?>(null)
 
-        cleanupScope.launch {
-            try {
-                tab.terminalSession.disconnect()
-                sshSessionManager.disconnect(tab.sessionId)
-            } catch (e: Exception) {
-                Timber.w("Erreur fermeture onglet ${tab.host.label}: ${e.message}")
-            }
-        }
+    /**
+     * Snippet dont l'utilisateur doit confirmer l'exécution. Tenu ici et non dans l'écran : il doit
+     * survivre à une rotation, mais pas à la mort du processus (les onglets meurent avec lui), et un
+     * [Snippet] n'a pas à entrer dans un `Bundle`.
+     */
+    val pendingSnippet: StateFlow<Snippet?> = _pendingSnippet
 
-        // All state computation inside update {} to avoid TOCTOU race
-        _uiState.update { state ->
-            if (state.tabs.getOrNull(index) == null) return@update state
+    /** Demande la confirmation d'exécution de [snippet] (le dialogue s'affiche). */
+    fun requestSnippet(snippet: Snippet) {
+        _pendingSnippet.value = snippet
+    }
 
-            val newTabs = state.tabs.toMutableList().also { it.removeAt(index) }
-            val newActiveIndex = when {
-                newTabs.isEmpty() -> 0
-                state.activeTabIndex >= newTabs.size -> newTabs.lastIndex
-                else -> state.activeTabIndex
-            }
+    /** Exécute le snippet en attente dans la session focalisée, puis vide la demande. */
+    fun confirmSnippet() {
+        val snippet = _pendingSnippet.value ?: return
+        _pendingSnippet.value = null
+        executeSnippet(snippet.command)
+    }
 
-            // Exit split if the closed tab was in a pane, and adjust tab indices
-            val newSplitState = state.splitState?.let { split ->
-                val leftContent = split.leftOrTopPane
-                val rightContent = split.rightOrBottomPane
-                val closedInLeft = leftContent is PaneContent.Terminal && leftContent.tabIndex == index
-                val closedInRight = rightContent is PaneContent.Terminal && rightContent.tabIndex == index
-                if (closedInLeft || closedInRight) {
-                    null // Exit split mode
-                } else {
-                    // Adjust tab indices for remaining terminal panes
-                    val adjustIndex = { content: PaneContent ->
-                        when (content) {
-                            is PaneContent.Terminal -> {
-                                val adjusted = if (content.tabIndex > index) content.tabIndex - 1 else content.tabIndex
-                                PaneContent.Terminal(adjusted)
-                            }
-                            is PaneContent.Sftp -> content
-                        }
-                    }
-                    split.copy(
-                        leftOrTopPane = adjustIndex(split.leftOrTopPane),
-                        rightOrBottomPane = adjustIndex(split.rightOrBottomPane),
-                    )
-                }
-            }
-
-            state.copy(tabs = newTabs, activeTabIndex = newActiveIndex, splitState = newSplitState)
-        }
+    /** Abandonne la demande de confirmation en cours. */
+    fun cancelSnippet() {
+        _pendingSnippet.value = null
     }
 
     /** Efface le message d'erreur affiché. */
     fun clearError() {
-        _uiState.update { it.copy(error = null) }
+        screenState.update { it.copy(error = null) }
     }
 
     /**
@@ -353,38 +474,35 @@ class SessionViewModel @Inject constructor(
     }
 
     /**
-     * Reconnecte un onglet déconnecté ou en erreur.
-     * Ferme l'onglet actuel et relance une connexion vers le même hôte.
+     * Reconnecte un onglet déconnecté ou en erreur : une nouvelle connexion vers le même hôte
+     * (connexion, shell, nouvelle [SshTerminalSession]), puis l'onglet est remplacé À SA PLACE par
+     * [TerminalTabStore.replaceTab], qui ferme l'ancien (shell, puis sa référence, une seule fois).
+     *
+     * L'ancien onglet n'est touché qu'une fois la reconnexion réussie : si l'hôte est injoignable ou
+     * l'authentification expirée, l'erreur s'affiche par le canal `error` et l'onglet reste tel quel,
+     * son historique avec lui. Pendant la reconnexion l'écran montre la connexion en cours
+     * (`isConnecting`), comme pour une connexion, et un second appui sur le même onglet ne lance
+     * rien. Si l'écran est quitté pendant la reconnexion, la coroutine est annulée : la nouvelle
+     * référence est rendue et l'ancien onglet reste. Si l'ancien onglet a été fermé entre-temps, la
+     * nouvelle session n'a plus de place et est rendue.
      */
     fun reconnectTab(index: Int) {
-        val tab = _uiState.value.tabs.getOrNull(index) ?: return
+        val tab = tabStore.state.value.tabs.getOrNull(index) ?: return
         if (tab.status != SessionStatus.DISCONNECTED && tab.status != SessionStatus.ERROR) return
-        closeTab(index)
-        connectToHost(tab.host.id)
+        if (!reconnectingSessionIds.add(tab.sessionId)) return
+
+        viewModelScope.launch {
+            screenState.update { it.copy(isConnecting = true, error = null) }
+            try {
+                connectInto(tab.host.id) { newTab -> tabStore.replaceTab(tab.sessionId, newTab) }
+            } finally {
+                reconnectingSessionIds.remove(tab.sessionId)
+            }
+        }
     }
 
     // acceptHostKey / rejectHostKey : déplacés vers HostKeyPromptCoordinator
     // (rendu global au niveau MainActivity).
-
-    /**
-     * Appelé par le BottomSheet FIDO2 lorsque la clé matérielle a signé.
-     */
-    fun completeFido2Challenge(signature: SkSshSignature) {
-        fido2Response?.complete(Fido2ChallengeResponse.Signed(signature))
-        fido2Response = null
-        _fido2ChallengeState.value?.signingData?.fill(0)
-        _fido2ChallengeState.value = null
-    }
-
-    /**
-     * Appelé par le BottomSheet FIDO2 en cas d'annulation ou d'erreur.
-     */
-    fun cancelFido2Challenge() {
-        fido2Response?.complete(Fido2ChallengeResponse.Cancelled)
-        fido2Response = null
-        _fido2ChallengeState.value?.signingData?.fill(0)
-        _fido2ChallengeState.value = null
-    }
 
     // ── Split-screen ─────────────────────────────────────────────────────────────
 
@@ -394,213 +512,43 @@ class SessionViewModel @Inject constructor(
      * Returns null if the focused pane is SFTP (SFTP does not receive terminal keys).
      */
     val focusedSession: SshTerminalSession?
-        get() {
-            val state = _uiState.value
-            val split = state.splitState ?: return state.tabs.getOrNull(state.activeTabIndex)?.terminalSession
-            val content = when (split.focusedPane) {
-                PaneSlot.LEFT_OR_TOP -> split.leftOrTopPane
-                PaneSlot.RIGHT_OR_BOTTOM -> split.rightOrBottomPane
-            }
-            return when (content) {
-                is PaneContent.Terminal -> state.tabs.getOrNull(content.tabIndex)?.terminalSession
-                is PaneContent.Sftp -> null
-            }
-        }
+        get() = tabStore.focusedSession
 
-    /**
-     * Enters split-screen mode with two terminal tabs.
-     * The current active tab goes to the left/top pane,
-     * [secondTabIndex] goes to the right/bottom pane.
-     */
-    fun enterSplit(secondTabIndex: Int, orientation: SplitOrientation = SplitOrientation.HORIZONTAL) {
-        _uiState.update { state ->
-            val activeIdx = state.activeTabIndex
-            if (activeIdx == secondTabIndex) return@update state
-            if (state.tabs.getOrNull(activeIdx) == null || state.tabs.getOrNull(secondTabIndex) == null) return@update state
-            state.copy(
-                splitState = SplitState(
-                    orientation = orientation,
-                    leftOrTopPane = PaneContent.Terminal(activeIdx),
-                    rightOrBottomPane = PaneContent.Terminal(secondTabIndex),
-                )
-            )
-        }
-    }
+    /** See [TerminalTabStore.enterSplit]. */
+    fun enterSplit(secondTabIndex: Int, orientation: SplitOrientation = SplitOrientation.HORIZONTAL) =
+        tabStore.enterSplit(secondTabIndex, orientation)
 
-    /**
-     * Enters split-screen mode with the current terminal tab + an SFTP browser pane.
-     */
-    fun enterSplitWithSftp(sessionId: String, hostLabel: String, orientation: SplitOrientation = SplitOrientation.HORIZONTAL) {
-        _uiState.update { state ->
-            val activeIdx = state.activeTabIndex
-            if (state.tabs.getOrNull(activeIdx) == null) return@update state
-            state.copy(
-                splitState = SplitState(
-                    orientation = orientation,
-                    leftOrTopPane = PaneContent.Terminal(activeIdx),
-                    rightOrBottomPane = PaneContent.Sftp(sessionId, hostLabel),
-                )
-            )
-        }
-    }
+    /** See [TerminalTabStore.enterSplitWithSftp]. */
+    fun enterSplitWithSftp(sessionId: String, hostLabel: String, orientation: SplitOrientation = SplitOrientation.HORIZONTAL) =
+        tabStore.enterSplitWithSftp(sessionId, hostLabel, orientation)
 
-    /**
-     * Exits split-screen mode. The focused pane's tab becomes the active tab.
-     */
-    fun exitSplit() {
-        _uiState.update { state ->
-            val split = state.splitState ?: return@update state
-            val focusedContent = when (split.focusedPane) {
-                PaneSlot.LEFT_OR_TOP -> split.leftOrTopPane
-                PaneSlot.RIGHT_OR_BOTTOM -> split.rightOrBottomPane
-            }
-            val maxIndex = (state.tabs.size - 1).coerceAtLeast(0)
-            val newActiveIndex = when (focusedContent) {
-                is PaneContent.Terminal -> focusedContent.tabIndex.coerceIn(0, maxIndex)
-                is PaneContent.Sftp -> state.activeTabIndex.coerceIn(0, maxIndex)
-            }
-            state.copy(splitState = null, activeTabIndex = newActiveIndex)
-        }
-    }
+    /** Exits split-screen mode. The focused pane's tab becomes the active tab. */
+    fun exitSplit() = tabStore.exitSplit()
 
     /** Toggles split orientation between horizontal and vertical. */
-    fun toggleSplitOrientation() {
-        _uiState.update { state ->
-            val split = state.splitState ?: return@update state
-            val newOrientation = when (split.orientation) {
-                SplitOrientation.HORIZONTAL -> SplitOrientation.VERTICAL
-                SplitOrientation.VERTICAL -> SplitOrientation.HORIZONTAL
-            }
-            state.copy(splitState = split.copy(orientation = newOrientation))
-        }
-    }
+    fun toggleSplitOrientation() = tabStore.toggleSplitOrientation()
 
     /** Updates the split ratio, clamped to 0.2..0.8. */
-    fun updateSplitRatio(ratio: Float) {
-        _uiState.update { state ->
-            val split = state.splitState ?: return@update state
-            state.copy(splitState = split.copy(splitRatio = ratio.coerceIn(0.2f, 0.8f)))
-        }
-    }
+    fun updateSplitRatio(ratio: Float) = tabStore.updateSplitRatio(ratio)
 
     /** Sets which pane has input focus. */
-    fun setFocusedPane(slot: PaneSlot) {
-        _uiState.update { state ->
-            val split = state.splitState ?: return@update state
-            if (split.focusedPane == slot) return@update state
-            state.copy(splitState = split.copy(focusedPane = slot))
-        }
-    }
+    fun setFocusedPane(slot: PaneSlot) = tabStore.setFocusedPane(slot)
 
     /** Swaps the content of the two panes. Focus follows the content. */
-    fun swapPanes() {
-        _uiState.update { state ->
-            val split = state.splitState ?: return@update state
-            val newFocus = when (split.focusedPane) {
-                PaneSlot.LEFT_OR_TOP -> PaneSlot.RIGHT_OR_BOTTOM
-                PaneSlot.RIGHT_OR_BOTTOM -> PaneSlot.LEFT_OR_TOP
-            }
-            state.copy(
-                splitState = split.copy(
-                    leftOrTopPane = split.rightOrBottomPane,
-                    rightOrBottomPane = split.leftOrTopPane,
-                    focusedPane = newFocus,
-                )
-            )
-        }
-    }
+    fun swapPanes() = tabStore.swapPanes()
 
     // ── Cycle de vie ──────────────────────────────────────────────────────────────
 
+    /**
+     * Ne ferme rien et ne rend aucune référence : les onglets, le split et leurs références SSH
+     * sont au [TerminalTabStore], qui survit à l'écran. Seul ce qui est propre à l'écran s'arrête
+     * ici, avec `viewModelScope` : une connexion ou une reprise en cours, dont le `finally` rend la
+     * référence qu'aucun onglet ne porte encore.
+     *
+     * hostKeyResponse et réponse FIDO2 retirées : gérées par les coordinators (Singleton). Le
+     * presse-papier aussi est au store, son effacement différé continue après la sortie de l'écran.
+     */
     override fun onCleared() {
         super.onCleared()
-        // Clear split state
-        _uiState.update { it.copy(splitState = null) }
-        // hostKeyResponse retiré : géré par HostKeyPromptCoordinator (Singleton).
-        fido2Response?.complete(Fido2ChallengeResponse.Cancelled)
-        fido2Response = null
-        _fido2ChallengeState.value?.signingData?.fill(0)
-        _fido2ChallengeState.value = null
-        clipboardClearJob?.cancel()
-
-        val tabs = _uiState.value.tabs
-        cleanupScope.launch {
-            tabs.forEach { tab ->
-                try {
-                    tab.terminalSession.disconnect()
-                    sshSessionManager.disconnect(tab.sessionId)
-                } catch (e: Exception) {
-                    Timber.w("Erreur nettoyage session ${tab.host.label}: ${e.message}")
-                }
-            }
-        }
-    }
-
-    // ── Privé ─────────────────────────────────────────────────────────────────────
-
-    private fun scheduleClipboardClear() {
-        clipboardClearJob?.cancel()
-        val timeoutSeconds = clipboardClearTimeout.value
-        if (timeoutSeconds <= 0) return
-        clipboardClearJob = viewModelScope.launch {
-            delay(timeoutSeconds * 1000L)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                clipboardManager.clearPrimaryClip()
-            }
-        }
-    }
-
-    private fun buildSessionClient(sessionId: String): TerminalSessionClient {
-        return object : TerminalSessionClient {
-            override fun onTextChanged(changedSession: TerminalSession) {
-                if (changedSession is SshTerminalSession) {
-                    changedSession.onScreenUpdate?.invoke()
-                }
-            }
-
-            override fun onTitleChanged(changedSession: TerminalSession) {}
-
-            override fun onSessionFinished(finishedSession: TerminalSession) {
-                Timber.i("Session SSH terminée : $sessionId")
-                _uiState.update { state ->
-                    val idx = state.tabs.indexOfFirst { it.sessionId == sessionId }
-                    if (idx == -1) return@update state
-                    val updatedTabs = state.tabs.toMutableList()
-                    updatedTabs[idx] = updatedTabs[idx].copy(status = SessionStatus.DISCONNECTED)
-                    state.copy(tabs = updatedTabs)
-                }
-            }
-
-            override fun onCopyTextToClipboard(session: TerminalSession, text: String?) {
-                if (text.isNullOrEmpty()) return
-                val clip = ClipData.newPlainText("NextSH", text)
-                clipboardManager.setPrimaryClip(clip)
-                scheduleClipboardClear()
-            }
-
-            override fun onPasteTextFromClipboard(session: TerminalSession?) {
-                val clip = clipboardManager.primaryClip ?: return
-                if (clip.itemCount == 0) return
-                val text = clip.getItemAt(0).coerceToText(context).toString()
-                if (text.isNotEmpty()) {
-                    session?.write(text)
-                }
-            }
-            override fun onBell(session: TerminalSession) {}
-            override fun onColorsChanged(session: TerminalSession) {}
-            override fun onTerminalCursorStateChange(state: Boolean) {}
-            override fun setTerminalShellPid(session: TerminalSession, pid: Int) {}
-            override fun getTerminalCursorStyle(): Int? = null
-
-            override fun logError(tag: String, message: String) { Timber.tag(tag).e(message) }
-            override fun logWarn(tag: String, message: String) { Timber.tag(tag).w(message) }
-            override fun logInfo(tag: String, message: String) { Timber.tag(tag).i(message) }
-            override fun logDebug(tag: String, message: String) { Timber.tag(tag).d(message) }
-            override fun logVerbose(tag: String, message: String) { Timber.tag(tag).v(message) }
-            override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {
-                Timber.tag(tag).e(e, message)
-            }
-            override fun logStackTrace(tag: String, e: Exception) { Timber.tag(tag).e(e) }
-        }
     }
 }

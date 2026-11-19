@@ -75,29 +75,6 @@ class SkSshSignature private constructor(
         }
     }
 
-    /**
-     * Ancien encodage "inner" : `string raw_signature || byte flags || uint32 counter`.
-     *
-     * ATTENTION : ce n'est PAS le format fil d'OpenSSH. La signature ECDSA y reste en DER et le
-     * key_type est ajoute par l'appelant, ce qui produit un double niveau de prefixe que OpenSSH
-     * rejette. Il n'est conserve que pour l'ancien chemin SSHJ `SkFido2Signature` (Desktop), qui
-     * n'est pas utilise pour l'authentification. Tout nouveau code doit utiliser
-     * [encodeSignatureBlob].
-     *
-     * Format :
-     *   string raw_signature
-     *   byte   flags
-     *   uint32 counter
-     */
-    @Deprecated("Not the OpenSSH wire format, use encodeSignatureBlob()")
-    fun encodeInner(): ByteArray {
-        val buf = Buffer.PlainBuffer()
-        buf.putString(rawSignature)
-        buf.putByte(flags)
-        buf.putUInt32(counter.toLong())
-        return buf.compactData
-    }
-
     override fun close() {
         rawSignature.fill(0)
     }

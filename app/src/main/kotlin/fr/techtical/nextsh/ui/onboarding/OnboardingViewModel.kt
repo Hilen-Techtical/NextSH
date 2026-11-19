@@ -5,16 +5,23 @@ package fr.techtical.nextsh.ui.onboarding
 
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import androidx.annotation.StringRes
-import androidx.biometric.BiometricPrompt
-import androidx.fragment.app.FragmentActivity
 import fr.techtical.nextsh.R
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.techtical.nextsh.core.crypto.BiometricHelper
+import fr.techtical.nextsh.core.di.IoDispatcher
+import fr.techtical.nextsh.core.lock.AppLock
+import fr.techtical.nextsh.core.ssh.BiometricPromptCoordinator
+import fr.techtical.nextsh.core.ssh.BiometricPromptResponse
+import fr.techtical.nextsh.core.ssh.VaultAuthPurpose
 import fr.techtical.nextsh.core.vault.VaultAuthExpiredException
+import fr.techtical.nextsh.core.vault.VaultManager
 import fr.techtical.nextsh.core.vault.VaultMigration
-import kotlinx.coroutines.Dispatchers
+import fr.techtical.nextsh.shared.util.errorClass
+import fr.techtical.nextsh.ui.vault.vaultPromptFailureRes
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,6 +30,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import javax.inject.Inject
 
 /**
@@ -31,18 +39,25 @@ import javax.inject.Inject
  * Unlike Desktop (which derives a key from a user-chosen PIN), Android backs
  * the vault with the hardware Keystore (TEE/StrongBox). There is therefore no
  * PIN and no recovery phrase: the "create vault" step is a hardware-backed
- * unlock that triggers a [BiometricPrompt] via the existing [BiometricHelper],
- * exactly the same path as [fr.techtical.nextsh.ui.vault.VaultUnlockViewModel],
- * so no crypto is duplicated here.
+ * unlock that asks the system dialog through the [BiometricPromptCoordinator],
+ * then opens the vault, exactly the same path as
+ * [fr.techtical.nextsh.ui.vault.VaultUnlockViewModel], so no crypto is
+ * duplicated here.
  *
  * Completion is persisted via [SettingsDataStore.setOnboardingCompleted] so the
- * stepper never reappears on later launches.
+ * stepper never reappears on later launches. It also unlocks the app: the
+ * owner has just proved who they are, and the host list must not open under the
+ * lock screen of a process that has not been unlocked yet.
  */
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
     private val biometricHelper: BiometricHelper,
     private val vaultMigration: VaultMigration,
+    private val vaultManager: VaultManager,
     private val settingsDataStore: SettingsDataStore,
+    private val biometricPrompts: BiometricPromptCoordinator,
+    private val appLock: AppLock,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
 
     data class OnboardingState(
@@ -53,15 +68,9 @@ class OnboardingViewModel @Inject constructor(
         /** In-flight biometric prompt / migration. */
         val isAuthenticating: Boolean = false,
         /**
-         * Runtime error text surfaced by the system BiometricPrompt (already
-         * localized by the OS, so it is passed through as-is). Mutually exclusive
-         * with [errorRes]: at most one is non-null at a time.
-         */
-        val errorMessage: String? = null,
-        /**
-         * Localizable error surfaced for known vault exceptions. Resolved with
+         * Localizable error: a failed dialog, or a known vault exception. Resolved with
          * `stringResource(errorRes)` at the composable layer so an English-locale
-         * user never sees a hardcoded French literal.
+         * user never sees a hardcoded French literal, nor the text of the system dialog.
          */
         @StringRes val errorRes: Int? = null,
     )
@@ -89,71 +98,80 @@ class OnboardingViewModel @Inject constructor(
     }
 
     /**
-     * Triggers the biometric / device-credential prompt that initializes the
-     * hardware-backed vault key. On success, runs any pending v1→v2 migration
-     * on IO and marks the vault step as ready.
+     * Asks the system dialog (biometric or device credential) that initializes the
+     * hardware-backed vault key. On success, runs any pending v1→v2 migration and
+     * opens the vault on IO, then marks the vault step as ready. A dialog the user
+     * closes says nothing; any other end is a sentence of ours, never the text of
+     * the system.
      */
-    fun createVault(activity: FragmentActivity) {
-        _state.value = _state.value.copy(
-            isAuthenticating = true,
-            errorMessage = null,
-            errorRes = null,
-        )
-        biometricHelper.authenticate(
-            activity = activity,
-            onSuccess = {
-                viewModelScope.launch {
-                    try {
-                        withContext(Dispatchers.IO) {
-                            if (vaultMigration.needsMigration()) vaultMigration.migrate()
-                        }
-                        _state.value = _state.value.copy(
-                            vaultReady = true,
-                            isAuthenticating = false,
-                            errorMessage = null,
-                            errorRes = null,
-                        )
-                    } catch (e: VaultAuthExpiredException) {
-                        _state.value = _state.value.copy(
-                            isAuthenticating = false,
-                            errorMessage = null,
-                            errorRes = R.string.firstlaunch_error_auth_expired,
-                        )
-                    } catch (e: KeyPermanentlyInvalidatedException) {
-                        _state.value = _state.value.copy(
-                            isAuthenticating = false,
-                            errorMessage = null,
-                            errorRes = R.string.firstlaunch_error_key_invalidated,
-                        )
-                    }
-                }
-            },
-            onError = { errorCode, errString ->
-                _state.value = _state.value.copy(isAuthenticating = false)
-                if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
-                    errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON
-                ) {
+    fun createVault() {
+        if (_state.value.isAuthenticating) return
+        _state.value = _state.value.copy(isAuthenticating = true, errorRes = null)
+        viewModelScope.launch {
+            try {
+                val response = biometricPrompts.authenticateVault(VaultAuthPurpose.UNLOCK)
+                if (response == BiometricPromptResponse.Authorized) {
+                    openVault()
+                } else {
                     _state.value = _state.value.copy(
-                        errorMessage = errString,
-                        errorRes = null,
+                        isAuthenticating = false,
+                        errorRes = vaultPromptFailureRes(response),
                     )
                 }
-            },
-        )
+            } catch (e: CancellationException) {
+                _state.value = _state.value.copy(isAuthenticating = false)
+                throw e
+            }
+        }
+    }
+
+    private suspend fun openVault() {
+        try {
+            withContext(ioDispatcher) {
+                if (vaultMigration.needsMigration()) vaultMigration.migrate()
+                vaultManager.open()
+            }
+            _state.value = _state.value.copy(vaultReady = true, isAuthenticating = false, errorRes = null)
+        } catch (e: CancellationException) {
+            _state.value = _state.value.copy(isAuthenticating = false)
+            throw e
+        } catch (e: VaultAuthExpiredException) {
+            _state.value = _state.value.copy(
+                isAuthenticating = false,
+                errorRes = R.string.firstlaunch_error_auth_expired,
+            )
+        } catch (e: KeyPermanentlyInvalidatedException) {
+            _state.value = _state.value.copy(
+                isAuthenticating = false,
+                errorRes = R.string.firstlaunch_error_key_invalidated,
+            )
+        } catch (e: Exception) {
+            // The class only: the message may say what the vault holds or where.
+            Timber.w("Vault could not be opened at onboarding (${errorClass(e)})")
+            _state.value = _state.value.copy(
+                isAuthenticating = false,
+                errorRes = R.string.vault_unlock_error_open_failed,
+            )
+        }
     }
 
     fun dismissError() {
-        _state.value = _state.value.copy(errorMessage = null, errorRes = null)
+        _state.value = _state.value.copy(errorRes = null)
     }
 
     /**
      * Persists the onboarding-completed flag, then invokes [onPersisted] so the
      * caller can navigate away. Guarantees the flag is written before the host
      * list is shown, so the stepper cannot reappear on a fast relaunch.
+     *
+     * The app is unlocked first when the vault step was done: the host list opens
+     * right after, and the lock screen must not cover it for a process in which the
+     * owner has just proved who they are.
      */
     fun completeOnboarding(onPersisted: () -> Unit) {
         viewModelScope.launch {
             settingsDataStore.setOnboardingCompleted(true)
+            if (_state.value.vaultReady) appLock.unlock()
             onPersisted()
         }
     }

@@ -43,7 +43,6 @@ class SettingsDataStoreClipboardTest {
         val settings = SettingsDataStore.Settings(
             terminalFontSize = 18,
             scrollbackLines = 5000,
-            keepAliveInterval = 20,
             autoReconnect = false,
             connectionTimeout = 15,
             clipboardClearTimeout = 90,
@@ -52,7 +51,6 @@ class SettingsDataStoreClipboardTest {
         assertEquals(90, settings.clipboardClearTimeout)
         assertEquals(18, settings.terminalFontSize)
         assertEquals(5000, settings.scrollbackLines)
-        assertEquals(20, settings.keepAliveInterval)
         assertEquals(false, settings.autoReconnect)
         assertEquals(15, settings.connectionTimeout)
     }
@@ -62,8 +60,7 @@ class SettingsDataStoreClipboardTest {
         val settings = SettingsDataStore.Settings()
 
         assertEquals(24, settings.terminalFontSize)
-        assertEquals(10000, settings.scrollbackLines)
-        assertEquals(30, settings.keepAliveInterval)
+        assertEquals(5000, settings.scrollbackLines)
         assertEquals(true, settings.autoReconnect)
         assertEquals(10, settings.connectionTimeout)
         assertEquals(60, settings.clipboardClearTimeout)

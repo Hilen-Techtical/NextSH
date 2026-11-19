@@ -6,27 +6,29 @@ package fr.techtical.nextsh.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import fr.techtical.nextsh.core.vault.VaultAuthExpiredException
-import fr.techtical.nextsh.core.vault.VaultManager
+import fr.techtical.nextsh.core.lock.AppLock
+import fr.techtical.nextsh.core.lock.AutoLockDelay
+import fr.techtical.nextsh.core.vault.AndroidVaultWipe
 import fr.techtical.nextsh.data.preferences.SettingsDataStore
 import fr.techtical.nextsh.shared.core.sync.SyncInterval
 import fr.techtical.nextsh.shared.core.sync.SyncScheduler
 import fr.techtical.nextsh.shared.core.sync.SyncState
 import fr.techtical.nextsh.shared.core.sync.SyncStatus
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
+import fr.techtical.nextsh.shared.util.errorClass
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
-    private val vaultManager: VaultManager,
+    private val androidVaultWipe: AndroidVaultWipe,
     private val syncScheduler: SyncScheduler,
+    private val appLock: AppLock,
 ) : ViewModel() {
 
     val state = settingsDataStore.settingsFlow.stateIn(
@@ -50,10 +52,6 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsDataStore.updateScrollbackLines(lines) }
     }
 
-    fun updateKeepAlive(seconds: Int) {
-        viewModelScope.launch { settingsDataStore.updateKeepAliveInterval(seconds) }
-    }
-
     fun toggleAutoReconnect() {
         viewModelScope.launch { settingsDataStore.updateAutoReconnect(!state.value.autoReconnect) }
     }
@@ -64,6 +62,15 @@ class SettingsViewModel @Inject constructor(
 
     fun updateClipboardClearTimeout(seconds: Int) {
         viewModelScope.launch { settingsDataStore.updateClipboardClearTimeout(seconds) }
+    }
+
+    fun updateAutoLockDelay(delay: AutoLockDelay) {
+        viewModelScope.launch { settingsDataStore.updateAutoLockDelay(delay) }
+    }
+
+    /** "Lock now": the lock screen covers the app at once. */
+    fun lockNow() {
+        appLock.lock()
     }
 
     fun toggleSyncEnabled() {
@@ -90,17 +97,29 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun forceSync() {
-        viewModelScope.launch { syncScheduler.forceSync() }
+        viewModelScope.launch {
+            try {
+                syncScheduler.forceSync()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // viewModelScope has no handler: an escaping exception would kill the process.
+                // The scheduler already reports its own failures through syncState.
+                Timber.w("forceSync failed (${errorClass(e)})")
+            }
+        }
     }
 
-    private val _authRequiredEvent = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val authRequiredEvent: SharedFlow<Unit> = _authRequiredEvent.asSharedFlow()
-
+    /**
+     * Starts the wipe of the vault, after the two steps of confirmation of the screen. The wipe belongs to
+     * the application ([AndroidVaultWipe], its own scope): leaving the settings, a rotation or the
+     * destruction of the activity does not cut it, and this view model does not even wait for it. Its
+     * progress and its failure are shown by the modal of `MainActivity`, from the state of the app.
+     *
+     * No authentication is asked: the wipe works on the raw preferences of the vault and does not need it
+     * open (it stays possible after the authentication window closed, or the master key was invalidated).
+     */
     fun wipeVault() {
-        try {
-            vaultManager.wipeVault()
-        } catch (e: VaultAuthExpiredException) {
-            _authRequiredEvent.tryEmit(Unit)
-        }
+        androidVaultWipe.start()
     }
 }

@@ -3,8 +3,12 @@
 
 package fr.techtical.nextsh.core.ssh
 
+import fr.techtical.nextsh.shared.domain.model.SshResult
+import io.mockk.Runs
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
 import net.schmizz.sshj.SSHClient
@@ -77,6 +81,45 @@ class SftpManagerSharingTest {
         manager.closeSftp("inconnue")
 
         assertFalse(manager.isOpen("inconnue"))
+    }
+
+    @Test
+    fun `la fin de la session emporte son client SFTP, que personne n a ferme`() = runTest {
+        val ends = slot<SessionEndListener>()
+        val sshClient: SSHClient = mockk(relaxed = true)
+        every { sshClient.newSFTPClient() } returns sftpClient
+        val sessionManager: SshSessionManager = mockk(relaxed = true)
+        every { sessionManager.getClient("s1") } returns sshClient
+        every { sessionManager.addSessionEndListener(capture(ends)) } just Runs
+        val manager = SftpManager(sessionManager)
+        manager.openSftp("s1")
+        manager.openSftp("s1")
+
+        // The link dies: the SFTP channel went with it, closing it would talk to a dead transport.
+        ends.captured.onSessionEnded("s1", SessionEnd.Lost("CONNECTION_LOST"))
+
+        assertFalse(manager.isOpen("s1"), "un client de session morte n'est pas rendu comme ouvert")
+        verify(exactly = 0) { sftpClient.close() }
+        // The users that come after start from a clean count and a new channel.
+        manager.openSftp("s1")
+        assertTrue(manager.isOpen("s1"))
+        manager.closeSftp("s1")
+        assertFalse(manager.isOpen("s1"))
+    }
+
+    @Test
+    fun `une session disparue pendant l ouverture ne laisse pas de client`() = runTest {
+        val sshClient: SSHClient = mockk(relaxed = true)
+        every { sshClient.newSFTPClient() } returns sftpClient
+        val sessionManager: SshSessionManager = mockk(relaxed = true)
+        // The session is there when the channel is asked for, gone when it is opened.
+        every { sessionManager.getClient("s1") } returnsMany listOf(sshClient, null)
+        val manager = SftpManager(sessionManager)
+
+        val result = manager.openSftp("s1")
+
+        assertTrue(result is SshResult.Error)
+        assertFalse(manager.isOpen("s1"))
     }
 
     @Test

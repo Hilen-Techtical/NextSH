@@ -19,26 +19,95 @@ import androidx.compose.ui.awt.SwingPanel
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import fr.techtical.nextsh.desktop.core.browser.KcefFailure
+import fr.techtical.nextsh.desktop.core.browser.KcefPhase
 import fr.techtical.nextsh.desktop.core.browser.KcefState
+import fr.techtical.nextsh.desktop.generated.resources.Res
+import fr.techtical.nextsh.desktop.generated.resources.action_cancel
+import fr.techtical.nextsh.desktop.generated.resources.action_close
+import fr.techtical.nextsh.desktop.generated.resources.action_continue
+import fr.techtical.nextsh.desktop.generated.resources.browser_action_back
+import fr.techtical.nextsh.desktop.generated.resources.browser_action_forward
+import fr.techtical.nextsh.desktop.generated.resources.browser_action_minimize
+import fr.techtical.nextsh.desktop.generated.resources.browser_action_reload
+import fr.techtical.nextsh.desktop.generated.resources.browser_external_message
+import fr.techtical.nextsh.desktop.generated.resources.browser_external_title
+import fr.techtical.nextsh.desktop.generated.resources.browser_external_warning
+import fr.techtical.nextsh.desktop.generated.resources.browser_kcef_error_profile_busy
+import fr.techtical.nextsh.desktop.generated.resources.browser_kcef_error_profile_unknown
+import fr.techtical.nextsh.desktop.generated.resources.browser_kcef_error_restart_required
+import fr.techtical.nextsh.desktop.generated.resources.browser_kcef_error_timeout
+import fr.techtical.nextsh.desktop.generated.resources.browser_kcef_error_unknown
+import fr.techtical.nextsh.desktop.generated.resources.browser_kcef_phase_downloading
+import fr.techtical.nextsh.desktop.generated.resources.browser_kcef_phase_extracting
+import fr.techtical.nextsh.desktop.generated.resources.browser_kcef_phase_initializing
+import fr.techtical.nextsh.desktop.generated.resources.browser_kcef_phase_installing
+import fr.techtical.nextsh.desktop.generated.resources.browser_kcef_phase_locating
+import fr.techtical.nextsh.desktop.generated.resources.browser_kcef_phase_preparing
+import fr.techtical.nextsh.desktop.generated.resources.browser_kcef_title_failed
+import fr.techtical.nextsh.desktop.generated.resources.browser_kcef_title_unavailable
+import fr.techtical.nextsh.desktop.generated.resources.browser_tunnel_disconnected
+import fr.techtical.nextsh.desktop.generated.resources.browser_auth_interception_unavailable
+import fr.techtical.nextsh.desktop.generated.resources.browser_auth_other_address
+import fr.techtical.nextsh.desktop.generated.resources.browser_auth_unsupported
+import fr.techtical.nextsh.desktop.generated.resources.browser_error_private_session
+import fr.techtical.nextsh.desktop.generated.resources.browser_error_start_failed
 import fr.techtical.nextsh.desktop.theme.*
 import fr.techtical.nextsh.shared.domain.model.TunnelStatus
 import fr.techtical.nextsh.shared.util.Logger
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.cef.CefApp
 import org.cef.CefClient
 import org.cef.browser.CefBrowser
-import org.cef.browser.CefBrowserOsrWithHandler
+import org.cef.browser.CefDevToolsClient
 import org.cef.browser.CefFrame
 import org.cef.browser.CefRequestContext
 import org.cef.callback.CefCallback
+import org.cef.handler.CefLifeSpanHandlerAdapter
 import org.cef.handler.CefLoadHandler
 import org.cef.handler.CefLoadHandlerAdapter
 import org.cef.handler.CefRequestHandlerAdapter
 import org.cef.network.CefRequest
 import org.cef.security.CefSSLInfo
+import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.getString
+import org.jetbrains.compose.resources.stringResource
 import java.awt.Desktop
+import javax.swing.SwingUtilities
+
+private const val TAG = "DesktopBrowserOverlay"
+
+// Longest wait for Chromium to report the browser as created before giving up.
+private const val BROWSER_CREATE_TIMEOUT_MS = 30_000L
+
+// How long the "unsupported authentication" notice stays on screen.
+private const val AUTH_NOTICE_DISPLAY_MS = 10_000L
+
+/**
+ * Gives a browser back to the engine, in the order that matters for the HTTP
+ * authentication channel: DevTools client first (its listener holds the coordinator),
+ * then the browser, then the client. Nothing typed in the sign-in panel survives the
+ * browser: see [NextShOsrBrowser]. The client is released once the close has been started,
+ * which for a browser that is not created yet means once it is: the creation callback must
+ * find its client. Never throws: a failing JNI call must not leave the rest unreleased.
+ */
+private fun releaseBrowserStack(
+    browser: CefBrowser?,
+    client: CefClient?,
+    panel: SoftwareOsrPanel?,
+    devTools: CefDevToolsClient?,
+) {
+    runCatching { devTools?.close() }
+    panel?.detachBrowser()
+    val releaseClient = { runCatching { client?.dispose() }; Unit }
+    if (browser != null) closeBrowserForGood(browser, releaseClient) else releaseClient()
+}
 
 @Composable
 fun DesktopBrowserOverlay(
@@ -68,10 +137,33 @@ fun DesktopBrowserOverlay(
     var browser by remember { mutableStateOf<CefBrowser?>(null) }
     var client by remember { mutableStateOf<CefClient?>(null) }
     var panel by remember { mutableStateOf<SoftwareOsrPanel?>(null) }
+    var devTools by remember { mutableStateOf<CefDevToolsClient?>(null) }
 
-    // Track the URL currently loaded into the browser so we can detect tunnel switches
+    // The tunnel and URL the live browser was created for, so a tunnel switch is detected
     // without relying on browser.getURL() which may not reflect pending loads.
     var loadedUrl by remember { mutableStateOf("") }
+    var loadedTunnelId by remember { mutableStateOf<String?>(null) }
+
+    // Ends the live browser: HTTP authentication state first (pending requests answered,
+    // credentials wiped), then the engine objects. Used by the Close button, a tunnel
+    // switch (each tunnel gets its own in-memory request context, so Chromium's
+    // authentication cache never carries credentials from one tunnel to the next) and a
+    // failed start.
+    fun closeBrowserStack() {
+        val b = browser
+        val c = client
+        val p = panel
+        val dt = devTools
+        browser = null
+        client = null
+        panel = null
+        devTools = null
+        loadedUrl = ""
+        loadedTunnelId = null
+        viewModel.detachAuth()
+        sessionHolder.setKcefBrowser(null)
+        releaseBrowserStack(b, c, p, dt)
+    }
 
     LaunchedEffect(activeTunnelId) {
         activeTunnelId?.let {
@@ -86,11 +178,38 @@ fun DesktopBrowserOverlay(
     // Done once on composition entry; cleared on composition exit.
     DisposableEffect(Unit) {
         sessionHolder.onDispose = { b ->
-            (b as? CefBrowser)?.close(true)
+            (b as? CefBrowser)?.let { closeBrowserForGood(it) }
         }
         onDispose {
             sessionHolder.onDispose = null
+            // The overlay leaves the composition when the vault locks. The browser and its
+            // state held by remember die with it, and re-entering creates a fresh browser:
+            // the old one would otherwise live on, unreachable, with its page, cookies and
+            // HTTP authentication cache. Release it, and the credentials typed for it.
+            viewModel.detachAuth()
+            sessionHolder.setKcefBrowser(null)
+            releaseBrowserStack(browser, client, panel, devTools)
         }
+    }
+
+    // The authentication notices are informational and go away by themselves, after being
+    // on screen for AUTH_NOTICE_DISPLAY_MS. The clock only runs while the overlay is visible
+    // (it restarts when the overlay comes back): a notice raised while the user was looking
+    // elsewhere must not expire unseen.
+    LaunchedEffect(uiState.authNotice, isVisible) {
+        if (uiState.authNotice != null && isVisible) {
+            delay(AUTH_NOTICE_DISPLAY_MS)
+            viewModel.dismissAuthNotice()
+        }
+    }
+
+    // While the sign-in panel is up the keyboard belongs to it: the OSR panel gives its
+    // keyboard focus up, and cannot take it back by itself (mouse click included), so
+    // nothing typed for the sign-in form can reach an input of the web page, an autofocused
+    // one for instance. The panel focuses its own field.
+    // When the form goes away while the overlay is visible, the page gets the keyboard back.
+    LaunchedEffect(panel, uiState.authPrompt != null, isVisible) {
+        panel?.setKeyboardBlocked(uiState.authPrompt != null, restoreFocus = isVisible)
     }
 
     // External navigation warning dialog, shown even when the overlay is minimised
@@ -101,13 +220,13 @@ fun DesktopBrowserOverlay(
             containerColor = Surface,
             titleContentColor = TextPrimary,
             textContentColor = TextSecondary,
-            title = { Text("Navigation externe") },
+            title = { Text(stringResource(Res.string.browser_external_title)) },
             text = {
                 Column {
-                    Text("Vous allez quitter le service tunnelisé et ouvrir une URL dans votre navigateur système.")
+                    Text(stringResource(Res.string.browser_external_message))
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "Vérifiez que l'URL est sûre avant de continuer.",
+                        text = stringResource(Res.string.browser_external_warning),
                         color = WarningAmber,
                     )
                     Spacer(Modifier.height(8.dp))
@@ -137,13 +256,13 @@ fun DesktopBrowserOverlay(
                         }
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = WarningAmber),
-                ) { Text("Continuer") }
+                ) { Text(stringResource(Res.string.action_continue)) }
             },
             dismissButton = {
                 TextButton(
                     onClick = { viewModel.cancelExternalNavigation() },
                     colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary),
-                ) { Text("Annuler") }
+                ) { Text(stringResource(Res.string.action_cancel)) }
             },
         )
     }
@@ -152,9 +271,12 @@ fun DesktopBrowserOverlay(
     // CefBrowser + SoftwareOsrPanel are never destroyed on minimise, only on close().
     // The SwingPanel below is collapsed to size 0 when hidden, because zIndex alone
     // cannot push an AWT heavyweight behind Compose content (it always pierces through).
-    // Heavyweight also pierces Compose dialogs, so we also collapse while the external
-    // nav AlertDialog is open to keep it legible above the Chromium surface.
-    val shouldRenderBrowser = isVisible && !uiState.showExternalNavWarning
+    // Heavyweight also pierces Compose dialogs and the inline HTTP sign-in panel, so we
+    // also collapse while the external nav AlertDialog is open or a sign-in prompt is
+    // pending, to keep them legible above the Chromium surface.
+    val shouldRenderBrowser = isVisible &&
+        !uiState.showExternalNavWarning &&
+        uiState.authPrompt == null
     if (activeTunnelId != null) {
         Box(
             modifier = Modifier
@@ -176,28 +298,18 @@ fun DesktopBrowserOverlay(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 IconButton(onClick = {
-                                    val b = browser
-                                    val c = client
-                                    val p = panel
-                                    browser = null
-                                    client = null
-                                    panel = null
-                                    loadedUrl = ""
+                                    // Releases the browser, its client (prevents a native
+                                    // leak on open → close → open cycles within the same app
+                                    // session) and the HTTP authentication state.
+                                    closeBrowserStack()
                                     viewModel.onBrowserClosed()
+                                    // Also invokes the onDispose callback installed above,
+                                    // which has nothing left to close here.
                                     sessionHolder.close()
-                                    // sessionHolder.close triggers onDispose (DisposableEffect
-                                    // above) which calls b.close(true). Belt-and-suspenders
-                                    // in case onDispose was not yet installed (race on first
-                                    // composition).
-                                    p?.detachBrowser()
-                                    b?.close(true)
-                                    // Releasing the client prevents a native leak on
-                                    // open → close → open cycles within the same app session.
-                                    c?.dispose()
                                 }) {
                                     Icon(
                                         Icons.Rounded.Close,
-                                        contentDescription = "Fermer",
+                                        contentDescription = stringResource(Res.string.action_close),
                                         tint = TextPrimary,
                                     )
                                 }
@@ -205,7 +317,7 @@ fun DesktopBrowserOverlay(
                                 IconButton(onClick = { sessionHolder.hide() }) {
                                     Icon(
                                         Icons.Rounded.KeyboardArrowDown,
-                                        contentDescription = "Réduire",
+                                        contentDescription = stringResource(Res.string.browser_action_minimize),
                                         tint = Gold,
                                     )
                                 }
@@ -221,33 +333,51 @@ fun DesktopBrowserOverlay(
                                     style = MaterialTheme.typography.labelMedium,
                                 )
 
+                                // Back / forward / reload are disabled while the sign-in panel
+                                // is shown: the page is waiting for the answer, and a
+                                // navigation would orphan the request the panel answers.
+                                // Close and minimise stay available.
+                                val navEnabled = uiState.authPrompt == null
+
                                 IconButton(
-                                    onClick = { browser?.goBack() },
-                                    enabled = uiState.canGoBack,
+                                    onClick = {
+                                        viewModel.onUserNavigation()
+                                        browser?.goBack()
+                                    },
+                                    enabled = uiState.canGoBack && navEnabled,
                                 ) {
                                     Icon(
                                         Icons.AutoMirrored.Rounded.ArrowBack,
-                                        contentDescription = "Précédent",
-                                        tint = if (uiState.canGoBack) Gold else TextSecondary,
+                                        contentDescription = stringResource(Res.string.browser_action_back),
+                                        tint = if (uiState.canGoBack && navEnabled) Gold else TextSecondary,
                                     )
                                 }
 
                                 IconButton(
-                                    onClick = { browser?.goForward() },
-                                    enabled = uiState.canGoForward,
+                                    onClick = {
+                                        viewModel.onUserNavigation()
+                                        browser?.goForward()
+                                    },
+                                    enabled = uiState.canGoForward && navEnabled,
                                 ) {
                                     Icon(
                                         Icons.AutoMirrored.Rounded.ArrowForward,
-                                        contentDescription = "Suivant",
-                                        tint = if (uiState.canGoForward) Gold else TextSecondary,
+                                        contentDescription = stringResource(Res.string.browser_action_forward),
+                                        tint = if (uiState.canGoForward && navEnabled) Gold else TextSecondary,
                                     )
                                 }
 
-                                IconButton(onClick = { browser?.reload() }) {
+                                IconButton(
+                                    onClick = {
+                                        viewModel.onUserNavigation()
+                                        browser?.reload()
+                                    },
+                                    enabled = navEnabled,
+                                ) {
                                     Icon(
                                         Icons.Rounded.Refresh,
-                                        contentDescription = "Actualiser",
-                                        tint = Gold,
+                                        contentDescription = stringResource(Res.string.browser_action_reload),
+                                        tint = if (navEnabled) Gold else TextSecondary,
                                     )
                                 }
                             }
@@ -268,7 +398,7 @@ fun DesktopBrowserOverlay(
                                     color = ErrorRed.copy(alpha = 0.15f),
                                 ) {
                                     Text(
-                                        text = "Tunnel déconnecté",
+                                        text = stringResource(Res.string.browser_tunnel_disconnected),
                                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                                         color = ErrorRed,
                                         style = MaterialTheme.typography.bodySmall,
@@ -287,6 +417,29 @@ fun DesktopBrowserOverlay(
                                         color = WarningAmber,
                                         style = MaterialTheme.typography.bodySmall,
                                         maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+
+                            if (uiState.authNotice != null) {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = WarningAmber.copy(alpha = 0.15f),
+                                ) {
+                                    Text(
+                                        text = stringResource(
+                                            when (uiState.authNotice) {
+                                                AuthNotice.OTHER_ADDRESS -> Res.string.browser_auth_other_address
+                                                AuthNotice.INTERCEPTION_UNAVAILABLE ->
+                                                    Res.string.browser_auth_interception_unavailable
+                                                else -> Res.string.browser_auth_unsupported
+                                            },
+                                        ),
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                        color = WarningAmber,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 3,
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                 }
@@ -310,7 +463,7 @@ fun DesktopBrowserOverlay(
                             ) {
                                 CircularProgressIndicator(color = Gold)
                                 Text(
-                                    text = state.message,
+                                    text = stringResource(kcefPhaseText(state.phase)),
                                     color = TextSecondary,
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
@@ -331,12 +484,12 @@ fun DesktopBrowserOverlay(
                                 modifier = Modifier.padding(24.dp),
                             ) {
                                 Text(
-                                    text = state.title,
+                                    text = stringResource(kcefFailureTitle(state.failure)),
                                     color = ErrorRed,
                                     style = MaterialTheme.typography.titleSmall,
                                 )
                                 Text(
-                                    text = state.reason,
+                                    text = kcefFailureText(state),
                                     color = TextSecondary,
                                     style = MaterialTheme.typography.bodySmall,
                                     maxLines = 4,
@@ -348,14 +501,39 @@ fun DesktopBrowserOverlay(
                         KcefState.Ready -> {
                             val initialUrl = uiState.initialUrl
                             if (initialUrl.isNotEmpty()) {
-                                // Create the CEF client + browser once per active session.
-                                // We use LaunchedEffect rather than remember { } because
+                                // During a tunnel switch initialUrl is still the previous
+                                // tunnel's until loadTunnel has loaded the new config: only
+                                // a config whose id is the active tunnel's is acted upon.
+                                val configTunnelId = uiState.tunnelConfig?.id
+                                // Read with the id, from the same state: the port of the tunnel
+                                // this very browser is created for, the one origin allowed to
+                                // receive credentials from it.
+                                val configPort = uiState.tunnelConfig?.localPort
+
+                                // Create the CEF client + browser once per tunnel. We use
+                                // LaunchedEffect rather than remember { } because
                                 // CefApp.getInstance().createClient() must not run during
                                 // composition: it belongs in an effect.
-                                LaunchedEffect(activeTunnelId) {
-                                    if (browser == null) {
+                                LaunchedEffect(activeTunnelId, configTunnelId, initialUrl) {
+                                    val configIsCurrent = configTunnelId != null &&
+                                        configPort != null &&
+                                        configTunnelId == activeTunnelId
+                                    val alreadyOpen = browser != null &&
+                                        loadedTunnelId == configTunnelId &&
+                                        loadedUrl == initialUrl
+                                    if (configIsCurrent && !alreadyOpen) {
+                                        val tunnelPort = configPort ?: return@LaunchedEffect
+                                        // Tunnel switch: the previous browser goes away with its
+                                        // in-memory request context, so the HTTP authentication
+                                        // credentials Chromium cached for the previous tunnel
+                                        // (keyed by 127.0.0.1:<port>, a port a later tunnel may
+                                        // reuse) cannot reach the next tunnel's service.
+                                        if (browser != null) closeBrowserStack()
+
                                         // OSR custom path: build our own CefBrowserOsrWithHandler
-                                        // backed by SoftwareOsrRenderHandler + SoftwareOsrPanel.
+                                        // (NextShOsrBrowser, which closes without notifying the
+                                        // main window) backed by SoftwareOsrRenderHandler +
+                                        // SoftwareOsrPanel.
                                         // This bypasses both windowed rendering (white HWND flashes)
                                         // and JCEF's default OSR (JOGL crash on HDR10). See
                                         // SoftwareOsrPanel for the render pipeline.
@@ -365,6 +543,12 @@ fun DesktopBrowserOverlay(
                                         val newClient = withContext(Dispatchers.IO) {
                                             runCatching { CefApp.getInstance().createClient() }.getOrNull()
                                         } ?: return@LaunchedEffect
+                                        if (!isActive) {
+                                            // A newer tunnel switch superseded this one while
+                                            // the client was being created.
+                                            newClient.dispose()
+                                            return@LaunchedEffect
+                                        }
 
                                         val loadHandler = object : CefLoadHandlerAdapter() {
                                             override fun onLoadStart(
@@ -445,6 +629,23 @@ fun DesktopBrowserOverlay(
                                             }
 
                                             /**
+                                             * A link opened in a new tab (middle click, Ctrl+click). No
+                                             * second browser is ever created: see resolvePopupTarget.
+                                             */
+                                            override fun onOpenURLFromTab(
+                                                browser: CefBrowser,
+                                                frame: CefFrame?,
+                                                targetUrl: String?,
+                                                userGesture: Boolean,
+                                            ): Boolean {
+                                                val target = viewModel.resolvePopupTarget(targetUrl)
+                                                if (target != null) {
+                                                    SwingUtilities.invokeLater { runCatching { browser.loadURL(target) } }
+                                                }
+                                                return true
+                                            }
+
+                                            /**
                                              * Called when a TLS certificate error is encountered.
                                              * Self-signed certificates on loopback addresses are accepted
                                              * because many self-hosted services (Proxmox, Portainer, …)
@@ -484,18 +685,48 @@ fun DesktopBrowserOverlay(
                                         val requestContext = runCatching { CefRequestContext.createContext(null) }.getOrNull()
                                         if (requestContext == null) {
                                             Logger.w(
-                                                "DesktopBrowserOverlay",
+                                                TAG,
                                                 "in-memory request context unavailable, browser not opened",
                                             )
                                             newClient.dispose()
-                                            viewModel.onWebError(
-                                                "Session de navigation privée indisponible : le navigateur n'a pas été ouvert."
-                                            )
+                                            viewModel.onWebError(getString(Res.string.browser_error_private_session))
                                             return@LaunchedEffect
                                         }
-                                        val newBrowser = CefBrowserOsrWithHandler(
+                                        // Created without a URL: the page must only be requested
+                                        // once the HTTP authentication channel below is up, or
+                                        // its first 401 could reach Chromium's native sign-in
+                                        // window (see startAuthInterception).
+                                        val created = CompletableDeferred<Unit>()
+                                        newClient.addLifeSpanHandler(object : CefLifeSpanHandlerAdapter() {
+                                            override fun onAfterCreated(b: CefBrowser) {
+                                                // Lets a close that was asked for before the creation go through.
+                                                (b as? NextShOsrBrowser)?.markCreated()
+                                                created.complete(Unit)
+                                            }
+
+                                            /**
+                                             * window.open and target=_blank. A popup would be a second
+                                             * browser without the HTTP authentication channel (its first
+                                             * 401 would open Chromium's own window) and, windowless, would
+                                             * draw into this very panel: none is ever created. A loopback
+                                             * target opens in this browser instead, see resolvePopupTarget.
+                                             */
+                                            override fun onBeforePopup(
+                                                b: CefBrowser,
+                                                frame: CefFrame?,
+                                                targetUrl: String?,
+                                                targetFrameName: String?,
+                                            ): Boolean {
+                                                val target = viewModel.resolvePopupTarget(targetUrl)
+                                                if (target != null) {
+                                                    SwingUtilities.invokeLater { runCatching { b.loadURL(target) } }
+                                                }
+                                                return true
+                                            }
+                                        })
+                                        val newBrowser = NextShOsrBrowser(
                                             newClient,
-                                            initialUrl,
+                                            "",
                                             requestContext,
                                             renderHandler,
                                             newPanel,
@@ -506,22 +737,65 @@ fun DesktopBrowserOverlay(
                                         newPanel.attachBrowser(newBrowser)
                                         newBrowser.createImmediately()
 
+                                        // Published at once, before anything suspends: if this
+                                        // effect is cancelled from here on (tunnel switch, overlay
+                                        // leaving the composition), the browser is still reachable
+                                        // and gets released instead of leaking.
                                         client = newClient
                                         browser = newBrowser
                                         panel = newPanel
                                         loadedUrl = initialUrl
+                                        loadedTunnelId = configTunnelId
                                         sessionHolder.setKcefBrowser(newBrowser)
-                                    }
-                                }
 
-                                // On tunnel switch (activeTunnelId unchanged but URL changed),
-                                // navigate the existing browser to the new service URL instead
-                                // of disposing and recreating it.
-                                LaunchedEffect(initialUrl) {
-                                    val b = browser ?: return@LaunchedEffect
-                                    if (initialUrl != loadedUrl) {
-                                        b.loadURL(initialUrl)
-                                        loadedUrl = initialUrl
+                                        // True while this effect still owns the browser it created:
+                                        // not cancelled, and not replaced in the state by a tunnel
+                                        // switch or released by the composition leaving. Checked
+                                        // after every suspension, before touching anything shared.
+                                        fun stillCurrent() = isActive && browser === newBrowser
+
+                                        val reported = withTimeoutOrNull(BROWSER_CREATE_TIMEOUT_MS) {
+                                            created.await()
+                                            true
+                                        } ?: false
+                                        if (!reported) {
+                                            Logger.w(TAG, "browser creation not reported by Chromium, browser not opened")
+                                            // A browser that is never created keeps its close gate waiting, and its
+                                            // client alive: deliberate, disposing a client while a native creation is
+                                            // still pending is the very hazard the gate exists to avoid.
+                                            if (browser === newBrowser) {
+                                                closeBrowserStack()
+                                                viewModel.onWebError(getString(Res.string.browser_error_start_failed))
+                                            } else {
+                                                // Superseded: this effect's own browser, whatever the
+                                                // state says now (releasing twice is harmless).
+                                                releaseBrowserStack(newBrowser, newClient, newPanel, null)
+                                            }
+                                            return@LaunchedEffect
+                                        }
+                                        if (!stillCurrent()) return@LaunchedEffect
+
+                                        // HTTP authentication through the DevTools Fetch domain:
+                                        // Chromium never opens its own sign-in window, challenges
+                                        // reach the coordinator that drives the NextSH panel.
+                                        val devToolsClient = awaitDevToolsClient(newBrowser)
+                                        if (!stillCurrent()) return@LaunchedEffect
+                                        var intercepted = false
+                                        if (devToolsClient != null) {
+                                            devTools = devToolsClient
+                                            val coordinator = viewModel.attachAuth(tunnelPort, CefDevToolsSender(devToolsClient))
+                                            intercepted = startAuthInterception(devToolsClient, coordinator)
+                                            if (!stillCurrent()) return@LaunchedEffect
+                                        }
+                                        if (!intercepted) {
+                                            // Degraded, not fatal: the page still loads, but Chromium
+                                            // may show its own sign-in window if the service asks for a
+                                            // password, and the user is told so. Nothing identifying
+                                            // is logged.
+                                            Logger.w(TAG, "HTTP sign-in interception unavailable")
+                                            viewModel.onAuthInterceptionUnavailable()
+                                        }
+                                        newBrowser.loadURL(initialUrl)
                                     }
                                 }
 
@@ -540,21 +814,25 @@ fun DesktopBrowserOverlay(
                                     // goes from size(0.dp) back to fillMaxSize() we force
                                     // revalidate()+repaint() so AWT re-draws the last frame
                                     // rather than leaving a blank canvas after minimise→restore.
-                                    SwingPanel(
-                                        background = NearBlack,
-                                        modifier = if (shouldRenderBrowser) {
-                                            Modifier.fillMaxSize()
-                                        } else {
-                                            Modifier.size(0.dp)
-                                        },
-                                        factory = { currentPanel },
-                                        update = {
-                                            if (shouldRenderBrowser) {
-                                                it.revalidate()
-                                                it.repaint()
-                                            }
-                                        },
-                                    )
+                                    // Keyed on the panel: a tunnel switch swaps the browser, and
+                                    // the interop view must follow instead of keeping the old one.
+                                    key(currentPanel) {
+                                        SwingPanel(
+                                            background = NearBlack,
+                                            modifier = if (shouldRenderBrowser) {
+                                                Modifier.fillMaxSize()
+                                            } else {
+                                                Modifier.size(0.dp)
+                                            },
+                                            factory = { currentPanel },
+                                            update = {
+                                                if (shouldRenderBrowser) {
+                                                    it.revalidate()
+                                                    it.repaint()
+                                                }
+                                            },
+                                        )
+                                    }
                                 } else {
                                     // Browser is being created asynchronously: show a spinner
                                     // until the LaunchedEffect above completes.
@@ -563,8 +841,54 @@ fun DesktopBrowserOverlay(
                             }
                         }
                     }
+
+                    // HTTP sign-in panel (401 Basic from a tunnelled service). Replaces
+                    // Chromium's native sign-in window. Drawn inline over the NearBlack
+                    // container, not as a Dialog or Popup: those open as separate OS
+                    // windows on Desktop and would outlive the overlay. The SwingPanel
+                    // above stays composed (the CEF browser must stay attached) but is
+                    // collapsed to 0.dp while a prompt is pending, see shouldRenderBrowser.
+                    //
+                    // Only while the overlay is visible: a focus-taking form must never
+                    // show up over another screen (a terminal, say) and swallow keystrokes
+                    // meant for it, such as a password. While minimised the request stays
+                    // paused (the page just waits) and the panel reappears when the browser
+                    // is reopened; closing the browser cancels it.
+                    uiState.authPrompt?.takeIf { isVisible }?.let { prompt ->
+                        HttpAuthPanel(
+                            prompt = prompt,
+                            onSubmit = viewModel::submitAuth,
+                            onCancel = viewModel::cancelAuth,
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .padding(24.dp),
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+private fun kcefPhaseText(phase: KcefPhase): StringResource = when (phase) {
+    KcefPhase.Preparing -> Res.string.browser_kcef_phase_preparing
+    KcefPhase.Locating -> Res.string.browser_kcef_phase_locating
+    KcefPhase.Downloading -> Res.string.browser_kcef_phase_downloading
+    KcefPhase.Extracting -> Res.string.browser_kcef_phase_extracting
+    KcefPhase.Installing -> Res.string.browser_kcef_phase_installing
+    KcefPhase.Initializing -> Res.string.browser_kcef_phase_initializing
+}
+
+private fun kcefFailureTitle(failure: KcefFailure): StringResource = when (failure) {
+    KcefFailure.ProfileBusy -> Res.string.browser_kcef_title_unavailable
+    else -> Res.string.browser_kcef_title_failed
+}
+
+@Composable
+private fun kcefFailureText(state: KcefState.Failed): String = when (state.failure) {
+    KcefFailure.ProfileUnknown -> stringResource(Res.string.browser_kcef_error_profile_unknown)
+    KcefFailure.ProfileBusy -> stringResource(Res.string.browser_kcef_error_profile_busy)
+    KcefFailure.RestartRequired -> stringResource(Res.string.browser_kcef_error_restart_required)
+    KcefFailure.Timeout -> stringResource(Res.string.browser_kcef_error_timeout)
+    KcefFailure.EngineError -> state.detail ?: stringResource(Res.string.browser_kcef_error_unknown)
 }

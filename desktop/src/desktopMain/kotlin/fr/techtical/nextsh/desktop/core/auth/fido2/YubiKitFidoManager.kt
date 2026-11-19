@@ -25,6 +25,7 @@ import com.yubico.yubikit.fido.webauthn.PublicKeyCredentialUserEntity
 import com.yubico.yubikit.fido.webauthn.ResidentKeyRequirement
 import com.yubico.yubikit.fido.webauthn.UserVerificationRequirement
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
@@ -34,12 +35,19 @@ import java.security.SecureRandom
 import java.util.Arrays
 import javax.smartcardio.Card
 import javax.smartcardio.CardChannel
+import javax.smartcardio.CardTerminal
 import javax.smartcardio.CommandAPDU
 import javax.smartcardio.TerminalFactory
 
-// ── Log tag : délibérément sans "fido2"/"ctap"/"authenticator" pour éviter le filtre de
-// sanitisation Logger.desktop.kt (sensitivePatterns). Utiliser "YubiKit" qui n'est pas filtré.
+// ── Log tag. Le Logger Desktop passe chaque ligne (tag compris) par LogScrubber, qui ne
+// filtre pas les mots "fido2" ou "ctap" : le tag n'a aucune contrainte de nom.
 private const val TAG = "YubiKit"
+
+// ── Règle des journaux de ce fichier ────────────────────────────────────────
+// Texte fixe, nom de transport (HID, PC/SC), compteurs, codes CTAP / SW / SCARD et classes
+// d'exception uniquement. Jamais : nom de lecteur PC/SC, libellé matériel (HidDevice.toString),
+// nom de processus, octets d'APDU ou d'ATR, rpId, libellé de clé, message ou pile d'exception.
+// Les noms de lecteur servent à ouvrir la connexion et à l'interface, pas au journal.
 
 /**
  * Manager FIDO2 Desktop : transport HID FIDO (primaire) + PC/SC CCID (fallback NFC).
@@ -82,6 +90,14 @@ private const val TAG = "YubiKit"
 class YubiKitFidoManager(
     private val onTouchRequired: (deviceLabel: String) -> Unit = {},
     private val onTouchDone: () -> Unit = {},
+    /**
+     * Enumeration seams. Production uses the defaults (hid4java, the YubiKit PC/SC manager and
+     * `javax.smartcardio`); a test replaces them so that it loads no native library and reaches
+     * no reader. Each one may throw: the callers log the failure and carry on with no device.
+     */
+    private val hidDeviceSource: () -> List<HidDevice> = { HidManager().getFidoDevices() },
+    private val pcscDeviceSource: () -> List<UsbPcscDevice> = { PcscManager().getDevices() },
+    private val terminalSource: () -> List<CardTerminal> = { TerminalFactory.getDefault().terminals().list() },
 ) {
 
     /**
@@ -147,14 +163,13 @@ class YubiKitFidoManager(
          * `T=1` forcé et n'appelle jamais `beginExclusive` / `endExclusive`.
          *
          * Si ce fallback lui-même échoue encore avec 0x80100027, ce message est affiché.
-         * Workaround recommandé : lecteur NFC USB ou Windows WebAuthn API native (Phase 3+).
+         * Sur Windows, ce chemin PC/SC n'est emprunté que si l'API WebAuthn native n'est pas
+         * disponible (voir Fido2ProviderDispatcher). Solution recommandée : lecteur NFC USB.
          */
         object PcscWindowsBug : FidoError() {
             override val message: String =
-                "L'accès PC/SC à ta YubiKey échoue avec un bug connu Windows+Java " +
-                "(SCARD_E_NOT_TRANSACTED / 0x80100027). " +
-                "Workaround : utilise un lecteur NFC USB pour la YubiKey, " +
-                "ou patiente : implémentation Windows WebAuthn API native prévue dans une prochaine MR."
+                "PC/SC access to the YubiKey failed with a known Windows + Java bug " +
+                "(SCARD_E_NOT_TRANSACTED / 0x80100027). Use a USB NFC reader."
         }
     }
 
@@ -198,7 +213,7 @@ class YubiKitFidoManager(
         if (result.isEmpty()) {
             Logger.w(TAG, "listDevices: NO DEVICES on any transport (HID:${result.count { it.transport == Transport.USB_HID }}, PC/SC:${result.count { it.transport != Transport.USB_HID }})")
         } else {
-            Logger.d(TAG, "listDevices: found ${result.size} device(s): ${result.map { "${it.label}[${it.transport}]" }}")
+            Logger.d(TAG, "listDevices: found ${result.size} device(s) (HID:${result.count { it.transport == Transport.USB_HID }}, PC/SC:${result.count { it.transport != Transport.USB_HID }})")
         }
 
         return result
@@ -222,15 +237,15 @@ class YubiKitFidoManager(
         // Tente HID en premier (transport standard FIDO2 USB)
         val hidDevices = listHidDevicesRaw()
         if (hidDevices.isNotEmpty()) {
-            Logger.d(TAG, "detectDeviceForEnrollment: using HID device '${hidDevices[0]}'")
+            Logger.d(TAG, "detectDeviceForEnrollment: using the first of ${hidDevices.size} HID device(s)")
             return@withContext detectViaHid(hidDevices[0])
         }
 
         Logger.d(TAG, "detectDeviceForEnrollment: no HID device, trying PC/SC fallback")
 
         // Fallback PC/SC (lecteur NFC ou CCID activé manuellement)
-        val terminalsWithCard = listTerminalsWithCardPresent()
-        Logger.d(TAG, "detectDeviceForEnrollment: PC/SC terminals with card = ${terminalsWithCard.size} : $terminalsWithCard")
+        val terminalsWithCard = listTerminalsWithCardPresent(terminalSource)
+        Logger.d(TAG, "detectDeviceForEnrollment: PC/SC terminals with card = ${terminalsWithCard.size}")
 
         if (terminalsWithCard.isEmpty()) {
             Logger.w(TAG, "detectDeviceForEnrollment: NO DEVICES on any transport (HID:0, PC/SC:0)")
@@ -238,7 +253,7 @@ class YubiKitFidoManager(
         }
 
         val pcscDevices = listPcscDevicesRaw(terminalsWithCard)
-        Logger.d(TAG, "detectDeviceForEnrollment: PC/SC YubiKey devices = ${pcscDevices.size} : ${pcscDevices.map { it.getName() }}")
+        Logger.d(TAG, "detectDeviceForEnrollment: PC/SC YubiKey devices = ${pcscDevices.size}")
 
         if (pcscDevices.isEmpty()) {
             Logger.w(TAG, "detectDeviceForEnrollment: NO DEVICES on any transport (HID:0, PC/SC terminals found but no YubiKey PID matched)")
@@ -281,14 +296,14 @@ class YubiKitFidoManager(
         // Sélection du device : HID en priorité
         val hidDevices = listHidDevicesRaw()
         if (hidDevices.isNotEmpty()) {
-            Logger.d(TAG, "enrollCredential: using HID device '${hidDevices[0]}'")
+            Logger.d(TAG, "enrollCredential: using the first of ${hidDevices.size} HID device(s)")
             return@withContext enrollViaHid(hidDevices[0], rpId, rpName, userName, userDisplayName, pin, timeoutMs)
         }
 
         Logger.d(TAG, "enrollCredential: no HID device, trying PC/SC")
 
         // Fallback PC/SC
-        val terminalsWithCard = listTerminalsWithCardPresent()
+        val terminalsWithCard = listTerminalsWithCardPresent(terminalSource)
         val pcscDevices = listPcscDevicesRaw(terminalsWithCard)
         if (pcscDevices.isEmpty()) {
             Logger.w(TAG, "enrollCredential: NO DEVICES on any transport (HID:0, PC/SC:${terminalsWithCard.size})")
@@ -326,14 +341,14 @@ class YubiKitFidoManager(
         // HID en priorité
         val hidDevices = listHidDevicesRaw()
         if (hidDevices.isNotEmpty()) {
-            Logger.d(TAG, "signChallenge: using HID device '${hidDevices[0]}'")
+            Logger.d(TAG, "signChallenge: using the first of ${hidDevices.size} HID device(s)")
             return@withContext signViaHid(hidDevices[0], rpId, clientDataHash, credentialId, requireUv, timeoutMs)
         }
 
         Logger.d(TAG, "signChallenge: no HID device, trying PC/SC")
 
         // Fallback PC/SC
-        val terminalsWithCard = listTerminalsWithCardPresent()
+        val terminalsWithCard = listTerminalsWithCardPresent(terminalSource)
         val pcscDevices = listPcscDevicesRaw(terminalsWithCard)
         if (pcscDevices.isEmpty()) {
             Logger.w(TAG, "signChallenge: NO DEVICES on any transport (HID:0, PC/SC:${terminalsWithCard.size})")
@@ -383,21 +398,20 @@ class YubiKitFidoManager(
      */
     private fun listHidDevicesRaw(): List<HidDevice> {
         return try {
-            val manager = HidManager()
-            Logger.d(TAG, "listHidDevicesRaw: HidManager created, enumerating HID FIDO devices")
-            val devices = manager.getFidoDevices()
+            Logger.d(TAG, "listHidDevicesRaw: enumerating HID FIDO devices")
+            val devices = hidDeviceSource()
             val count = devices.size
             if (count == 0) {
                 Logger.d(TAG, "listHidDevicesRaw: HID devices found = 0 (no YubiKey HID FIDO interface detected)")
             } else {
-                Logger.d(TAG, "listHidDevicesRaw: HID devices found = $count : ${devices.map { it.toString() }}")
+                Logger.d(TAG, "listHidDevicesRaw: HID devices found = $count")
             }
             devices
         } catch (e: UnsatisfiedLinkError) {
-            Logger.e(TAG, "listHidDevicesRaw: hid4java native lib load FAILED, hidapi.dll extraction error: ${e.message}", e)
+            Logger.e(TAG, "listHidDevicesRaw: hid4java native lib load FAILED (hidapi.dll extraction error)", e)
             emptyList()
         } catch (e: Throwable) {
-            Logger.w(TAG, "listHidDevicesRaw: HID enum failed: ${e.javaClass.simpleName}: ${e.message} | cause=${e.cause?.message}")
+            Logger.w(TAG, "listHidDevicesRaw: HID enum failed (${describeFailure(e)})")
             emptyList()
         }
     }
@@ -411,18 +425,19 @@ class YubiKitFidoManager(
 
     private fun detectViaHid(device: HidDevice): Fido2Enroller.DeviceDetection {
         val label = device.toString()
-        Logger.d(TAG, "detectViaHid: opening connection to '$label'")
+        Logger.d(TAG, "detectViaHid: opening connection")
         return try {
             // openFidoConnection() retourne HidFidoConnection qui implémente FidoConnection
             val connection = device.openFidoConnection()
             try {
-                Logger.d(TAG, "detectViaHid: CTAP2 session opening for '$label'")
+                Logger.d(TAG, "detectViaHid: CTAP2 session opening")
                 val session = Ctap2Session(connection)
                 val info = session.getCachedInfo()
-                Logger.d(TAG, "detectViaHid: CTAP2 session opened: versions=${info.versions}, transports=${info.transports}")
+                // The version and transport lists come from the authenticator: counts and one known flag only.
+                Logger.d(TAG, "detectViaHid: CTAP2 session opened: ${describeCtapInfo(info.versions, info.transports)}")
                 val client = BasicWebAuthnClient(session)
                 val pinConfigured = client.isPinConfigured()
-                Logger.d(TAG, "detectViaHid: pinConfigured=$pinConfigured for '$label'")
+                Logger.d(TAG, "detectViaHid: pinConfigured=$pinConfigured")
                 Fido2Enroller.DeviceDetection(deviceLabel = label, pinConfigured = pinConfigured)
             } finally {
                 runCatching { connection.close() }
@@ -430,10 +445,10 @@ class YubiKitFidoManager(
         } catch (e: FidoError) {
             throw e
         } catch (e: IOException) {
-            Logger.w(TAG, "detectViaHid: IOException for '$label': ${e.message} | cause=${e.cause?.message}")
+            Logger.w(TAG, "detectViaHid: IOException (${describeFailure(e)})")
             throw FidoError.TransportError(e)
         } catch (e: Exception) {
-            Logger.w(TAG, "detectViaHid: ${e.javaClass.simpleName} for '$label': ${e.message} | cause=${e.cause?.message}")
+            Logger.w(TAG, "detectViaHid: failed (${describeFailure(e)})")
             throw FidoError.TransportError(e)
         }
     }
@@ -448,7 +463,7 @@ class YubiKitFidoManager(
         timeoutMs: Long,
     ): Fido2Enroller.EnrollResult {
         val deviceLabel = device.toString()
-        Logger.d(TAG, "enrollViaHid: opening connection to '$deviceLabel'")
+        Logger.d(TAG, "enrollViaHid: opening connection")
         onTouchRequired(deviceLabel)
         try {
             return withTimeout(timeoutMs) {
@@ -471,28 +486,28 @@ class YubiKitFidoManager(
                 }
             }
         } catch (e: TimeoutCancellationException) {
-            Logger.w(TAG, "enrollViaHid: touch timeout for '$deviceLabel'")
+            Logger.w(TAG, "enrollViaHid: touch timeout")
             throw FidoError.TouchTimeout
         } catch (e: PinInvalidClientError) {
-            Logger.w(TAG, "enrollViaHid: PIN invalid for '$deviceLabel'")
+            Logger.w(TAG, "enrollViaHid: PIN invalid")
             throw FidoError.UserCancelled
         } catch (e: PinRequiredClientError) {
-            Logger.w(TAG, "enrollViaHid: PIN required but not provided for '$deviceLabel'")
+            Logger.w(TAG, "enrollViaHid: PIN required but not provided")
             throw FidoError.CtapError(0x36, "PIN required but not provided")
         } catch (e: ClientError) {
-            Logger.w(TAG, "enrollViaHid: ClientError for '$deviceLabel': ${e.errorCode}, ${e.message}")
+            Logger.w(TAG, "enrollViaHid: ClientError code=${e.errorCode}")
             throw FidoError.TransportError(e)
         } catch (e: CtapException) {
             val code = e.getCtapError().toInt() and 0xFF
-            Logger.w(TAG, "enrollViaHid: CTAP error 0x${code.toString(16)} for '$deviceLabel': ${e.message}")
+            Logger.w(TAG, "enrollViaHid: CTAP error 0x${code.toString(16)}")
             throw FidoError.CtapError(code, e.message ?: "CTAP error")
         } catch (e: IOException) {
-            Logger.w(TAG, "enrollViaHid: IOException for '$deviceLabel': ${e.message} | cause=${e.cause?.message}")
+            Logger.w(TAG, "enrollViaHid: IOException (${describeFailure(e)})")
             throw FidoError.TransportError(e)
         } catch (e: FidoError) {
             throw e
         } catch (e: Exception) {
-            Logger.w(TAG, "enrollViaHid: ${e.javaClass.simpleName} for '$deviceLabel': ${e.message} | cause=${e.cause?.message}")
+            Logger.w(TAG, "enrollViaHid: failed (${describeFailure(e)})")
             throw FidoError.TransportError(e)
         } finally {
             onTouchDone()
@@ -508,7 +523,7 @@ class YubiKitFidoManager(
         timeoutMs: Long,
     ): SkAssertion {
         val deviceLabel = device.toString()
-        Logger.d(TAG, "signViaHid: opening connection to '$deviceLabel'")
+        Logger.d(TAG, "signViaHid: opening connection")
         onTouchRequired(deviceLabel)
         try {
             return withTimeout(timeoutMs) {
@@ -526,19 +541,19 @@ class YubiKitFidoManager(
                 }
             }
         } catch (e: TimeoutCancellationException) {
-            Logger.w(TAG, "signViaHid: touch timeout for '$deviceLabel'")
+            Logger.w(TAG, "signViaHid: touch timeout")
             throw FidoError.TouchTimeout
         } catch (e: CtapException) {
             val code = e.getCtapError().toInt() and 0xFF
-            Logger.w(TAG, "signViaHid: CTAP error 0x${code.toString(16)} for '$deviceLabel': ${e.message}")
+            Logger.w(TAG, "signViaHid: CTAP error 0x${code.toString(16)}")
             throw FidoError.CtapError(code, e.message ?: "CTAP error")
         } catch (e: IOException) {
-            Logger.w(TAG, "signViaHid: IOException for '$deviceLabel': ${e.message} | cause=${e.cause?.message}")
+            Logger.w(TAG, "signViaHid: IOException (${describeFailure(e)})")
             throw FidoError.TransportError(e)
         } catch (e: FidoError) {
             throw e
         } catch (e: Exception) {
-            Logger.w(TAG, "signViaHid: ${e.javaClass.simpleName} for '$deviceLabel': ${e.message} | cause=${e.cause?.message}")
+            Logger.w(TAG, "signViaHid: failed (${describeFailure(e)})")
             throw FidoError.TransportError(e)
         } finally {
             onTouchDone()
@@ -548,29 +563,28 @@ class YubiKitFidoManager(
     // ── PC/SC transport: internal helpers ───────────────────────────────────
 
     private fun listPcscDevicesRaw(terminalsWithCard: Set<String>): List<UsbPcscDevice> {
-        val manager = PcscManager()
         val all = try {
-            manager.getDevices()
+            pcscDeviceSource()
         } catch (e: Exception) {
             if (e.isPcscNoDevice()) {
-                Logger.d(TAG, "listPcscDevicesRaw: PC/SC no readers/cards available (${e.message})")
+                Logger.d(TAG, "listPcscDevicesRaw: PC/SC no readers/cards available (${describeFailure(e)})")
             } else {
-                Logger.w(TAG, "listPcscDevicesRaw: PC/SC enum failed: ${e.javaClass.simpleName}: ${e.message} | cause=${e.cause?.message}")
+                Logger.w(TAG, "listPcscDevicesRaw: PC/SC enum failed (${describeFailure(e)})")
             }
             return emptyList()
         }
-        Logger.d(TAG, "listPcscDevicesRaw: PC/SC raw devices found = ${all.size} : ${all.map { it.getName() }}")
+        Logger.d(TAG, "listPcscDevicesRaw: PC/SC raw devices found = ${all.size}")
         val filtered = if (terminalsWithCard.isNotEmpty())
             all.filter { it.getName() in terminalsWithCard }
         else
             all
-        Logger.d(TAG, "listPcscDevicesRaw: after isCardPresent filter: ${filtered.size} device(s) : ${filtered.map { it.getName() }}")
+        Logger.d(TAG, "listPcscDevicesRaw: after isCardPresent filter: ${filtered.size} device(s)")
         return filtered
     }
 
     private fun listPcscDevices(): List<DeviceInfo> {
-        val terminalsWithCard = listTerminalsWithCardPresent()
-        Logger.d(TAG, "listPcscDevices: PC/SC terminals with card = ${terminalsWithCard.size} : $terminalsWithCard")
+        val terminalsWithCard = listTerminalsWithCardPresent(terminalSource)
+        Logger.d(TAG, "listPcscDevices: PC/SC terminals with card = ${terminalsWithCard.size}")
         return listPcscDevicesRaw(terminalsWithCard).map { device ->
             DeviceInfo(label = device.getName(), transport = Transport.NFC)
         }
@@ -578,18 +592,18 @@ class YubiKitFidoManager(
 
     private fun detectViaPcsc(device: UsbPcscDevice): Fido2Enroller.DeviceDetection {
         val label = device.getName()
-        Logger.d(TAG, "detectViaPcsc: opening direct T=1 connection to '$label' (bypass PcscManager beginExclusive)")
+        Logger.d(TAG, "detectViaPcsc: opening direct T=1 connection (bypass PcscManager beginExclusive)")
         return retryOnNotTransacted(label = label) {
             val connection = openDirectPcscConnection(label)
             try {
-                Logger.d(TAG, "detectViaPcsc: opening CTAP2 session for '$label'")
+                Logger.d(TAG, "detectViaPcsc: opening CTAP2 session")
                 val session = Ctap2Session(connection)
-                Logger.d(TAG, "detectViaPcsc: CTAP2 session opened for '$label'")
+                Logger.d(TAG, "detectViaPcsc: CTAP2 session opened")
                 val info = session.getCachedInfo()
-                Logger.d(TAG, "detectViaPcsc: CTAP2 info: versions=${info.versions}, transports=${info.transports}")
+                Logger.d(TAG, "detectViaPcsc: CTAP2 info: ${describeCtapInfo(info.versions, info.transports)}")
                 val client = BasicWebAuthnClient(session)
                 val pinConfigured = client.isPinConfigured()
-                Logger.d(TAG, "detectViaPcsc: pinConfigured=$pinConfigured for '$label'")
+                Logger.d(TAG, "detectViaPcsc: pinConfigured=$pinConfigured")
                 Fido2Enroller.DeviceDetection(deviceLabel = label, pinConfigured = pinConfigured)
             } finally {
                 runCatching { connection.close() }
@@ -607,14 +621,14 @@ class YubiKitFidoManager(
         timeoutMs: Long,
     ): Fido2Enroller.EnrollResult {
         val deviceLabel = device.getName()
-        Logger.d(TAG, "enrollViaPcsc: opening direct T=1 connection to '$deviceLabel' (bypass PcscManager beginExclusive)")
+        Logger.d(TAG, "enrollViaPcsc: opening direct T=1 connection (bypass PcscManager beginExclusive)")
         onTouchRequired(deviceLabel)
         try {
             return withTimeout(timeoutMs) {
                 retryOnNotTransacted(label = deviceLabel) {
                     val connection = openDirectPcscConnection(deviceLabel)
                     try {
-                        Logger.d(TAG, "enrollViaPcsc: opening CTAP2 session for '$deviceLabel'")
+                        Logger.d(TAG, "enrollViaPcsc: opening CTAP2 session")
                         doEnrollCredential(
                             session = Ctap2Session(connection),
                             deviceLabel = deviceLabel,
@@ -632,29 +646,29 @@ class YubiKitFidoManager(
                 }
             }
         } catch (e: TimeoutCancellationException) {
-            Logger.w(TAG, "enrollViaPcsc: touch timeout for '$deviceLabel'")
+            Logger.w(TAG, "enrollViaPcsc: touch timeout")
             throw FidoError.TouchTimeout
         } catch (e: PinInvalidClientError) {
-            Logger.w(TAG, "enrollViaPcsc: PIN invalid for '$deviceLabel'")
+            Logger.w(TAG, "enrollViaPcsc: PIN invalid")
             throw FidoError.UserCancelled
         } catch (e: PinRequiredClientError) {
-            Logger.w(TAG, "enrollViaPcsc: PIN required but not provided for '$deviceLabel'")
+            Logger.w(TAG, "enrollViaPcsc: PIN required but not provided")
             throw FidoError.CtapError(0x36, "PIN required but not provided")
         } catch (e: ClientError) {
-            Logger.w(TAG, "enrollViaPcsc: ClientError for '$deviceLabel': ${e.errorCode}, ${e.message}")
+            Logger.w(TAG, "enrollViaPcsc: ClientError code=${e.errorCode}")
             throw FidoError.TransportError(e)
         } catch (e: CtapException) {
             val code = e.getCtapError().toInt() and 0xFF
-            Logger.w(TAG, "enrollViaPcsc: CTAP error 0x${code.toString(16)} for '$deviceLabel': ${e.message}")
+            Logger.w(TAG, "enrollViaPcsc: CTAP error 0x${code.toString(16)}")
             throw FidoError.CtapError(code, e.message ?: "CTAP error")
         } catch (e: IOException) {
-            Logger.w(TAG, "enrollViaPcsc: IOException for '$deviceLabel': ${e.message} | cause=${e.cause?.message}")
+            Logger.w(TAG, "enrollViaPcsc: IOException (${describeFailure(e)})")
             throw FidoError.TransportError(e)
         } catch (e: FidoError) {
             throw e
         } catch (e: Exception) {
             if (e.isPcscNoDevice()) throw FidoError.NoDeviceFound
-            Logger.w(TAG, "enrollViaPcsc: ${e.javaClass.simpleName} for '$deviceLabel': ${e.message} | cause=${e.cause?.message}")
+            Logger.w(TAG, "enrollViaPcsc: failed (${describeFailure(e)})")
             throw FidoError.TransportError(e)
         } finally {
             onTouchDone()
@@ -670,14 +684,14 @@ class YubiKitFidoManager(
         timeoutMs: Long,
     ): SkAssertion {
         val deviceLabel = device.getName()
-        Logger.d(TAG, "signViaPcsc: opening direct T=1 connection to '$deviceLabel' (bypass PcscManager beginExclusive)")
+        Logger.d(TAG, "signViaPcsc: opening direct T=1 connection (bypass PcscManager beginExclusive)")
         onTouchRequired(deviceLabel)
         try {
             return withTimeout(timeoutMs) {
                 retryOnNotTransacted(label = deviceLabel) {
                     val connection = openDirectPcscConnection(deviceLabel)
                     try {
-                        Logger.d(TAG, "signViaPcsc: opening CTAP2 session for '$deviceLabel'")
+                        Logger.d(TAG, "signViaPcsc: opening CTAP2 session")
                         doGetAssertion(
                             session = Ctap2Session(connection),
                             rpId = rpId,
@@ -691,20 +705,20 @@ class YubiKitFidoManager(
                 }
             }
         } catch (e: TimeoutCancellationException) {
-            Logger.w(TAG, "signViaPcsc: touch timeout for '$deviceLabel'")
+            Logger.w(TAG, "signViaPcsc: touch timeout")
             throw FidoError.TouchTimeout
         } catch (e: CtapException) {
             val code = e.getCtapError().toInt() and 0xFF
-            Logger.w(TAG, "signViaPcsc: CTAP error 0x${code.toString(16)} for '$deviceLabel': ${e.message}")
+            Logger.w(TAG, "signViaPcsc: CTAP error 0x${code.toString(16)}")
             throw FidoError.CtapError(code, e.message ?: "CTAP error")
         } catch (e: IOException) {
-            Logger.w(TAG, "signViaPcsc: IOException for '$deviceLabel': ${e.message} | cause=${e.cause?.message}")
+            Logger.w(TAG, "signViaPcsc: IOException (${describeFailure(e)})")
             throw FidoError.TransportError(e)
         } catch (e: FidoError) {
             throw e
         } catch (e: Exception) {
             if (e.isPcscNoDevice()) throw FidoError.NoDeviceFound
-            Logger.w(TAG, "signViaPcsc: ${e.javaClass.simpleName} for '$deviceLabel': ${e.message} | cause=${e.cause?.message}")
+            Logger.w(TAG, "signViaPcsc: failed (${describeFailure(e)})")
             throw FidoError.TransportError(e)
         } finally {
             onTouchDone()
@@ -739,30 +753,30 @@ class YubiKitFidoManager(
                 .exec(arrayOf("tasklist", "/FO", "CSV", "/NH"))
                 .inputStream.bufferedReader().readText()
 
-            for (proc in suspectProcesses) {
-                // tasklist CSV: "name.exe","PID","Session","Num","Mem"
-                if (output.contains(proc, ignoreCase = true)) {
-                    Logger.w(
-                        TAG,
-                        "warnIfYubicoProcessRunning: WARNING: '$proc' is running." +
-                            " This process may hold an exclusive CCID lock on the YubiKey." +
-                            " Close it before retrying FIDO2 enrollment."
-                    )
-                }
+            // tasklist CSV: "name.exe","PID","Session","Num","Mem"
+            // Process names are never logged (they show what the user runs): only how many.
+            val suspectsRunning = suspectProcesses.count { output.contains(it, ignoreCase = true) }
+            if (suspectsRunning > 0) {
+                Logger.w(
+                    TAG,
+                    "warnIfYubicoProcessRunning: WARNING: $suspectsRunning Yubico related process(es) running." +
+                        " They may hold an exclusive CCID lock on the YubiKey." +
+                        " Close them before retrying FIDO2 enrollment."
+                )
             }
 
             // Navigateurs courants : vérification séparée car moins critique
             val browsers = listOf("chrome.exe", "firefox.exe", "msedge.exe", "opera.exe", "brave.exe")
-            val runningBrowsers = browsers.filter { output.contains(it, ignoreCase = true) }
-            if (runningBrowsers.isNotEmpty()) {
+            val browsersRunning = browsers.count { output.contains(it, ignoreCase = true) }
+            if (browsersRunning > 0) {
                 Logger.w(
                     TAG,
-                    "warnIfYubicoProcessRunning: browsers running: $runningBrowsers" +
+                    "warnIfYubicoProcessRunning: $browsersRunning browser(s) running" +
                         ": if WebAuthn is active in-browser, it may hold the CCID interface."
                 )
             }
         } catch (e: Throwable) {
-            Logger.d(TAG, "warnIfYubicoProcessRunning: tasklist check failed (non-fatal): ${e.message}")
+            Logger.d(TAG, "warnIfYubicoProcessRunning: tasklist check failed (non-fatal, ${errorClass(e)})")
         }
     }
 
@@ -795,43 +809,42 @@ class YubiKitFidoManager(
      * @throws IOException si le terminal est introuvable ou si la connexion échoue.
      */
     private fun openDirectPcscConnection(terminalName: String): SmartCardConnection {
-        Logger.d(TAG, "PC/SC direct connect: looking up terminal '$terminalName'")
+        Logger.d(TAG, "PC/SC direct connect: looking up the requested terminal")
 
         // ── Étape 1 : Détection de processus concurrents ──────────────────────
         warnIfYubicoProcessRunning()
 
         val factory = TerminalFactory.getDefault()
-        Logger.d(TAG, "PC/SC direct connect: TerminalFactory.getDefault() provider='${factory.provider.name}'")
+        Logger.d(TAG, "PC/SC direct connect: TerminalFactory.getDefault() obtained")
 
         val terminals = try {
             factory.terminals().list()
         } catch (e: javax.smartcardio.CardException) {
+            Logger.w(TAG, "PC/SC direct connect: terminal enumeration failed (${describeFailure(e)})")
             throw IOException("PC/SC terminal enumeration failed: ${e.message}", e)
         }
-        Logger.d(TAG, "PC/SC direct connect: ${terminals.size} terminal(s) visible: ${terminals.map { it.name }}")
+        Logger.d(TAG, "PC/SC direct connect: ${terminals.size} terminal(s) visible")
 
         val terminal = terminals.firstOrNull { it.name == terminalName }
             ?: throw IOException("PC/SC terminal '$terminalName' not found in ${terminals.map { it.name }}")
 
         // ── Étape 2 : Cascade protocoles T=1 → T=0 → * ───────────────────────
-        // Chaque échec est loggué avec la stack trace partielle pour identifier la ligne exacte.
+        // Chaque échec est loggué avec sa classe d'exception et son code SCARD (jamais le message ni la pile).
         val protocols = listOf("T=1", "T=0", "*")
         var card: javax.smartcardio.Card? = null
         var lastConnectException: Throwable? = null
 
         for (proto in protocols) {
-            Logger.d(TAG, "PC/SC direct connect: PRE-connect terminal='$terminalName' protocol='$proto'")
+            Logger.d(TAG, "PC/SC direct connect: PRE-connect protocol='$proto'")
             try {
                 card = terminal.connect(proto)
-                // POST-connect : log immédiat pour confirmer la ligne de succès
+                // POST-connect : log immédiat pour confirmer la ligne de succès.
+                // L'ATR est un identifiant de carte : seule sa longueur est journalisée.
                 Logger.d(TAG, "PC/SC direct connect: POST-connect SUCCESS: protocol='$proto' " +
-                    "ATR=${card.atr.bytes.toHex()} cardProtocol='${card.protocol}'")
+                    "atrLength=${card.atr.bytes.size} cardProtocol='${card.protocol}'")
                 break
             } catch (e: Throwable) {
-                val stackTop = e.stackTraceToString().lines().take(8).joinToString("\n  ")
-                Logger.w(TAG, "PC/SC direct connect: protocol '$proto' FAILED for '$terminalName'" +
-                    "\n  message=${e.message}" +
-                    "\n  stack(top-8):\n  $stackTop")
+                Logger.w(TAG, "PC/SC direct connect: protocol '$proto' FAILED (${describeFailure(e)})")
                 lastConnectException = e
                 // Si NOT_TRANSACTED sur la connexion elle-même, log explicitement
                 if (e.isNotTransacted()) {
@@ -883,13 +896,10 @@ class YubiKitFidoManager(
                 lastError = e
                 // Fix off-by-one : affiche "1/2", "2/2", jamais "3/2"
                 val attemptDisplay = attempt + 1
-                val stackTop = e.stackTraceToString().lines().take(8).joinToString("\n    ")
                 Logger.w(
                     TAG,
-                    "retryOnNotTransacted: SCARD_E_NOT_TRANSACTED (0x80100027) for '$label'" +
-                        ": attempt $attemptDisplay/$maxRetries" +
-                        "\n  message=${e.message}" +
-                        "\n  stack(top-8):\n    $stackTop"
+                    "retryOnNotTransacted: SCARD_E_NOT_TRANSACTED (0x80100027)" +
+                        ": attempt $attemptDisplay/$maxRetries (${errorClass(e)})"
                 )
                 if (attempt < maxRetries - 1) {
                     // Warm reset : disconnect avec reset=true avant de réessayer
@@ -900,7 +910,7 @@ class YubiKitFidoManager(
                 }
             }
         }
-        Logger.w(TAG, "retryOnNotTransacted: all $maxRetries retries exhausted for '$label', raising PcscWindowsBug")
+        Logger.w(TAG, "retryOnNotTransacted: all $maxRetries retries exhausted, raising PcscWindowsBug")
         throw FidoError.PcscWindowsBug
     }
 
@@ -916,13 +926,13 @@ class YubiKitFidoManager(
         try {
             val factory = TerminalFactory.getDefault()
             val terminal = factory.terminals().list().firstOrNull { it.name == terminalName } ?: return
-            Logger.d(TAG, "tryWarmResetTerminal: PRE-connect(T=1) for warm reset on '$terminalName'")
+            Logger.d(TAG, "tryWarmResetTerminal: PRE-connect(T=1) for warm reset")
             val card = terminal.connect("T=1")
-            Logger.d(TAG, "tryWarmResetTerminal: PRE-disconnect(reset=true) for '$terminalName'")
+            Logger.d(TAG, "tryWarmResetTerminal: PRE-disconnect(reset=true)")
             card.disconnect(true)
-            Logger.d(TAG, "tryWarmResetTerminal: POST warm reset OK for '$terminalName'")
+            Logger.d(TAG, "tryWarmResetTerminal: POST warm reset OK")
         } catch (e: Throwable) {
-            Logger.w(TAG, "tryWarmResetTerminal: reset failed for '$terminalName' (non-fatal): ${e.message}")
+            Logger.w(TAG, "tryWarmResetTerminal: reset failed (non-fatal, ${describeFailure(e)})")
         }
     }
 
@@ -950,7 +960,7 @@ class YubiKitFidoManager(
         pin: CharArray?,
         timeoutMs: Long,
     ): Fido2Enroller.EnrollResult {
-        Logger.d(TAG, "doEnrollCredential: opening BasicWebAuthnClient for '$deviceLabel'")
+        Logger.d(TAG, "doEnrollCredential: opening BasicWebAuthnClient")
         val client = BasicWebAuthnClient(session)
 
         val userId = ByteArray(16).also { SecureRandom().nextBytes(it) }
@@ -981,7 +991,7 @@ class YubiKitFidoManager(
             /* extensions   */ null,
         )
 
-        Logger.d(TAG, "doEnrollCredential: calling makeCredential on '$deviceLabel' (waiting for touch...)")
+        Logger.d(TAG, "doEnrollCredential: calling makeCredential (waiting for touch...)")
 
         // makeCredential throws: IOException, CommandException (Java checked), ClientError
         // En Kotlin les checked exceptions Java ne sont pas enforced : elles remontent
@@ -995,7 +1005,7 @@ class YubiKitFidoManager(
             null, // commandState
         )
 
-        Logger.d(TAG, "doEnrollCredential: makeCredential completed for '$deviceLabel'")
+        Logger.d(TAG, "doEnrollCredential: makeCredential completed")
 
         // credential.response est un AuthenticatorAttestationResponse
         val attestationResponse = credential.response
@@ -1029,7 +1039,7 @@ class YubiKitFidoManager(
             )
         }
 
-        Logger.d(TAG, "doEnrollCredential: credential created successfully for '$deviceLabel', credentialId.size=${credentialId.size}")
+        Logger.d(TAG, "doEnrollCredential: credential created successfully, credentialId.size=${credentialId.size}")
 
         return Fido2Enroller.EnrollResult(
             credentialId = credentialId.copyOf(),
@@ -1162,8 +1172,55 @@ private fun Throwable.isNotTransacted(): Boolean {
     return false
 }
 
-/** Convertit un tableau de bytes en chaîne hexadécimale majuscule (ex. "3B 8F 80 01 ..."). */
-private fun ByteArray.toHex(): String = joinToString(" ") { "%02X".format(it) }
+/** Plage des codes d'état PC/SC Windows (SCARD_*) : seul un code de cette plage est journalisé. */
+private val SCARD_CODE_RANGE: LongRange = 0x80100000L..0x8010FFFFL
+
+/** Nom symbolique d'un statut PC/SC (`SCARD_E_NOT_TRANSACTED`) : un vocabulaire fixe de Windows. */
+private val SCARD_NAME_RE = Regex("""SCARD_[EWFS]_[A-Z0-9_]{3,40}""")
+
+/** Nombre maximal de causes parcourues pour chercher un statut SCARD. */
+private const val SCARD_MAX_CAUSE_DEPTH = 8
+
+/**
+ * Tous les statuts SCARD trouvés dans le message de [t] et de ses causes : codes numériques
+ * 0x8010xxxx (reformatés ici, sur 8 chiffres) et noms symboliques `SCARD_*`, sans doublon,
+ * dans l'ordre de découverte. Le message lui-même n'est jamais journalisé : seuls ces codes
+ * et ces noms, qui forment un vocabulaire fixe, le sont.
+ */
+internal fun scardStatuses(t: Throwable): List<String> {
+    val found = LinkedHashSet<String>()
+    var current: Throwable? = t
+    var depth = 0
+    while (current != null && depth < SCARD_MAX_CAUSE_DEPTH) {
+        val message = current.message ?: ""
+        for (match in PCSC_HEX_RE.findAll(message)) {
+            val code = match.groupValues[1].toLongOrNull(16)
+            if (code != null && code in SCARD_CODE_RANGE) found += "0x%08X".format(code)
+        }
+        for (match in SCARD_NAME_RE.findAll(message)) found += match.value
+        current = current.cause
+        depth++
+    }
+    return found.toList()
+}
+
+/**
+ * Description d'un échec pour le journal : chaîne de classes de l'exception, plus les statuts
+ * SCARD (codes et noms) quand le message en porte. Jamais le message, la pile ni un nom de lecteur.
+ */
+internal fun describeFailure(t: Throwable): String {
+    val statuses = scardStatuses(t)
+    if (statuses.isEmpty()) return errorClass(t)
+    return "${errorClass(t)}, scard=${statuses.joinToString(" ")}"
+}
+
+/**
+ * Résumé de l'identité CTAP2 d'un authenticator pour le journal. Les listes de versions et de
+ * transports viennent de la clé : seuls leurs effectifs et un drapeau connu sont journalisés.
+ */
+internal fun describeCtapInfo(versions: Collection<*>?, transports: Collection<*>?): String =
+    "versionCount=${versions?.size ?: 0} transportCount=${transports?.size ?: 0} " +
+        "fido21=${versions?.contains("FIDO_2_1") == true}"
 
 /**
  * Implémentation directe de [SmartCardConnection] qui contourne le bug YubiKit/JDK/Windows.
@@ -1179,7 +1236,7 @@ private fun ByteArray.toHex(): String = joinToString(" ") { "%02X".format(it) }
  * - NE fait PAS [Card.beginExclusive] / [Card.endExclusive]
  * - Transmet les APDUs directement via [CardChannel.transmit] sur [Card.basicChannel]
  * - Ferme avec [Card.disconnect(false)] (leave-card, pas de reset)
- * - Loggue l'ATR et le protocole utilisé pour le diagnostic
+ * - Journalise le protocole utilisé et la longueur de l'ATR (jamais ses octets)
  *
  * ## Transport détecté
  * Le protocole `T=1` (préféré) ou `T=0` (fallback) est reflété dans [getTransport].
@@ -1188,7 +1245,7 @@ private fun ByteArray.toHex(): String = joinToString(" ") { "%02X".format(it) }
  * du terminal contient "NFC" ou "contactless", [Transport.USB] sinon.
  *
  * @param card Card obtenu via [javax.smartcardio.CardTerminal.connect]
- * @param terminalName Nom du terminal (pour logs et détection NFC)
+ * @param terminalName Nom du terminal (détection NFC et message d'exception ; jamais journalisé)
  */
 private class DirectPcscSmartCardConnection(
     private val card: Card,
@@ -1215,26 +1272,21 @@ private class DirectPcscSmartCardConnection(
     override fun getAtr(): ByteArray = card.atr.bytes
 
     override fun sendAndReceive(apdu: ByteArray): ByteArray {
-        Logger.d("YubiKit", "DirectPcscSmartCardConnection.sendAndReceive: PRE-transmit" +
-            " terminal='$terminalName' apdu[${apdu.size}]=${apdu.toHex().take(40)}…")
+        // The APDU bytes (a CTAP command, possibly carrying a PIN protocol payload) are never
+        // logged, only the length, the instruction byte and the status word of the reply.
+        Logger.d("YubiKit", "DirectPcscSmartCardConnection.sendAndReceive: PRE-transmit apduLength=${apdu.size}")
         return try {
             val cmd = CommandAPDU(apdu)
             Logger.d("YubiKit", "DirectPcscSmartCardConnection.sendAndReceive: PRE-channel.transmit" +
-                " CLA=${"%02X".format(cmd.cla)} INS=${"%02X".format(cmd.ins)}" +
-                " P1=${"%02X".format(cmd.p1)} P2=${"%02X".format(cmd.p2)}" +
-                " Lc=${cmd.nc} Le=${cmd.ne}")
+                " INS=${"%02X".format(cmd.ins)} Lc=${cmd.nc} Le=${cmd.ne}")
             val response = channel.transmit(cmd)
             val sw1 = (response.sw shr 8) and 0xFF
             val sw2 = response.sw and 0xFF
             Logger.d("YubiKit", "DirectPcscSmartCardConnection.sendAndReceive: POST-transmit OK" +
-                " SW=${"%02X".format(sw1)}${"%02X".format(sw2)} response[${response.bytes.size}]")
+                " SW=${"%02X".format(sw1)}${"%02X".format(sw2)} responseLength=${response.bytes.size}")
             response.bytes
         } catch (e: javax.smartcardio.CardException) {
-            val stackTop = e.stackTraceToString().lines().take(8).joinToString("\n    ")
-            Logger.w("YubiKit", "DirectPcscSmartCardConnection.sendAndReceive: FAILED transmit" +
-                " terminal='$terminalName'" +
-                "\n  message=${e.message}" +
-                "\n  stack(top-8):\n    $stackTop")
+            Logger.w("YubiKit", "DirectPcscSmartCardConnection.sendAndReceive: FAILED transmit (${describeFailure(e)})")
             throw IOException("PC/SC transmit failed for '$terminalName': ${e.message}", e)
         }
     }
@@ -1246,9 +1298,9 @@ private class DirectPcscSmartCardConnection(
     override fun close() {
         try {
             card.disconnect(false)
-            Logger.d("YubiKit", "DirectPcscSmartCardConnection.close: disconnected '$terminalName' (leave-card)")
+            Logger.d("YubiKit", "DirectPcscSmartCardConnection.close: disconnected (leave-card)")
         } catch (e: Throwable) {
-            Logger.w("YubiKit", "DirectPcscSmartCardConnection.close: disconnect failed for '$terminalName': ${e.message}")
+            Logger.w("YubiKit", "DirectPcscSmartCardConnection.close: disconnect failed (${describeFailure(e)})")
         }
     }
 }
@@ -1259,27 +1311,27 @@ private class DirectPcscSmartCardConnection(
  * Utilise directement [javax.smartcardio.TerminalFactory] et [javax.smartcardio.CardTerminal]
  * (module java.smartcardio, package public) : sans réflexion.
  */
-private fun listTerminalsWithCardPresent(): Set<String> = try {
-    val factory = javax.smartcardio.TerminalFactory.getDefault()
-    val terminalList: List<javax.smartcardio.CardTerminal> = factory.terminals().list()
+private fun listTerminalsWithCardPresent(terminals: () -> List<CardTerminal>): Set<String> = try {
+    val terminalList: List<CardTerminal> = terminals()
 
     val result = mutableSetOf<String>()
-    for (terminal in terminalList) {
+    // Terminals are named by ordinal in the log (PC/SC#0): the reader name is hardware the user owns.
+    for ((index, terminal) in terminalList.withIndex()) {
         val hasCard = try {
             terminal.isCardPresent
         } catch (e: Throwable) {
-            Logger.w("YubiKit", "listTerminalsWithCardPresent: isCardPresent failed for '${terminal.name}': ${e.message}")
+            Logger.w("YubiKit", "listTerminalsWithCardPresent: isCardPresent failed for PC/SC#$index (${describeFailure(e)})")
             false
         }
-        Logger.d("YubiKit", "listTerminalsWithCardPresent: terminal='${terminal.name}' isCardPresent=$hasCard")
+        Logger.d("YubiKit", "listTerminalsWithCardPresent: PC/SC#$index isCardPresent=$hasCard")
         if (hasCard) {
             result += terminal.name
         }
     }
-    Logger.d("YubiKit", "PC/SC enumeration: ${terminalList.size} terminals (${result.size} with card present): ${result.toList()}")
+    Logger.d("YubiKit", "PC/SC enumeration: ${terminalList.size} terminals (${result.size} with card present)")
     result
 } catch (e: Throwable) {
-    Logger.w("YubiKit", "listTerminalsWithCardPresent: failed, ${e.javaClass.simpleName}: ${e.message}")
+    Logger.w("YubiKit", "listTerminalsWithCardPresent: failed (${describeFailure(e)})")
     emptySet()
 }
 
@@ -1301,7 +1353,7 @@ private fun buildTransportMessage(cause: Throwable): String {
     return if (msg.contains("exclusive") || msg.contains("another application") ||
         msg.contains("access denied") || msg.contains("sharing violation")
     ) {
-        "YubiKey utilisée par une autre application : ferme-la (navigateur, Windows Hello) et réessaie"
+        "YubiKey in use by another application (browser, Windows Hello): close it and try again"
     } else {
         "Transport error: ${cause.javaClass.simpleName}: ${cause.message}"
     }

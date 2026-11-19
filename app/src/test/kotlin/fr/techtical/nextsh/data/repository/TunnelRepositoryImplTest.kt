@@ -3,6 +3,7 @@
 
 package fr.techtical.nextsh.data.repository
 
+import fr.techtical.nextsh.data.db.FakeTransactionRunner
 import fr.techtical.nextsh.data.db.dao.TunnelDao
 import fr.techtical.nextsh.data.db.entity.TunnelEntity
 import fr.techtical.nextsh.domain.model.TunnelConfig
@@ -33,11 +34,13 @@ class TunnelRepositoryImplTest {
     @MockK
     private lateinit var tunnelDao: TunnelDao
 
+    private val transactionRunner = FakeTransactionRunner()
+
     private lateinit var repository: TunnelRepositoryImpl
 
     @BeforeEach
     fun setUp() {
-        repository = TunnelRepositoryImpl(tunnelDao)
+        repository = TunnelRepositoryImpl(tunnelDao, transactionRunner)
     }
 
     private fun entity(
@@ -47,6 +50,7 @@ class TunnelRepositoryImplTest {
         createdAt: Long = 111L,
         deleted: Boolean = false,
         deletedAt: Long? = null,
+        browserPath: String = "/",
     ) = TunnelEntity(
         id = "tunnel-1",
         label = "Web",
@@ -61,9 +65,10 @@ class TunnelRepositoryImplTest {
         deleted = deleted,
         deletedAt = deletedAt,
         updatedAt = updatedAt,
+        browserPath = browserPath,
     )
 
-    private fun remoteTunnel(isFavorite: Boolean = true) = TunnelConfig(
+    private fun remoteTunnel(isFavorite: Boolean = true, browserPath: String = "/") = TunnelConfig(
         id = "tunnel-1",
         label = "Web (remote)",
         hostId = "host-1",
@@ -72,6 +77,7 @@ class TunnelRepositoryImplTest {
         remoteHost = "intranet",
         remotePort = 443,
         isFavorite = isFavorite,
+        browserPath = browserPath,
     )
 
     private val remoteClock = VectorClock(mapOf("desktop-device" to 9L))
@@ -176,7 +182,6 @@ class TunnelRepositoryImplTest {
         )
 
         coVerify(exactly = 1) { tunnelDao.upsert(any()) }
-        coVerify(exactly = 0) { tunnelDao.insert(any()) }
         val saved = written.captured
         assertEquals("Web (remote)", saved.label)
         assertEquals(9090, saved.localPort)
@@ -185,6 +190,71 @@ class TunnelRepositoryImplTest {
         assertEquals(5_000L, saved.updatedAt)
         assertFalse(saved.deleted)
         assertEquals(111L, saved.createdAt)
+    }
+
+    // The start path of the in-app browser travels with the tunnel on every write path.
+
+    @Test
+    fun `upsertSyncEntry writes the start path of the synced tunnel`() = runTest {
+        coEvery { tunnelDao.getByIdIncludingDeleted("tunnel-1") } returns entity(isFavorite = false, browserPath = "/")
+        val written = slot<TunnelEntity>()
+        coEvery { tunnelDao.upsert(capture(written)) } returns Unit
+
+        repository.upsertSyncEntry(
+            SyncEntry(
+                id = "tunnel-1",
+                payload = remoteTunnel(browserPath = "/admin?tab=2"),
+                clock = remoteClock,
+                updatedAt = 5_000L,
+            )
+        )
+
+        assertEquals("/admin?tab=2", written.captured.browserPath)
+    }
+
+    @Test
+    fun `upsertSyncEntry tombstone keeps the stored start path`() = runTest {
+        coEvery { tunnelDao.getByIdIncludingDeleted("tunnel-1") } returns
+            entity(isFavorite = false, browserPath = "/admin")
+        val written = slot<TunnelEntity>()
+        coEvery { tunnelDao.upsert(capture(written)) } returns Unit
+
+        repository.upsertSyncEntry(
+            SyncEntry(id = "tunnel-1", payload = null, clock = remoteClock, deleted = true, deletedAt = 4_000L, updatedAt = 4_000L)
+        )
+
+        assertEquals("/admin", written.captured.browserPath)
+    }
+
+    @Test
+    fun `getAllSyncEntries sends the start path in the payload`() = runTest {
+        coEvery { tunnelDao.getAllIncludingDeleted() } returns listOf(entity(isFavorite = false, browserPath = "/admin?tab=2"))
+
+        val entries = repository.getAllSyncEntries()
+
+        assertEquals("/admin?tab=2", entries.single().payload?.browserPath)
+    }
+
+    @Test
+    fun `save persists the start path`() = runTest {
+        coEvery { tunnelDao.getByIdIncludingDeleted("tunnel-1") } returns null
+        val written = slot<TunnelEntity>()
+        coEvery { tunnelDao.upsert(capture(written)) } returns Unit
+
+        repository.save(remoteTunnel(browserPath = "/admin"))
+
+        assertEquals("/admin", written.captured.browserPath)
+    }
+
+    @Test
+    fun `update persists the start path`() = runTest {
+        coEvery { tunnelDao.getById("tunnel-1") } returns entity(isFavorite = false, browserPath = "/")
+        val written = slot<TunnelEntity>()
+        coEvery { tunnelDao.update(capture(written)) } returns Unit
+
+        repository.update(remoteTunnel(browserPath = "/admin"))
+
+        assertEquals("/admin", written.captured.browserPath)
     }
 
     @Test
@@ -198,7 +268,6 @@ class TunnelRepositoryImplTest {
             SyncEntry(id = "tunnel-1", payload = remoteTunnel(), clock = remoteClock, updatedAt = 5_000L)
         )
 
-        coVerify(exactly = 0) { tunnelDao.insert(any()) }
         assertFalse(written.captured.deleted)
         assertNull(written.captured.deletedAt)
         assertEquals(111L, written.captured.createdAt)
@@ -217,7 +286,6 @@ class TunnelRepositoryImplTest {
         val after = System.currentTimeMillis()
 
         coVerify(exactly = 1) { tunnelDao.upsert(any()) }
-        coVerify(exactly = 0) { tunnelDao.insert(any()) }
         val saved = written.captured
         assertEquals("tunnel-1", saved.id)
         assertEquals(5_000L, saved.updatedAt)
@@ -244,7 +312,6 @@ class TunnelRepositoryImplTest {
         )
 
         coVerify(exactly = 1) { tunnelDao.upsert(any()) }
-        coVerify(exactly = 0) { tunnelDao.insert(any()) }
         assertEquals(
             existing.copy(
                 deleted = true,
@@ -265,6 +332,224 @@ class TunnelRepositoryImplTest {
         )
 
         coVerify(exactly = 0) { tunnelDao.upsert(any()) }
-        coVerify(exactly = 0) { tunnelDao.insert(any()) }
+    }
+
+    // save: an existing id (a backup restore) is updated in place, never REPLACEd; a new id is
+    // inserted with a fresh clock.
+
+    @Test
+    fun `save of a new id goes through upsert with a fresh clock, never insert`() = runTest {
+        coEvery { tunnelDao.getByIdIncludingDeleted("tunnel-1") } returns null
+        val written = slot<TunnelEntity>()
+        coEvery { tunnelDao.upsert(capture(written)) } returns Unit
+
+        val before = System.currentTimeMillis()
+        repository.save(remoteTunnel(isFavorite = false))
+        val after = System.currentTimeMillis()
+
+        coVerify(exactly = 1) { tunnelDao.upsert(any()) }
+        val saved = written.captured
+        assertEquals("Web (remote)", saved.label)
+        assertEquals(9090, saved.localPort)
+        assertTrue(saved.updatedAt in before..after)
+        assertTrue(saved.createdAt in before..after)
+        assertFalse(saved.deleted)
+        assertNull(saved.deletedAt)
+        val clock = VectorClockCodec.decode(saved.vectorClock)
+        assertEquals(setOf(DeviceIdentity.deviceId()), clock.entries.keys)
+        assertEquals(saved.updatedAt, clock.entries[DeviceIdentity.deviceId()])
+    }
+
+    @Test
+    fun `save over an existing tunnel updates in place, keeps createdAt, ticks the stored clock`() = runTest {
+        val previous = VectorClock(mapOf(DeviceIdentity.deviceId() to 5L, "other-device" to 7L))
+        coEvery { tunnelDao.getByIdIncludingDeleted("tunnel-1") } returns
+            entity(isFavorite = false, clock = previous, createdAt = 111L)
+        val written = slot<TunnelEntity>()
+        coEvery { tunnelDao.upsert(capture(written)) } returns Unit
+
+        val before = System.currentTimeMillis()
+        repository.save(remoteTunnel(isFavorite = true, browserPath = "/admin"))
+        val after = System.currentTimeMillis()
+
+        coVerify(exactly = 0) { tunnelDao.deleteById(any()) }
+        coVerify(exactly = 0) { tunnelDao.delete(any()) }
+        val saved = written.captured
+        assertEquals("Web (remote)", saved.label)
+        assertEquals(9090, saved.localPort)
+        assertEquals("intranet", saved.remoteHost)
+        assertEquals("/admin", saved.browserPath)
+        assertTrue(saved.isFavorite)
+        assertEquals(111L, saved.createdAt)
+        assertTrue(saved.updatedAt in before..after)
+        val newClock = VectorClockCodec.decode(saved.vectorClock)
+        assertTrue(newClock.dominates(previous))
+        assertEquals(7L, newClock.entries["other-device"])
+    }
+
+    @Test
+    fun `save over a tombstoned tunnel revives it in place and ticks the tombstone clock`() = runTest {
+        val previous = VectorClock(mapOf("desktop-device" to 9L))
+        coEvery { tunnelDao.getByIdIncludingDeleted("tunnel-1") } returns
+            entity(isFavorite = false, clock = previous, createdAt = 111L, deleted = true, deletedAt = 900L)
+        val written = slot<TunnelEntity>()
+        coEvery { tunnelDao.upsert(capture(written)) } returns Unit
+
+        repository.save(remoteTunnel())
+
+        val saved = written.captured
+        assertFalse(saved.deleted)
+        assertNull(saved.deletedAt)
+        assertEquals(111L, saved.createdAt)
+        val newClock = VectorClockCodec.decode(saved.vectorClock)
+        assertTrue(newClock.dominates(previous), "the revive must win over the tombstone on the peers")
+        assertEquals(9L, newClock.entries["desktop-device"])
+    }
+
+    // update: an edit keeps the local-only createdAt and never revives a deleted tunnel.
+
+    @Test
+    fun `update keeps createdAt and ticks the stored clock`() = runTest {
+        val previous = VectorClock(mapOf(DeviceIdentity.deviceId() to 5L, "other-device" to 7L))
+        coEvery { tunnelDao.getById("tunnel-1") } returns entity(isFavorite = false, clock = previous, createdAt = 111L)
+        val written = slot<TunnelEntity>()
+        coEvery { tunnelDao.update(capture(written)) } returns Unit
+
+        val before = System.currentTimeMillis()
+        repository.update(remoteTunnel(isFavorite = true))
+        val after = System.currentTimeMillis()
+
+        val saved = written.captured
+        assertEquals("Web (remote)", saved.label)
+        assertEquals(9090, saved.localPort)
+        assertTrue(saved.isFavorite)
+        assertEquals(111L, saved.createdAt)
+        assertTrue(saved.updatedAt in before..after)
+        assertFalse(saved.deleted)
+        assertNull(saved.deletedAt)
+        val newClock = VectorClockCodec.decode(saved.vectorClock)
+        assertTrue(newClock.dominates(previous))
+        assertEquals(7L, newClock.entries["other-device"])
+        coVerify(exactly = 0) { tunnelDao.upsert(any()) }
+    }
+
+    @Test
+    fun `update of a deleted or unknown tunnel writes nothing`() = runTest {
+        // TunnelDao.getById filters deleted = 0: a tombstone and an unknown id both come back null.
+        coEvery { tunnelDao.getById("tunnel-1") } returns null
+
+        repository.update(remoteTunnel())
+
+        coVerify(exactly = 0) { tunnelDao.update(any()) }
+        coVerify(exactly = 0) { tunnelDao.upsert(any()) }
+    }
+
+    // delete: a tunnel already deleted (or unknown) keeps its tombstone untouched.
+
+    @Test
+    fun `delete tombstones a live tunnel with a ticked clock`() = runTest {
+        val previous = VectorClock(mapOf(DeviceIdentity.deviceId() to 5L, "other-device" to 7L))
+        coEvery { tunnelDao.getById("tunnel-1") } returns entity(isFavorite = false, clock = previous)
+        val deletedAt = slot<Long>()
+        val updatedAt = slot<Long>()
+        val clockJson = slot<String>()
+        coEvery {
+            tunnelDao.softDelete("tunnel-1", capture(deletedAt), capture(updatedAt), capture(clockJson))
+        } returns Unit
+
+        val before = System.currentTimeMillis()
+        repository.delete("tunnel-1")
+        val after = System.currentTimeMillis()
+
+        assertTrue(deletedAt.captured in before..after)
+        assertEquals(deletedAt.captured, updatedAt.captured)
+        val newClock = VectorClockCodec.decode(clockJson.captured)
+        assertTrue(newClock.dominates(previous))
+        assertEquals(7L, newClock.entries["other-device"])
+    }
+
+    @Test
+    fun `delete of an unknown or already deleted tunnel writes nothing`() = runTest {
+        // TunnelDao.getById filters deleted = 0: a tombstone and an unknown id both come back null.
+        coEvery { tunnelDao.getById("gone") } returns null
+
+        repository.delete("gone")
+
+        coVerify(exactly = 0) { tunnelDao.softDelete(any(), any(), any(), any()) }
+    }
+
+    // save: restoring a tunnel that is already stored with the same content is a no-op.
+
+    @Test
+    fun `save of a live tunnel that already holds this content writes nothing`() = runTest {
+        val same = remoteTunnel(isFavorite = true)
+        coEvery { tunnelDao.getByIdIncludingDeleted("tunnel-1") } returns TunnelEntity.fromDomain(same).copy(
+            createdAt = 111L,
+            vectorClock = VectorClockCodec.encode(remoteClock),
+            updatedAt = 1_000L,
+        )
+
+        repository.save(same)
+
+        coVerify(exactly = 0) { tunnelDao.upsert(any()) }
+    }
+
+    @Test
+    fun `save of a live tunnel that differs by one field writes`() = runTest {
+        val same = remoteTunnel(isFavorite = true)
+        coEvery { tunnelDao.getByIdIncludingDeleted("tunnel-1") } returns
+            TunnelEntity.fromDomain(same.copy(remotePort = 8443)).copy(vectorClock = VectorClockCodec.encode(remoteClock))
+        coEvery { tunnelDao.upsert(any()) } returns Unit
+
+        repository.save(same)
+
+        coVerify(exactly = 1) { tunnelDao.upsert(match { it.remotePort == 443 }) }
+    }
+
+    @Test
+    fun `save of a tombstoned tunnel with the same content still revives it`() = runTest {
+        val same = remoteTunnel()
+        coEvery { tunnelDao.getByIdIncludingDeleted("tunnel-1") } returns TunnelEntity.fromDomain(same).copy(
+            vectorClock = VectorClockCodec.encode(remoteClock),
+            deleted = true,
+            deletedAt = 900L,
+        )
+        val written = slot<TunnelEntity>()
+        coEvery { tunnelDao.upsert(capture(written)) } returns Unit
+
+        repository.save(same)
+
+        assertFalse(written.captured.deleted)
+        assertNull(written.captured.deletedAt)
+        assertTrue(VectorClockCodec.decode(written.captured.vectorClock).dominates(remoteClock))
+    }
+
+    @Test
+    fun `update reads and writes inside one transaction`() = runTest {
+        val insideTransaction = mutableListOf<Boolean>()
+        coEvery { tunnelDao.getById("tunnel-1") } coAnswers {
+            insideTransaction += transactionRunner.active
+            entity(isFavorite = false)
+        }
+        coEvery { tunnelDao.update(any()) } coAnswers { insideTransaction += transactionRunner.active }
+
+        repository.update(remoteTunnel())
+
+        // A sync tombstone landing between the read and the write would otherwise be overwritten.
+        assertEquals(1, transactionRunner.runs)
+        assertEquals(listOf(true, true), insideTransaction)
+    }
+
+    @Test
+    fun `update of a deleted tunnel still runs its check inside the transaction`() = runTest {
+        coEvery { tunnelDao.getById("tunnel-1") } coAnswers {
+            assertTrue(transactionRunner.active)
+            null
+        }
+
+        repository.update(remoteTunnel())
+
+        assertEquals(1, transactionRunner.runs)
+        coVerify(exactly = 0) { tunnelDao.update(any()) }
     }
 }

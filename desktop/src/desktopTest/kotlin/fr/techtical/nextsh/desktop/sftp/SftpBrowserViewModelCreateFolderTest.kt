@@ -38,6 +38,7 @@ class SftpBrowserViewModelCreateFolderTest {
         val manager = mockk<DesktopSftpManager>()
         coEvery { manager.listDirectory(any(), any()) } returns SshResult.Success(emptyList())
         every { manager.sanitizePath(any()) } answers { firstArg() }
+        every { manager.knownUploadTempNames() } returns emptySet()
         return manager
     }
 
@@ -48,12 +49,13 @@ class SftpBrowserViewModelCreateFolderTest {
     ) = SftpBrowserViewModel(
         sessionId = sshSessionId,
         tabId = "tab-1",
+        paneId = "pane-1",
         initialCwd = cwd,
-        paneSlot = null,
         sftpManager = manager,
         sessionManager = mockk(relaxed = true),
         transferManager = mockk(relaxed = true),
         appScope = TestAppScope(scope),
+        inbox = SftpTransferInbox(),
     )
 
     @Test
@@ -82,8 +84,6 @@ class SftpBrowserViewModelCreateFolderTest {
 
             viewModel.createFolder("a/b")
 
-            val loaded = viewModel.state.value as? SftpBrowserUiState.Loaded
-                ?: error("the browser must stay on the listing after a refusal")
-            assertEquals("refused by the manager", loaded.lastError)
+            assertEquals("refused by the manager", viewModel.notice.value)
         }
 }

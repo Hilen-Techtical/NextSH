@@ -9,6 +9,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class CredentialCodecTest {
 
@@ -73,6 +74,22 @@ class CredentialCodecTest {
         val tamperedBytes = java.util.Base64.getUrlDecoder().decode(ct).also { it[it.size - 1] = (it[it.size - 1].toInt() xor 1).toByte() }
         val tamperedCt = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(tamperedBytes)
         assertFailsWith<SyncCodecException> { CredentialCodec.decrypt(iv, tamperedCt, inner) }
+    }
+
+    @Test
+    fun `decrypt failures carry fixed text plus the failing class name only`() = runTest {
+        val inner = CredentialCodec.deriveInnerKey(sharedSecret)
+        val wrong = ByteArray(32).also { it.indices.forEach { i -> it[i] = (i + 1).toByte() } }
+        val (iv, ct) = CredentialCodec.encrypt("payload".toByteArray(), inner)
+        val shape = Regex("""Credential decrypt failed \(\w+\)""")
+
+        val wrongKey = assertFailsWith<SyncCodecException> { CredentialCodec.decrypt(iv, ct, wrong) }
+        assertTrue(shape.matches(wrongKey.message.orEmpty()), "message: ${wrongKey.message}")
+
+        // The offending text sits in the wire value, not in the message.
+        val badBase64 = assertFailsWith<SyncCodecException> { CredentialCodec.decrypt("$LEAK_MARKER!!", ct, inner) }
+        assertTrue(shape.matches(badBase64.message.orEmpty()), "message: ${badBase64.message}")
+        assertNoPayloadLeak(badBase64)
     }
 
     @Test

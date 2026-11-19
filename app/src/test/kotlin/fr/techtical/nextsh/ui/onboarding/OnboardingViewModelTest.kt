@@ -3,14 +3,27 @@
 
 package fr.techtical.nextsh.ui.onboarding
 
+import android.security.keystore.KeyPermanentlyInvalidatedException
+import fr.techtical.nextsh.R
 import fr.techtical.nextsh.core.crypto.BiometricHelper
+import fr.techtical.nextsh.core.lock.AppLock
+import fr.techtical.nextsh.core.ssh.BiometricFailure
+import fr.techtical.nextsh.core.ssh.BiometricPromptCoordinator
+import fr.techtical.nextsh.core.ssh.BiometricPromptResponse
+import fr.techtical.nextsh.core.ssh.VaultAuthPurpose
+import fr.techtical.nextsh.core.vault.VaultAuthExpiredException
+import fr.techtical.nextsh.core.vault.VaultManager
 import fr.techtical.nextsh.core.vault.VaultMigration
 import fr.techtical.nextsh.data.preferences.SettingsDataStore
+import io.mockk.coEvery
 import io.mockk.coJustRun
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
+import io.mockk.verify
+import io.mockk.verifyOrder
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +37,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
@@ -55,6 +69,15 @@ class OnboardingViewModelTest {
     @MockK
     private lateinit var settingsDataStore: SettingsDataStore
 
+    @MockK
+    private lateinit var vaultManager: VaultManager
+
+    @MockK
+    private lateinit var biometricPrompts: BiometricPromptCoordinator
+
+    /** The real lock on a clock that never moves; it starts locked, like the app. */
+    private val appLock = AppLock { 0L }
+
     private val testDispatcher = UnconfinedTestDispatcher()
 
     private lateinit var viewModel: OnboardingViewModel
@@ -81,12 +104,18 @@ class OnboardingViewModelTest {
     ): OnboardingViewModel {
         every { biometricHelper.canAuthenticate() } returns biometricAvailable
         every { settingsDataStore.onboardingCompletedFlow } returns flowOf(completedValue)
-        return OnboardingViewModel(
-            biometricHelper = biometricHelper,
-            vaultMigration = vaultMigration,
-            settingsDataStore = settingsDataStore,
-        )
+        return newViewModel()
     }
+
+    private fun newViewModel() = OnboardingViewModel(
+        biometricHelper = biometricHelper,
+        vaultMigration = vaultMigration,
+        vaultManager = vaultManager,
+        settingsDataStore = settingsDataStore,
+        biometricPrompts = biometricPrompts,
+        appLock = appLock,
+        ioDispatcher = testDispatcher,
+    )
 
     // ── Initial state ────────────────────────────────────────────────────────
 
@@ -108,24 +137,133 @@ class OnboardingViewModelTest {
         val state = viewModel.state.value
         assertFalse(state.vaultReady)
         assertFalse(state.isAuthenticating)
-        assertNull(state.errorMessage)
         assertNull(state.errorRes)
     }
 
     // ── dismissError ─────────────────────────────────────────────────────────
 
     @Test
-    fun `dismissError clears errorMessage`() {
+    fun `dismissError clears the error`() = runTest {
         viewModel = buildViewModel()
-        // Inject an error directly via the internal state copy path used in production code.
-        // We reach it through the public `dismissError()` after manually triggering it.
-        // Here we verify the post-condition: calling dismissError on a ViewModel that
-        // has an error (simulated by reflection-free state seeding via the BiometricHelper
-        // onError path is not unit-testable without a real BiometricPrompt, so we test
-        // the guard: dismissError on a clean state is a no-op and keeps nulls).
+        coEvery { biometricPrompts.authenticateVault(VaultAuthPurpose.UNLOCK) } returns BiometricPromptResponse.Failed(BiometricFailure.OTHER)
+        viewModel.createVault()
+        assertNotNull(viewModel.state.value.errorRes)
+
         viewModel.dismissError()
-        assertNull(viewModel.state.value.errorMessage)
+
         assertNull(viewModel.state.value.errorRes)
+    }
+
+    // ── createVault: the vault prompt goes through the coordinator ───────────
+
+    @Test
+    fun `createVault asks the unlock prompt of the coordinator, never a prompt of its own`() = runTest {
+        viewModel = buildViewModel()
+        coEvery { biometricPrompts.authenticateVault(any()) } returns BiometricPromptResponse.Cancelled
+
+        viewModel.createVault()
+
+        coVerify(exactly = 1) { biometricPrompts.authenticateVault(VaultAuthPurpose.UNLOCK) }
+    }
+
+    @Test
+    fun `a success migrates if due, opens the vault, and marks the step ready`() = runTest {
+        viewModel = buildViewModel()
+        coEvery { biometricPrompts.authenticateVault(any()) } returns BiometricPromptResponse.Authorized
+        every { vaultMigration.needsMigration() } returns true
+        every { vaultMigration.migrate() } returns Unit
+        every { vaultManager.open() } returns Unit
+
+        viewModel.createVault()
+
+        assertTrue(viewModel.state.value.vaultReady)
+        assertFalse(viewModel.state.value.isAuthenticating)
+        assertNull(viewModel.state.value.errorRes)
+        verifyOrder {
+            vaultMigration.migrate()
+            vaultManager.open()
+        }
+    }
+
+    @Test
+    fun `a success without migration still opens the vault`() = runTest {
+        viewModel = buildViewModel()
+        coEvery { biometricPrompts.authenticateVault(any()) } returns BiometricPromptResponse.Authorized
+        every { vaultMigration.needsMigration() } returns false
+        every { vaultManager.open() } returns Unit
+
+        viewModel.createVault()
+
+        verify(exactly = 1) { vaultManager.open() }
+        verify(exactly = 0) { vaultMigration.migrate() }
+        assertTrue(viewModel.state.value.vaultReady)
+    }
+
+    @Test
+    fun `a dialog the user closes says nothing`() = runTest {
+        viewModel = buildViewModel()
+        coEvery { biometricPrompts.authenticateVault(any()) } returns BiometricPromptResponse.Cancelled
+
+        viewModel.createVault()
+
+        assertNull(viewModel.state.value.errorRes)
+        assertFalse(viewModel.state.value.vaultReady)
+        assertFalse(viewModel.state.value.isAuthenticating, "the button is back")
+        verify(exactly = 0) { vaultManager.open() }
+    }
+
+    @Test
+    fun `a dialog that fails says why with a sentence of ours, one that times out is generic`() = runTest {
+        val cases = listOf(
+            BiometricPromptResponse.Failed(BiometricFailure.LOCKOUT) to R.string.vault_unlock_error_lockout,
+            BiometricPromptResponse.Failed(BiometricFailure.NO_BIOMETRICS) to R.string.vault_unlock_error_none_enrolled,
+            BiometricPromptResponse.Failed(BiometricFailure.OTHER) to R.string.vault_unlock_error_prompt_failed,
+            null to R.string.vault_unlock_error_prompt_failed,
+        )
+        for ((response, expected) in cases) {
+            viewModel = buildViewModel()
+            coEvery { biometricPrompts.authenticateVault(any()) } returns response
+
+            viewModel.createVault()
+
+            assertEquals(expected, viewModel.state.value.errorRes, "$response")
+            assertFalse(viewModel.state.value.vaultReady)
+            assertFalse(viewModel.state.value.isAuthenticating)
+        }
+    }
+
+    @Test
+    fun `a vault whose window expired or whose key is gone has its own sentence`() = runTest {
+        val cases = listOf(
+            VaultAuthExpiredException() to R.string.firstlaunch_error_auth_expired,
+            KeyPermanentlyInvalidatedException("key invalidated") to R.string.firstlaunch_error_key_invalidated,
+            IllegalStateException("secret path /data/x") to R.string.vault_unlock_error_open_failed,
+        )
+        for ((failure, expected) in cases) {
+            viewModel = buildViewModel()
+            coEvery { biometricPrompts.authenticateVault(any()) } returns BiometricPromptResponse.Authorized
+            every { vaultMigration.needsMigration() } returns false
+            every { vaultManager.open() } throws failure
+
+            viewModel.createVault()
+
+            assertEquals(expected, viewModel.state.value.errorRes, "$failure")
+            assertFalse(viewModel.state.value.vaultReady)
+            assertFalse(viewModel.state.value.isAuthenticating)
+        }
+    }
+
+    @Test
+    fun `a second tap while the dialog is up is ignored`() = runTest {
+        viewModel = buildViewModel()
+        val answer = CompletableDeferred<BiometricPromptResponse?>()
+        coEvery { biometricPrompts.authenticateVault(any()) } coAnswers { answer.await() }
+
+        viewModel.createVault()
+        viewModel.createVault()
+
+        coVerify(exactly = 1) { biometricPrompts.authenticateVault(any()) }
+        answer.complete(BiometricPromptResponse.Cancelled)
     }
 
     // ── onboardingCompleted StateFlow ────────────────────────────────────────
@@ -168,11 +306,7 @@ class OnboardingViewModelTest {
         val completedSource = MutableStateFlow(false)
         every { biometricHelper.canAuthenticate() } returns false
         every { settingsDataStore.onboardingCompletedFlow } returns completedSource
-        viewModel = OnboardingViewModel(
-            biometricHelper = biometricHelper,
-            vaultMigration = vaultMigration,
-            settingsDataStore = settingsDataStore,
-        )
+        viewModel = newViewModel()
 
         val collected = mutableListOf<Boolean?>()
         val job = launch(testDispatcher) {
@@ -216,5 +350,33 @@ class OnboardingViewModelTest {
         advanceUntilIdle()
 
         assertTrue(callbackInvoked, "onPersisted callback must be invoked after DataStore write")
+    }
+
+    // ── completeOnboarding unlocks the app ───────────────────────────────────
+
+    @Test
+    fun `completing the onboarding after the vault step unlocks the app, before it moves on`() = runTest {
+        viewModel = buildViewModel()
+        coEvery { biometricPrompts.authenticateVault(any()) } returns BiometricPromptResponse.Authorized
+        every { vaultMigration.needsMigration() } returns false
+        every { vaultManager.open() } returns Unit
+        coJustRun { settingsDataStore.setOnboardingCompleted(true) }
+        viewModel.createVault()
+        assertTrue(appLock.isLocked(), "a process that starts is locked, the vault step alone does not unlock")
+
+        var unlockedWhenItMovedOn: Boolean? = null
+        viewModel.completeOnboarding(onPersisted = { unlockedWhenItMovedOn = !appLock.isLocked() })
+
+        assertEquals(true, unlockedWhenItMovedOn, "the host list must not open under the lock screen")
+    }
+
+    @Test
+    fun `completing the onboarding without the vault step leaves the app locked`() = runTest {
+        viewModel = buildViewModel()
+        coJustRun { settingsDataStore.setOnboardingCompleted(true) }
+
+        viewModel.completeOnboarding(onPersisted = {})
+
+        assertTrue(appLock.isLocked())
     }
 }

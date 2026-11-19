@@ -36,11 +36,19 @@ class EnrolledDeviceSecretStore(private val vaultManager: VaultManager) {
         }
     }
 
-    /** Returns the decoded secret, or null if not found. Caller must wipe the result after use. */
+    /**
+     * Returns the decoded secret, or null if not found. Caller must wipe the result after use.
+     *
+     * @throws IllegalArgumentException with a fixed message if the stored value is not valid
+     * Base64. The Base64 decoder's own message quotes the offending character of its input,
+     * which here is the stored secret, so it is neither forwarded nor kept as a cause.
+     */
     suspend fun retrieve(deviceId: String): ByteArray? {
         val encoded = vaultManager.getPassword("$LAN_SYNC_SECRET_KEY_PREFIX$deviceId") ?: return null
         return try {
             Base64.decode(String(encoded))
+        } catch (_: IllegalArgumentException) {
+            throw IllegalArgumentException("Stored sync secret is not valid Base64")
         } finally {
             encoded.fill('\u0000')
         }

@@ -6,6 +6,7 @@ package fr.techtical.nextsh.ui.sync
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.techtical.nextsh.core.lock.AppLock
 import fr.techtical.nextsh.shared.core.sync.DeviceIdentity
 import fr.techtical.nextsh.shared.core.sync.EcdhHandshake
 import fr.techtical.nextsh.shared.core.sync.EnrolledDevice
@@ -13,6 +14,8 @@ import fr.techtical.nextsh.shared.core.sync.EnrolledDeviceRepository
 import fr.techtical.nextsh.shared.core.sync.EnrolledDeviceSecretStore
 import fr.techtical.nextsh.shared.core.sync.Platform
 import fr.techtical.nextsh.shared.domain.vault.VaultManager
+import fr.techtical.nextsh.shared.util.LogId
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,15 +27,24 @@ import javax.inject.Inject
 private const val TAG = "EnrollmentScanViewModel"
 
 @HiltViewModel
-class EnrollmentScanViewModel @Inject constructor(
+class EnrollmentScanViewModel internal constructor(
     private val vaultManager: VaultManager,
     private val enrolledDeviceRepository: EnrolledDeviceRepository,
+    private val client: EnrollmentClient,
+    private val appLock: AppLock,
 ) : ViewModel() {
+
+    /** Le constructeur de Hilt : le client HTTP est celui de l'app, les tests donnent le leur au constructeur ci-dessus. */
+    @Inject
+    constructor(
+        vaultManager: VaultManager,
+        enrolledDeviceRepository: EnrolledDeviceRepository,
+        appLock: AppLock,
+    ) : this(vaultManager, enrolledDeviceRepository, EnrollmentClient(), appLock)
 
     private val _state = MutableStateFlow<ScannedEnrollment>(ScannedEnrollment.Idle)
     val state: StateFlow<ScannedEnrollment> = _state.asStateFlow()
 
-    private val client = EnrollmentClient()
     private val secretStore = EnrolledDeviceSecretStore(vaultManager)
 
     /** QR parsé en attente de confirmation, stocké pour confirmFingerprint(). */
@@ -59,7 +71,7 @@ class EnrollmentScanViewModel @Inject constructor(
 
         val parsed = EnrollmentQrParser.parse(raw)
         if (parsed == null) {
-            _state.value = ScannedEnrollment.Error("QR invalide ou format non reconnu")
+            _state.value = ScannedEnrollment.Error(EnrollmentError.InvalidQr)
             return
         }
 
@@ -73,14 +85,15 @@ class EnrollmentScanViewModel @Inject constructor(
                     val serverPubBytes = try {
                         Base64.getDecoder().decode(hello.publicKey)
                     } catch (e: IllegalArgumentException) {
-                        _state.value = ScannedEnrollment.Error("Réponse serveur invalide : clé publique malformée")
+                        Timber.tag(TAG).w("Desktop public key is not valid Base64")
+                        _state.value = ScannedEnrollment.Error(EnrollmentError.InvalidResponse)
                         return@fold
                     }
 
                     val calculatedFp = EcdhHandshake.fingerprint(serverPubBytes)
 
                     if (calculatedFp != parsed.fingerprint) {
-                        Timber.w(TAG, "Fingerprint mismatch: expected=${parsed.fingerprint} actual=$calculatedFp")
+                        Timber.tag(TAG).w("Fingerprint mismatch: the key sent by the Desktop does not match the scanned QR")
                         serverPublicKeyBytes = null
                         pendingParsed = null
                         pendingTlsCertFingerprint = null
@@ -94,21 +107,12 @@ class EnrollmentScanViewModel @Inject constructor(
                     serverPublicKeyBytes = serverPubBytes
                     pendingParsed = parsed
                     pendingTlsCertFingerprint = hello.tlsCertFingerprint
-                    Timber.i(TAG, "Desktop device detected: ${hello.deviceName} (fp=$calculatedFp)")
+                    Timber.tag(TAG).i("Desktop device detected, key matches the scanned QR")
                     _state.value = ScannedEnrollment.FingerprintConfirm(parsed, hello.deviceName)
                 },
                 onFailure = { e ->
-                    val msg = when (e) {
-                        is EnrollmentClient.EnrollmentException -> when (e.reason) {
-                            EnrollmentClient.Reason.TIMEOUT -> "Délai dépassé : le serveur Desktop ne répond pas"
-                            EnrollmentClient.Reason.NETWORK -> "Impossible de joindre ${parsed.host}:${parsed.port}"
-                            EnrollmentClient.Reason.HTTP_4XX -> "Erreur serveur (${e.message})"
-                            EnrollmentClient.Reason.HTTP_5XX -> "Erreur interne serveur Desktop"
-                            EnrollmentClient.Reason.INVALID_RESPONSE -> "Réponse serveur inattendue"
-                        }
-                        else -> "Erreur réseau : ${e.message}"
-                    }
-                    _state.value = ScannedEnrollment.Error(msg)
+                    Timber.tag(TAG).w("Desktop hello failed (${requestFailureLog(e)})")
+                    _state.value = ScannedEnrollment.Error(helloFailure(e, parsed.host, parsed.port))
                 },
             )
         }
@@ -176,31 +180,26 @@ class EnrollmentScanViewModel @Inject constructor(
                             lastKnownHost = parsed.host,
                         )
                         enrolledDeviceRepository.save(device)
-                        Timber.i(TAG, "Enrolled ${ack.deviceName}: persisted")
+                        Timber.tag(TAG).i("Enrolled device=${LogId.of(ack.deviceId)}: persisted")
                     } catch (e: fr.techtical.nextsh.shared.domain.vault.VaultAuthExpiredException) {
                         sharedSecret.fill(0)
-                        _state.value = ScannedEnrollment.Error("Vault verrouillé : déverrouillez le vault et réessayez")
+                        // The lock screen covers the scanner: the user unlocks (the vault opens again),
+                        // reads the message, and starts again with a new QR code.
+                        appLock.lock()
+                        _state.value = ScannedEnrollment.Error(EnrollmentError.VaultLocked)
                         return@fold
                     } catch (e: Exception) {
                         sharedSecret.fill(0)
-                        _state.value = ScannedEnrollment.Error("Erreur lors de l'enrôlement : ${e.message}")
+                        Timber.tag(TAG).w("Enrollment failed (${errorClass(e)})")
+                        _state.value = ScannedEnrollment.Error(EnrollmentError.NotSaved)
                         return@fold
                     }
                     _state.value = ScannedEnrollment.Success(ack.deviceName)
                 },
                 onFailure = { e ->
                     sharedSecret.fill(0)
-                    val msg = when (e) {
-                        is EnrollmentClient.EnrollmentException -> when (e.reason) {
-                            EnrollmentClient.Reason.TIMEOUT -> "Délai dépassé lors de l'envoi"
-                            EnrollmentClient.Reason.NETWORK -> "Connexion perdue avec le serveur Desktop"
-                            EnrollmentClient.Reason.HTTP_4XX -> "Enrôlement refusé par le serveur (${e.message})"
-                            EnrollmentClient.Reason.HTTP_5XX -> "Erreur interne serveur Desktop"
-                            EnrollmentClient.Reason.INVALID_RESPONSE -> "Réponse serveur inattendue"
-                        }
-                        else -> "Erreur réseau : ${e.message}"
-                    }
-                    _state.value = ScannedEnrollment.Error(msg)
+                    Timber.tag(TAG).w("Enrollment request failed (${requestFailureLog(e)})")
+                    _state.value = ScannedEnrollment.Error(submitFailure(e))
                 },
             )
         }
@@ -222,3 +221,43 @@ class EnrollmentScanViewModel @Inject constructor(
         client.close()
     }
 }
+
+/**
+ * Ce que le journal dit d'une requête d'enrôlement qui a échoué : la classe de l'exception et, pour
+ * celles du client, le nom fixe de sa raison (`reason=HTTP_4XX`, `INVALID_RESPONSE`...), qui permet
+ * de distinguer un QR déjà utilisé (4xx), un Desktop en erreur (5xx) et une réponse illisible. Jamais
+ * le message de l'exception : [EnrollmentClient] y met le texte du JDK, avec l'adresse jointe.
+ */
+internal fun requestFailureLog(e: Throwable): String =
+    if (e is EnrollmentClient.EnrollmentException) "${errorClass(e)}, reason=${e.reason.name}" else errorClass(e)
+
+/**
+ * Pourquoi la première requête (GET /enroll) a échoué. Seule la cause compte, jamais le message de
+ * l'exception : [EnrollmentClient] y met le texte du JDK, avec l'adresse jointe.
+ */
+internal fun helloFailure(e: Throwable, host: String, port: Int): EnrollmentError =
+    if (e is EnrollmentClient.EnrollmentException) {
+        when (e.reason) {
+            EnrollmentClient.Reason.TIMEOUT -> EnrollmentError.ConnectTimeout
+            EnrollmentClient.Reason.NETWORK -> EnrollmentError.Unreachable(host, port)
+            EnrollmentClient.Reason.HTTP_4XX -> EnrollmentError.Refused
+            EnrollmentClient.Reason.HTTP_5XX -> EnrollmentError.ServerFailure
+            EnrollmentClient.Reason.INVALID_RESPONSE -> EnrollmentError.InvalidResponse
+        }
+    } else {
+        EnrollmentError.Network
+    }
+
+/** Pourquoi l'envoi de l'enrôlement (POST /enroll) a échoué, comme [helloFailure]. */
+internal fun submitFailure(e: Throwable): EnrollmentError =
+    if (e is EnrollmentClient.EnrollmentException) {
+        when (e.reason) {
+            EnrollmentClient.Reason.TIMEOUT -> EnrollmentError.SubmitTimeout
+            EnrollmentClient.Reason.NETWORK -> EnrollmentError.ConnectionLost
+            EnrollmentClient.Reason.HTTP_4XX -> EnrollmentError.Refused
+            EnrollmentClient.Reason.HTTP_5XX -> EnrollmentError.ServerFailure
+            EnrollmentClient.Reason.INVALID_RESPONSE -> EnrollmentError.InvalidResponse
+        }
+    } else {
+        EnrollmentError.Network
+    }

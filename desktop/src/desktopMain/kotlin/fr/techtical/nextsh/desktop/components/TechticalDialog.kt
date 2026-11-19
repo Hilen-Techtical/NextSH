@@ -56,6 +56,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.X
+import fr.techtical.nextsh.desktop.generated.resources.Res
+import fr.techtical.nextsh.desktop.generated.resources.action_close
 import fr.techtical.nextsh.desktop.theme.Border1
 import fr.techtical.nextsh.desktop.theme.Burgundy
 import fr.techtical.nextsh.desktop.theme.GoldLight
@@ -67,6 +69,7 @@ import fr.techtical.nextsh.desktop.theme.Surface
 import fr.techtical.nextsh.desktop.theme.TextDisabled
 import fr.techtical.nextsh.desktop.theme.TextPrimary
 import fr.techtical.nextsh.desktop.theme.TextSecondary
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * Carte modale Techtical réutilisable : scrim NearBlack@0.65 + carte
@@ -221,6 +224,6 @@ private fun CloseButton(onClick: () -> Unit) {
             .clickable(interactionSource = interactionSource, indication = null) { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Lucide.X, contentDescription = "Fermer", tint = tint, modifier = Modifier.size(14.dp))
+        Icon(Lucide.X, contentDescription = stringResource(Res.string.action_close), tint = tint, modifier = Modifier.size(14.dp))
     }
 }

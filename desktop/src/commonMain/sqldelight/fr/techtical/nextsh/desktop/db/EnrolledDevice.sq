@@ -27,3 +27,7 @@ UPDATE enrolled_devices SET lastSyncAt = ? WHERE deviceId = ?;
 
 updateLastKnownHost:
 UPDATE enrolled_devices SET lastKnownHost = ? WHERE deviceId = ?;
+
+-- Vault wipe: every row, tombstones included. Generated, so that the listeners of the table are notified.
+deleteAll:
+DELETE FROM enrolled_devices;

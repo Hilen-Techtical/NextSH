@@ -56,7 +56,7 @@ class AndroidTunnelServiceController @Inject constructor(
             // ForegroundServiceStartNotAllowedException (API 31+) n'existe pas
             // sur les API plus anciennes : on attrape large plutôt que de
             // référencer une classe absente à l'exécution sur API 29 et 30.
-            Timber.w("Démarrage du service de tunnels refusé : ${e.message}")
+            Timber.w("Démarrage du service de tunnels refusé (${e::class.java.simpleName})")
             false
         }
     }

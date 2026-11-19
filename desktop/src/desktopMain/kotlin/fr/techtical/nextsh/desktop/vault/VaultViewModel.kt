@@ -16,13 +16,13 @@ import kotlinx.coroutines.withContext
 
 data class VaultUnlockState(
     val isUnlocking: Boolean = false,
-    val error: String? = null,
+    val error: VaultError? = null,
     /**
      * Error specific to the recovery-phrase sub-flow. Kept separate from
      * [error] (the PIN field error) so the two views never cross-contaminate
      * each other's messages.
      */
-    val recoveryError: String? = null,
+    val recoveryError: VaultError? = null,
 )
 
 class VaultViewModel(
@@ -47,7 +47,7 @@ class VaultViewModel(
     // PIN is CharArray so pinManager.unlock can wipe it after derivation.
     fun attemptUnlock(pin: CharArray, onSuccess: () -> Unit) {
         if (pin.size < 4) {
-            _state.value = _state.value.copy(error = "Passphrase incorrecte")
+            _state.value = _state.value.copy(error = VaultError.WRONG_PASSPHRASE)
             java.util.Arrays.fill(pin, ' ')
             return
         }
@@ -66,7 +66,7 @@ class VaultViewModel(
                 // phrase côté UI.
                 _state.value = _state.value.copy(
                     isUnlocking = false,
-                    error = "Passphrase incorrecte",
+                    error = VaultError.WRONG_PASSPHRASE,
                 )
             }
         }
@@ -89,7 +89,7 @@ class VaultViewModel(
             } else {
                 _state.value = _state.value.copy(
                     isUnlocking = false,
-                    recoveryError = "Phrase de récupération invalide",
+                    recoveryError = VaultError.INVALID_RECOVERY_PHRASE,
                 )
             }
         }
@@ -102,7 +102,7 @@ class VaultViewModel(
      */
     fun setNewPin(newPin: CharArray, onSuccess: () -> Unit) {
         if (newPin.size < 4) {
-            _state.value = _state.value.copy(recoveryError = "La Passphrase doit contenir au moins 4 caractères")
+            _state.value = _state.value.copy(recoveryError = VaultError.PASSPHRASE_TOO_SHORT)
             java.util.Arrays.fill(newPin, ' ')
             return
         }
@@ -115,7 +115,7 @@ class VaultViewModel(
             } else {
                 _state.value = _state.value.copy(
                     isUnlocking = false,
-                    recoveryError = "Échec du changement de Passphrase",
+                    recoveryError = VaultError.RECOVERY_CHANGE_FAILED,
                 )
             }
         }

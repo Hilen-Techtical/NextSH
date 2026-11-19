@@ -167,45 +167,6 @@ class WindowsWebAuthnProviderTest {
         assertTrue(xBytes.contentEquals(result), "x coordinate mismatch")
     }
 
-    // ── Test 5c : DER ECDSA → SSH mpint ──────────────────────────────────────
-
-    @Test
-    fun `derEcdsaToSshMpint round-trip with typical 64-byte signature`() {
-        // Typical DER ECDSA P-256 signature : 0x30 len 0x02 rLen r 0x02 sLen s
-        val rBytes = ByteArray(32) { (it + 1).toByte() }
-        val sBytes = ByteArray(32) { (it + 33).toByte() }
-        val der = buildDerEcdsaSig(rBytes, sBytes)
-
-        val result = WindowsWebAuthnProvider.derEcdsaToSshMpint(der)
-
-        // SSH mpint format = SSH string(r) + SSH string(s)
-        // SSH string = uint32 BE length + bytes
-        assertTrue(result.size >= 8, "Result must contain at least two SSH length prefixes")
-        // Parse first SSH string (r)
-        val rLen = ((result[0].toInt() and 0xFF) shl 24) or
-            ((result[1].toInt() and 0xFF) shl 16) or
-            ((result[2].toInt() and 0xFF) shl 8) or
-            (result[3].toInt() and 0xFF)
-        assertTrue(rLen == rBytes.size, "r length must be ${rBytes.size}, got $rLen")
-    }
-
-    @Test
-    fun `derEcdsaToSshMpint handles DER integers with leading zero padding`() {
-        // DER INTEGER with high bit set → padded with 0x00 by ASN.1
-        val rBytes = byteArrayOf(0x00, 0xFF.toByte()) + ByteArray(31) { 0x11 }  // 33 bytes avec padding
-        val sBytes = ByteArray(32) { 0x22 }
-        val der = buildDerEcdsaSig(rBytes, sBytes)
-
-        val result = WindowsWebAuthnProvider.derEcdsaToSshMpint(der)
-        assertTrue(result.isNotEmpty(), "Result must not be empty")
-        // r length = rBytes.size (33 with padding)
-        val rLen = ((result[0].toInt() and 0xFF) shl 24) or
-            ((result[1].toInt() and 0xFF) shl 16) or
-            ((result[2].toInt() and 0xFF) shl 8) or
-            (result[3].toInt() and 0xFF)
-        assertEquals(rBytes.size, rLen, "r must include leading zero from DER")
-    }
-
     // ── Test 6 : HRESULT → FidoError mapping ─────────────────────────────────
 
     @Test
@@ -435,24 +396,6 @@ class WindowsWebAuthnProviderTest {
             add(0x21)                      // label -2 (x)
             add(0x58); add(0x20)           // ByteString 32 bytes
             addAll(xBytes.toList())
-        }.toByteArray()
-    }
-
-    /**
-     * Construit un DER ECDSA signature minimal pour les tests.
-     * 0x30 <total_len> 0x02 <r_len> <r> 0x02 <s_len> <s>
-     */
-    private fun buildDerEcdsaSig(rBytes: ByteArray, sBytes: ByteArray): ByteArray {
-        val totalLen = 2 + rBytes.size + 2 + sBytes.size
-        return buildList<Byte> {
-            add(0x30)                    // SEQUENCE
-            add(totalLen.toByte())       // length
-            add(0x02)                    // INTEGER
-            add(rBytes.size.toByte())    // r length
-            addAll(rBytes.toList())
-            add(0x02)                    // INTEGER
-            add(sBytes.size.toByte())    // s length
-            addAll(sBytes.toList())
         }.toByteArray()
     }
 

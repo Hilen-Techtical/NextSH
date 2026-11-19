@@ -7,6 +7,7 @@ import fr.techtical.nextsh.shared.core.sync.PendingConflictRepository
 import fr.techtical.nextsh.shared.core.sync.SyncScheduler
 import fr.techtical.nextsh.shared.core.sync.SyncState
 import fr.techtical.nextsh.shared.core.sync.SyncStatus
+import fr.techtical.nextsh.shared.util.LogId
 import fr.techtical.nextsh.shared.util.Logger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -72,7 +73,7 @@ class DesktopSyncScheduler(
      * @param conflicts number of conflicting entries (informational: persisted by DesktopSyncRepository)
      */
     fun onPushReceived(fromDeviceId: String, cleanApplied: Int, conflicts: Int) {
-        Logger.d(TAG, "Push received from deviceId=$fromDeviceId cleanApplied=$cleanApplied conflicts=$conflicts")
+        Logger.d(TAG, "Push received from device=${LogId.of(fromDeviceId)} cleanApplied=$cleanApplied conflicts=$conflicts")
         _syncState.update { current ->
             current.copy(
                 status = SyncStatus.IDLE,

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,9 +34,6 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -51,12 +49,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.Code
 import com.composables.icons.lucide.Folder
 import com.composables.icons.lucide.Lucide
@@ -72,6 +76,7 @@ import fr.techtical.nextsh.R
 import fr.techtical.nextsh.domain.model.AuthType
 import fr.techtical.nextsh.domain.model.Host
 import fr.techtical.nextsh.ui.components.BrandText
+import fr.techtical.nextsh.ui.components.NextShMessage
 import fr.techtical.nextsh.ui.theme.BioViolet
 import fr.techtical.nextsh.ui.theme.Border1
 import fr.techtical.nextsh.ui.theme.Border2
@@ -100,7 +105,7 @@ import fr.techtical.nextsh.ui.theme.White
  * HostListScreen : refonte Phase 3.2 (DA Techtical portée du Desktop).
  *
  * Conventions Android conservées : Scaffold + TopAppBar + FAB +
- * SnackbarHost. La refonte porte sur :
+ * message NextShMessage. La refonte porte sur :
  *  - TopAppBar : BrandText 22sp + subtitle compteur + icon actions
  *  - FilterChips Border1/Burgundy selected (parité visual chips)
  *  - HostCard : Surface/Border1/Radii.Lg, icon-wrap Gold avec icône
@@ -110,13 +115,25 @@ import fr.techtical.nextsh.ui.theme.White
  *  - Empty state : Lucide.Server 64dp + Space Grotesk SemiBold title
  *
  * Comportement existant préservé : tap card = SSH connect, FAB =
- * nouvel hôte, SyncBanner Android-only (warning conflits + pending).
+ * nouvel hôte, conflits de sync signalés par le badge de l'icône de la barre.
+ *
+ * Sessions terminal : les onglets survivent à l'écran terminal (ils appartiennent à
+ * `TerminalTabStore`), la liste aide donc à les retrouver.
+ *  - Tap sur un hôte qui a déjà un onglet = ouvre le terminal sur cet onglet, sans se reconnecter.
+ *  - Bandeau « N sessions ouvertes · M déconnectées · Reprendre » sous les filtres dès qu'un onglet
+ *    existe (la part « déconnectées » seulement s'il y en a) : ouvre le terminal sans hôte, qui
+ *    affiche les onglets présents.
+ *  - Pastille sur l'icône de la carte d'un hôte qui a un onglet : SuccessGreen si un onglet est
+ *    connecté, TextDisabled s'il n'est plus que déconnecté (même code couleur que la barre d'onglets
+ *    du terminal).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HostListScreen(
     onNavigateToDetail: (String?) -> Unit,
-    onNavigateToSession: (String) -> Unit,
+    onNavigateToSession: (hostId: String, sessionId: String) -> Unit,
+    /** Opens the terminal on the tabs that exist: on the tab of [hostId], or as they are when null. */
+    onNavigateToTerminal: (hostId: String?) -> Unit = {},
     onNavigateToSnippets: () -> Unit = {},
     onNavigateToImport: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
@@ -126,35 +143,44 @@ fun HostListScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val syncState by viewModel.syncState.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
+    // Un nouveau message remplace l ancien : le collecteur d événements n attend jamais sa disparition.
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
             when (event) {
-                is HostEvent.Connected -> onNavigateToSession(event.sessionId)
+                is HostEvent.Connected -> onNavigateToSession(event.hostId, event.sessionId)
+                is HostEvent.OpenTerminal -> onNavigateToTerminal(event.hostId)
                 is HostEvent.SftpReady -> onNavigateToSftp(event.sessionId, event.hostLabel)
-                is HostEvent.Error -> {
-                    snackbarHostState.showSnackbar(
-                        message = event.message,
-                        duration = SnackbarDuration.Short,
-                    )
-                }
+                is HostEvent.Error -> errorMessage = event.message
                 else -> {}
             }
         }
     }
 
+    // The count of the hosts shown (filtered by group). Zero is a string of its own: in French the
+    // "one" plural covers 0 and 1 and would read "0 hôte". It is short ("Aucun hôte"), not the
+    // sentence of the empty state: it sits in the bar beside the sync state, and it stays true when
+    // a group filter shows nothing while hosts exist.
     val totalHosts = uiState.hosts.size
-    val hostsLabel = when {
-        totalHosts == 0 -> "Aucun hôte"
-        totalHosts == 1 -> "1 hôte"
-        else -> "$totalHosts hôtes"
+    val hostsLabel = if (totalHosts == 0) {
+        stringResource(R.string.host_list_count_zero)
+    } else {
+        pluralStringResource(R.plurals.host_list_count, totalHosts, totalHosts)
     }
     val pendingConflicts = syncState.pendingConflicts
     val (syncLabel, syncColor, syncDot) = syncStatusDescriptor(syncState.status, pendingConflicts, syncState.lastSyncAt)
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        // Le slot du Scaffold superpose le message en bas de la liste sans la redimensionner.
+        snackbarHost = {
+            NextShMessage(
+                message   = errorMessage,
+                isError   = true,
+                onDismiss = { errorMessage = null },
+                modifier  = Modifier.padding(Spacing.Md),
+            )
+        },
         topBar = {
             TopAppBar(
                 title = {
@@ -165,6 +191,8 @@ fun HostListScreen(
                                 text = hostsLabel,
                                 color = TextDisabled,
                                 fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             Spacer(Modifier.width(6.dp))
                             Text("·", color = TextDisabled, fontSize = 12.sp)
@@ -175,11 +203,17 @@ fun HostListScreen(
                                     .background(syncDot, RoundedCornerShape(50)),
                             )
                             Spacer(Modifier.width(5.dp))
+                            // One line: the bar is narrow beside the three actions (« 12 conflits en
+                            // attente » at 130 % of font size), the label takes what is left and ends
+                            // with an ellipsis rather than wrapping the title over a second line.
                             Text(
                                 text = syncLabel,
                                 color = syncColor,
                                 fontSize = 12.sp,
                                 fontWeight = if (pendingConflicts > 0) FontWeight.Medium else FontWeight.Normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
                             )
                         }
                     }
@@ -233,6 +267,16 @@ fun HostListScreen(
                 onAddHost = { onNavigateToDetail(null) },
             )
 
+            // Hors de la LazyColumn : visible aussi quand la liste est vide (un hôte supprimé alors
+            // que son onglet reste ouvert), et fixe, pour que « Reprendre » ne parte pas avec le défilement.
+            if (uiState.openTerminalCount > 0) {
+                OpenSessionsBanner(
+                    count = uiState.openTerminalCount,
+                    disconnectedCount = uiState.disconnectedTerminalCount,
+                    onResume = { onNavigateToTerminal(null) },
+                )
+            }
+
             if (uiState.hosts.isEmpty() && !uiState.isLoading) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -277,6 +321,7 @@ fun HostListScreen(
                         HostCard(
                             host = host,
                             isConnecting = uiState.connectingHostId == host.id,
+                            terminalTab = uiState.terminalTabOf(host.id),
                             onConnect = { viewModel.connectToHost(host) },
                             onEdit = { onNavigateToDetail(host.id) },
                             onSftpBrowse = { viewModel.connectForSftp(host) },
@@ -325,9 +370,18 @@ private fun syncStatusDescriptor(
  * Icône Settings TopAppBar avec badge "n" Burgundy en haut-droite
  * quand des conflits de sync sont en attente. Tap → résolution conflits
  * directement (raccourci) si badge > 0, sinon Settings classique.
+ *
+ * La description suit l'effet du toucher : « Paramètres » sans conflit, « Résoudre N conflits de
+ * synchronisation » sinon. Elle porte le compte, donc la pastille du badge, qui est un texte à part,
+ * est écartée de l'arbre d'accessibilité (TalkBack la lirait comme un « 3 » isolé).
  */
 @Composable
 private fun SettingsIconWithBadge(badgeCount: Int, onClick: () -> Unit) {
+    val description = if (badgeCount > 0) {
+        pluralStringResource(R.plurals.host_list_resolve_conflicts, badgeCount, badgeCount)
+    } else {
+        stringResource(R.string.action_settings)
+    }
     Box(modifier = Modifier.size(48.dp)) {
         IconButton(
             onClick = onClick,
@@ -335,7 +389,7 @@ private fun SettingsIconWithBadge(badgeCount: Int, onClick: () -> Unit) {
         ) {
             Icon(
                 Lucide.Settings,
-                contentDescription = stringResource(R.string.action_settings),
+                contentDescription = description,
                 tint = TextSecondary,
                 modifier = Modifier.size(18.dp),
             )
@@ -347,7 +401,8 @@ private fun SettingsIconWithBadge(badgeCount: Int, onClick: () -> Unit) {
                     .padding(top = 6.dp, end = 4.dp)
                     .size(16.dp)
                     .background(Burgundy, RoundedCornerShape(50))
-                    .border(1.dp, NearBlack, RoundedCornerShape(50)),
+                    .border(1.dp, NearBlack, RoundedCornerShape(50))
+                    .clearAndSetSemantics {},
                 contentAlignment = Alignment.Center,
             ) {
                 // `lineHeight = fontSize` retire le padding vertical implicite
@@ -436,6 +491,105 @@ private fun BtnAddPrimary(onClick: () -> Unit) {
     }
 }
 
+// ── Sessions terminal ouvertes ──────────────────────────────────────────────
+
+/**
+ * Bandeau « N sessions ouvertes · M déconnectées · Reprendre », sous la barre des filtres.
+ * BurgundyDark + liseré Burgundy (le container « sélectionné » de la DA), texte TextPrimary,
+ * action en GoldLight. [count] est le total des onglets, [disconnectedCount] ceux dont le shell
+ * est tombé : la part « M déconnectées » n'apparaît que s'il y en a, pour qu'un onglet mort ne
+ * passe pas pour une session ouverte. Le texte passe à la ligne plutôt que de se tronquer.
+ *
+ * Toute la ligne est la cible tactile (48dp au moins) : « Reprendre » n'est pas un second bouton
+ * dans un bouton, c'est l'indication de ce que fait le toucher. Pour TalkBack c'est un seul
+ * bouton, lu « N sessions ouvertes, M déconnectées, Reprendre » : la description est donnée en
+ * entier, sans le point médian du texte affiché, que le lecteur d'écran épelle ou avale.
+ */
+@Composable
+private fun OpenSessionsBanner(count: Int, disconnectedCount: Int, onResume: () -> Unit) {
+    val shape = RoundedCornerShape(Radii.Lg)
+    val opened = pluralStringResource(R.plurals.host_list_open_sessions, count, count)
+    val disconnected = if (disconnectedCount > 0) {
+        pluralStringResource(R.plurals.host_list_disconnected_sessions, disconnectedCount, disconnectedCount)
+    } else {
+        null
+    }
+    val resume = stringResource(R.string.host_list_resume_sessions)
+    val text = if (disconnected != null) stringResource(R.string.host_list_open_sessions_summary, opened, disconnected) else opened
+    val spoken = listOfNotNull(opened, disconnected, resume).joinToString(", ")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.Lg)
+            .clip(shape)
+            .background(BurgundyDark)
+            .border(1.dp, Burgundy, shape)
+            .clickable(
+                onClickLabel = resume,
+                role = Role.Button,
+                onClick = onResume,
+            )
+            .semantics { contentDescription = spoken }
+            .defaultMinSize(minHeight = 48.dp)
+            .padding(horizontal = Spacing.Md, vertical = Spacing.Sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Lucide.Terminal,
+            contentDescription = null,
+            tint = GoldLight,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(Spacing.Sm))
+        Text(
+            text = text,
+            color = TextPrimary,
+            fontFamily = SpaceGroteskFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = 14.sp,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(Spacing.Sm))
+        Text(
+            text = resume,
+            color = GoldLight,
+            fontFamily = SpaceGroteskFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 13.sp,
+        )
+        Icon(
+            Lucide.ChevronRight,
+            contentDescription = null,
+            tint = GoldLight,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
+/**
+ * Pastille de la carte d'un hôte qui a un onglet terminal : 8dp au coin de l'icône-wrap, cernée
+ * d'un anneau Surface de 1,5dp pour la détacher de l'icône. SuccessGreen quand un onglet est
+ * connecté, TextDisabled quand il ne reste que des onglets déconnectés. Même code couleur que la
+ * barre d'onglets du terminal.
+ *
+ * La couleur ne porte pas seule l'information : `contentDescription` dit « Session ouverte » ou
+ * « Session déconnectée ». TalkBack la lit avec la carte, qui fusionne ses enfants.
+ */
+@Composable
+private fun OpenSessionDot(connected: Boolean, modifier: Modifier = Modifier) {
+    val description = stringResource(
+        if (connected) R.string.host_card_session_open else R.string.host_card_session_disconnected,
+    )
+    Box(
+        modifier = modifier
+            .size(11.dp)
+            .background(Surface, CircleShape)
+            .padding(1.5.dp)
+            .background(if (connected) SuccessGreen else TextDisabled, CircleShape)
+            .semantics { contentDescription = description },
+    )
+}
+
 // ── HostCard refondue ───────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -443,6 +597,7 @@ private fun BtnAddPrimary(onClick: () -> Unit) {
 private fun HostCard(
     host: Host,
     isConnecting: Boolean,
+    terminalTab: HostTerminalTab,
     onConnect: () -> Unit,
     onEdit: () -> Unit,
     onSftpBrowse: () -> Unit,
@@ -454,7 +609,15 @@ private fun HostCard(
             .clip(RoundedCornerShape(Radii.Lg))
             .background(Surface)
             .border(1.dp, Border1, RoundedCornerShape(Radii.Lg))
-            .clickable(onClick = onConnect)
+            // Le toucher a deux effets : rouvrir l'onglet que l'hôte a déjà, ou se connecter. Le
+            // libellé le dit à TalkBack, qui l'annonce avec « appuyez deux fois pour ».
+            .clickable(
+                onClickLabel = stringResource(
+                    if (terminalTab == HostTerminalTab.NONE) R.string.host_card_action_connect
+                    else R.string.host_card_action_reopen_session,
+                ),
+                onClick = onConnect,
+            )
             .padding(Spacing.Md),
         verticalArrangement = Arrangement.spacedBy(Spacing.Sm),
     ) {
@@ -462,20 +625,34 @@ private fun HostCard(
         Row(verticalAlignment = Alignment.Top) {
             // Parité Desktop : icône `Server` uniforme (pas auth-type),
             // icon-wrap SurfaceVariant 32dp + GoldMuted tint, le badge auth
-            // à droite porte l'info de méthode.
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(Radii.Sm))
-                    .background(SurfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Lucide.Server,
-                    contentDescription = host.authType.name,
-                    tint = GoldMuted,
-                    modifier = Modifier.size(16.dp),
-                )
+            // à droite porte l'info de méthode. L'icône est décorative (la même pour tous les
+            // hôtes) : sans description, TalkBack lit le nom de l'hôte en premier, et le mode
+            // d'authentification une seule fois, par le badge.
+            // Boîte extérieure non rognée : la pastille de session déborde du coin de l'icône-wrap,
+            // qui, lui, est clippé.
+            Box(modifier = Modifier.size(32.dp)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(Radii.Sm))
+                        .background(SurfaceVariant),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Lucide.Server,
+                        contentDescription = null,
+                        tint = GoldMuted,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                if (terminalTab != HostTerminalTab.NONE) {
+                    OpenSessionDot(
+                        connected = terminalTab == HostTerminalTab.CONNECTED,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = 3.dp, y = (-3).dp),
+                    )
+                }
             }
             Spacer(Modifier.width(Spacing.Sm))
             Column(modifier = Modifier.weight(1f)) {
@@ -602,6 +779,9 @@ private fun TechticalFilterChip(
  *   - FIDO2     : SuccessGreen sur dark-tinted #1A2A1A
  *   - BIO       : BioViolet sur dark-tinted #1A1A2A
  * Mono Bold 10sp + radius 2dp, pas de border.
+ *
+ * Le texte visible est un code (« PWD », « SSH_KEY ») que TalkBack épellerait : la Box le remplace
+ * par le libellé du mode d'authentification, celui de l'écran de détail (`authTypeLabelRes`).
  */
 @Composable
 private fun AuthBadge(authType: AuthType) {
@@ -612,11 +792,14 @@ private fun AuthBadge(authType: AuthType) {
         AuthType.FIDO2 -> Triple("FIDO2", Color(0xFF1A2A1A), SuccessGreen)
         AuthType.BIOMETRIC_KEY -> Triple("BIO", Color(0xFF1A1A2A), BioViolet)
     }
+    // Lu hors du lambda de sémantique : stringResource est composable.
+    val spokenLabel = stringResource(authTypeLabelRes(authType))
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(Radii.Xs))
             .background(bg)
-            .padding(horizontal = 6.dp, vertical = 2.dp),
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .clearAndSetSemantics { contentDescription = spokenLabel },
     ) {
         Text(
             text = label,

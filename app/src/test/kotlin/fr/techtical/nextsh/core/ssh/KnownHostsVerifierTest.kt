@@ -18,6 +18,7 @@ import java.io.File
 import java.nio.file.Path
 import java.security.KeyPairGenerator
 import java.security.PublicKey
+import java.util.Base64
 
 @ExtendWith(MockKExtension::class)
 class KnownHostsVerifierTest {
@@ -107,6 +108,52 @@ class KnownHostsVerifierTest {
         assertEquals("$hostname:$port", mismatch.hostname)
         assertTrue(mismatch.storedFingerprint.startsWith("SHA256:"), "Stored fingerprint should have SHA256: prefix")
         assertTrue(mismatch.receivedFingerprint.startsWith("SHA256:"), "Received fingerprint should have SHA256: prefix")
+    }
+
+    // ── storedKeyState: the question of a prompt that waited for its turn ────
+
+    private fun unknownOf(hostname: String, port: Int, key: PublicKey): HostKeyVerifyResult.Unknown =
+        verifier.checkKey(hostname, port, key) as HostKeyVerifyResult.Unknown
+
+    @Test
+    fun `a key is stored once the user trusted it, and not before`() {
+        val key = generateTestKeyPair()
+        val unknown = unknownOf("example.com", 22, key)
+        assertEquals(StoredKeyState.NONE, verifier.storedKeyState(unknown), "nothing was trusted yet")
+
+        verifier.acceptHost("example.com:22", key.algorithm, key.encoded)
+
+        assertEquals(StoredKeyState.SAME, verifier.storedKeyState(unknown))
+    }
+
+    @Test
+    fun `another key for the same host is a different key, never the stored one`() {
+        val trusted = generateTestKeyPair()
+        val other = generateDifferentKeyPair()
+        val unknownOther = unknownOf("example.com", 22, other)
+        verifier.acceptHost("example.com:22", trusted.algorithm, trusted.encoded)
+
+        assertEquals(StoredKeyState.DIFFERENT, verifier.storedKeyState(unknownOther), "a different key is never skipped by this")
+    }
+
+    @Test
+    fun `the same key for another host or port has nothing stored`() {
+        val key = generateTestKeyPair()
+        val elsewhere = unknownOf("other.example.com", 22, key)
+        val otherPort = unknownOf("example.com", 2222, key)
+        verifier.acceptHost("example.com:22", key.algorithm, key.encoded)
+
+        assertEquals(StoredKeyState.NONE, verifier.storedKeyState(elsewhere))
+        assertEquals(StoredKeyState.NONE, verifier.storedKeyState(otherPort))
+    }
+
+    @Test
+    fun `an algorithm that differs is a different key`() {
+        val key = generateTestKeyPair()
+        val unknown = unknownOf("example.com", 22, key)
+        verifier.acceptHost("example.com:22", "ssh-ed25519", key.encoded)
+
+        assertEquals(StoredKeyState.DIFFERENT, verifier.storedKeyState(unknown))
     }
 
     @Test
@@ -338,5 +385,335 @@ class KnownHostsVerifierTest {
         assertEquals(2, lines.size, "Should have two lines")
         assertTrue(lines[0].startsWith(hostPort1))
         assertTrue(lines[1].startsWith(hostPort2))
+    }
+
+    // ── Backup: exportEntries / importEntries ─────────────────────────────────
+
+    private fun candidate(hostPort: String, key: PublicKey) =
+        KnownHostCandidate(hostPort, key.algorithm, key.encoded)
+
+    private fun fileText(): String = File(tempDir.toFile(), "known_hosts").readText(Charsets.UTF_8)
+
+    @Test
+    fun `exportEntries is empty without a file`() {
+        assertTrue(verifier.exportEntries().isEmpty())
+    }
+
+    @Test
+    fun `exportEntries keeps the first line of a host and skips unreadable lines`() {
+        val first = generateTestKeyPair()
+        val second = generateDifferentKeyPair()
+        verifier.acceptHost("example.com:22", first.algorithm, first.encoded)
+        verifier.acceptHost("example.com:22", second.algorithm, second.encoded)
+        File(tempDir.toFile(), "known_hosts").appendText("garbage\nother.com:22 RSA not*base64\n", Charsets.UTF_8)
+        verifier.acceptHost("other.org:22", second.algorithm, second.encoded)
+
+        val entries = verifier.exportEntries()
+
+        assertEquals(listOf("example.com:22", "other.org:22"), entries.map { it.hostPort })
+        assertTrue(entries[0].encoded.contentEquals(first.encoded), "the first line wins, like verify()")
+    }
+
+    @Test
+    fun `importEntries adds an absent host and the key is then trusted`() {
+        val key = generateTestKeyPair()
+
+        val outcome = verifier.importEntries(listOf(candidate("new.example.org:22", key)))
+
+        assertEquals(1, outcome.added)
+        assertEquals(0, outcome.alreadyKnown)
+        assertTrue(outcome.conflicts.isEmpty())
+        assertTrue(verifier.checkKey("new.example.org", 22, key) is HostKeyVerifyResult.Trusted)
+    }
+
+    @Test
+    fun `importEntries counts the same key as already known and does not rewrite the file`() {
+        val key = generateTestKeyPair()
+        verifier.acceptHost("example.com:22", key.algorithm, key.encoded)
+        val before = fileText()
+
+        val outcome = verifier.importEntries(listOf(candidate("example.com:22", key)))
+
+        assertEquals(0, outcome.added)
+        assertEquals(1, outcome.alreadyKnown)
+        assertEquals(before, fileText())
+    }
+
+    @Test
+    fun `importEntries keeps the local key when the backup has another one and names the host`() {
+        val local = generateTestKeyPair()
+        val other = generateDifferentKeyPair()
+        verifier.acceptHost("example.com:22", local.algorithm, local.encoded)
+        val before = fileText()
+
+        val outcome = verifier.importEntries(listOf(candidate("example.com:22", other), candidate("fresh.com:22", other)))
+
+        assertEquals(listOf("example.com:22"), outcome.conflicts)
+        assertEquals(1, outcome.added)
+        assertTrue(verifier.checkKey("example.com", 22, local) is HostKeyVerifyResult.Trusted, "the local key stays trusted")
+        assertTrue(verifier.checkKey("example.com", 22, other) is HostKeyVerifyResult.Mismatch, "the backup key was not installed")
+        assertTrue(fileText().startsWith(before), "existing lines are kept as they were")
+    }
+
+    @Test
+    fun `importEntries keeps the existing lines and adds a missing final newline`() {
+        val key = generateTestKeyPair()
+        val file = File(tempDir.toFile(), "known_hosts")
+        file.writeText("old.example.org:22 RSA AAAA", Charsets.UTF_8) // no final newline
+
+        verifier.importEntries(listOf(candidate("new.example.org:22", key)))
+
+        val lines = fileText().lines().filter { it.isNotEmpty() }
+        assertEquals(2, lines.size)
+        assertEquals("old.example.org:22 RSA AAAA", lines[0])
+        assertTrue(lines[1].startsWith("new.example.org:22 ${key.algorithm} "))
+        assertTrue(fileText().endsWith("\n"))
+    }
+
+    @Test
+    fun `importEntries treats a duplicate inside the batch like the second sight of a host`() {
+        val key = generateTestKeyPair()
+        val other = generateDifferentKeyPair()
+
+        val outcome = verifier.importEntries(
+            listOf(
+                candidate("dup.example.org:22", key),
+                candidate("dup.example.org:22", key),
+                candidate("dup.example.org:22", other),
+            ),
+        )
+
+        assertEquals(1, outcome.added)
+        assertEquals(1, outcome.alreadyKnown)
+        assertEquals(listOf("dup.example.org:22"), outcome.conflicts)
+        assertEquals(1, fileText().lines().count { it.isNotEmpty() })
+    }
+
+    @Test
+    fun `importEntries refuses a host with a space or a control character and writes nothing for it`() {
+        val key = generateTestKeyPair()
+
+        val outcome = verifier.importEntries(
+            listOf(
+                candidate("a b.example.org:22", key),
+                candidate("tab\tx.example.org:22", key),
+                candidate("nl\nx.example.org:22", key),
+                candidate("", key),
+                KnownHostCandidate("ok.example.org:22", "bad algo", key.encoded),
+            ),
+        )
+
+        assertEquals(0, outcome.added)
+        assertEquals(5, outcome.rejected)
+        assertFalse(File(tempDir.toFile(), "known_hosts").exists(), "nothing added, nothing written")
+    }
+
+    @Test
+    fun `importEntries leaves no temporary file behind`() {
+        val key = generateTestKeyPair()
+
+        verifier.importEntries(listOf(candidate("one.example.org:22", key)))
+
+        assertEquals(listOf("known_hosts"), tempDir.toFile().list()!!.sorted())
+    }
+
+    @Test
+    fun `an imported entry round-trips through exportEntries`() {
+        val key = generateTestKeyPair()
+        verifier.importEntries(listOf(candidate("rt.example.org:2222", key)))
+
+        val exported = verifier.exportEntries().single()
+
+        assertEquals("rt.example.org:2222", exported.hostPort)
+        assertEquals(key.algorithm, exported.algorithm)
+        assertTrue(exported.encoded.contentEquals(key.encoded))
+    }
+
+    // ── Held addresses ──────────────────────────────────────────────────────
+
+    @Test
+    fun `a held address without a local fingerprint is not added and is counted as held`() {
+        val key = generateTestKeyPair()
+
+        val outcome = verifier.importEntries(
+            listOf(candidate("held.example.org:22", key), candidate("free.example.org:22", key)),
+            held = setOf("held.example.org:22"),
+        )
+
+        assertEquals(1, outcome.added)
+        assertEquals(listOf("held.example.org:22"), outcome.held)
+        assertTrue(verifier.checkKey("held.example.org", 22, key) is HostKeyVerifyResult.Unknown, "the first-connection prompt stays")
+        assertTrue(verifier.checkKey("free.example.org", 22, key) is HostKeyVerifyResult.Trusted)
+    }
+
+    @Test
+    fun `a held address that already has the same fingerprint is already known, not held`() {
+        val key = generateTestKeyPair()
+        verifier.acceptHost("held.example.org:22", key.algorithm, key.encoded)
+
+        val outcome = verifier.importEntries(listOf(candidate("held.example.org:22", key)), held = setOf("held.example.org:22"))
+
+        assertEquals(1, outcome.alreadyKnown)
+        assertTrue(outcome.held.isEmpty())
+    }
+
+    @Test
+    fun `a held address with another local fingerprint is a conflict, not held`() {
+        val local = generateTestKeyPair()
+        val other = generateDifferentKeyPair()
+        verifier.acceptHost("held.example.org:22", local.algorithm, local.encoded)
+
+        val outcome = verifier.importEntries(listOf(candidate("held.example.org:22", other)), held = setOf("held.example.org:22"))
+
+        assertEquals(listOf("held.example.org:22"), outcome.conflicts)
+        assertTrue(outcome.held.isEmpty())
+    }
+
+    @Test
+    fun `importing the same file twice never approves a held address`() {
+        val key = generateTestKeyPair()
+        val held = setOf("held.example.org:22")
+        val entries = listOf(candidate("held.example.org:22", key))
+
+        verifier.importEntries(entries, held)
+        val second = verifier.importEntries(entries, held)
+
+        assertEquals(listOf("held.example.org:22"), second.held)
+        assertEquals(0, second.added)
+        assertFalse(File(tempDir.toFile(), "known_hosts").exists())
+    }
+
+    @Test
+    fun `a duplicate of a held address in the batch is held once`() {
+        val key = generateTestKeyPair()
+
+        val outcome = verifier.importEntries(
+            listOf(candidate("held.example.org:22", key), candidate("held.example.org:22", key)),
+            held = setOf("held.example.org:22"),
+        )
+
+        assertEquals(listOf("held.example.org:22"), outcome.held)
+    }
+
+    // ── Rule on host:port (acceptHost, importEntries, strict reading) ─────────
+
+    private val formatChar = String(Character.toChars(0x202E))
+
+    private fun invalidHostPorts(): List<String> = listOf(
+        "a b:22",
+        "a.test:22\nb.test:22 RSA AAAA",
+        "a.test\t:22",
+        "a$formatChar.test:22",
+        ":22",
+        "a.test",
+        "a.test:",
+        "a.test:0",
+        "a.test:65536",
+        "a.test:2x",
+        "a.test:123456",
+        "${"a".repeat(256)}:22",
+        "",
+    )
+
+    @Test
+    fun `acceptHost refuses an invalid host port, returns false and leaves the file untouched`() {
+        val key = generateTestKeyPair()
+        verifier.acceptHost("ok.example.org:22", key.algorithm, key.encoded)
+        val before = fileText()
+
+        for (hostPort in invalidHostPorts()) {
+            assertFalse(verifier.acceptHost(hostPort, key.algorithm, key.encoded), "refused: ${hostPort.length} chars")
+        }
+
+        assertEquals(before, fileText())
+    }
+
+    @Test
+    fun `acceptHost writes nothing for an invalid host even without a file`() {
+        val key = generateTestKeyPair()
+
+        assertFalse(verifier.acceptHost("a b:22", key.algorithm, key.encoded))
+
+        assertFalse(File(tempDir.toFile(), "known_hosts").exists())
+    }
+
+    @Test
+    fun `acceptHost refuses an empty key and a bad algorithm`() {
+        val key = generateTestKeyPair()
+
+        assertFalse(verifier.acceptHost("a.test:22", key.algorithm, ByteArray(0)))
+        assertFalse(verifier.acceptHost("a.test:22", "bad algo", key.encoded))
+        assertFalse(verifier.acceptHost("a.test:22", "", key.encoded))
+        assertFalse(File(tempDir.toFile(), "known_hosts").exists())
+    }
+
+    @Test
+    fun `acceptHost accepts IPv6 hosts and a zone id`() {
+        val key = generateTestKeyPair()
+
+        assertTrue(verifier.acceptHost("2001:db8::1:22", key.algorithm, key.encoded))
+        assertTrue(verifier.acceptHost("fe80::1%wlan0:22", key.algorithm, key.encoded))
+        assertTrue(verifier.acceptHost("a.test:65535", key.algorithm, key.encoded))
+
+        assertTrue(verifier.checkKey("2001:db8::1", 22, key) is HostKeyVerifyResult.Trusted)
+        assertTrue(verifier.checkKey("fe80::1%wlan0", 22, key) is HostKeyVerifyResult.Trusted)
+    }
+
+    @Test
+    fun `importEntries rejects an invalid host port the same way`() {
+        val key = generateTestKeyPair()
+
+        val outcome = verifier.importEntries(
+            listOf(
+                candidate("a$formatChar.test:22", key),
+                candidate("a.test:0", key),
+                candidate("a.test:70000", key),
+                candidate("a b:22", key),
+                candidate("ok.example.org:22", key),
+            ),
+        )
+
+        assertEquals(4, outcome.rejected)
+        assertEquals(1, outcome.added)
+    }
+
+    @Test
+    fun `a line with four fields written by hand is neither read nor listed nor exported`() {
+        val key = generateTestKeyPair()
+        val encoded = Base64.getEncoder().encodeToString(key.encoded)
+        val file = File(tempDir.toFile(), "known_hosts")
+        file.writeText("example.com:22 ${key.algorithm} $encoded extra\n", Charsets.UTF_8)
+        val before = fileText()
+
+        assertTrue(verifier.checkKey("example.com", 22, key) is HostKeyVerifyResult.Unknown)
+        assertTrue(verifier.getAllEntries().isEmpty())
+        assertTrue(verifier.exportEntries().isEmpty())
+        assertEquals(before, fileText(), "an invalid line is ignored, never rewritten")
+    }
+
+    @Test
+    fun `a line whose host is invalid is ignored by every reading and kept in the file`() {
+        val key = generateTestKeyPair()
+        val encoded = Base64.getEncoder().encodeToString(key.encoded)
+        val file = File(tempDir.toFile(), "known_hosts")
+        file.writeText("a.test:0 ${key.algorithm} $encoded\nok.example.org:22 ${key.algorithm} $encoded\n", Charsets.UTF_8)
+        val before = fileText()
+
+        assertEquals(listOf("ok.example.org:22"), verifier.getAllEntries().map { it.hostPort })
+        assertEquals(listOf("ok.example.org:22"), verifier.exportEntries().map { it.hostPort })
+        assertTrue(verifier.checkKey("a.test", 0, key) is HostKeyVerifyResult.Unknown)
+        assertEquals(before, fileText())
+    }
+
+    @Test
+    fun `isStorableHostPort gives the verdicts of the shared validator`() {
+        assertTrue(KnownHostsVerifier.isStorableHostPort("a.test:22"))
+        assertTrue(KnownHostsVerifier.isStorableHostPort("a.test:1"))
+        assertTrue(KnownHostsVerifier.isStorableHostPort("a.test:65535"))
+        assertTrue(KnownHostsVerifier.isStorableHostPort("2001:db8::1:22"))
+        assertTrue(KnownHostsVerifier.isStorableHostPort("${"a".repeat(255)}:22"))
+        for (hostPort in invalidHostPorts()) {
+            assertFalse(KnownHostsVerifier.isStorableHostPort(hostPort), "refused: ${hostPort.length} chars")
+        }
     }
 }

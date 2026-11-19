@@ -3,9 +3,11 @@
 
 package fr.techtical.nextsh.core.ssh
 
+import fr.techtical.nextsh.testutil.RecordingTree
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import timber.log.Timber
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.connection.channel.direct.DirectConnection
 import org.junit.jupiter.api.Assertions.assertArrayEquals
@@ -120,5 +122,28 @@ class Socks5ServerTest {
             0x00, 0x00,
         )
         assertArrayEquals(expected, output.toByteArray())
+    }
+
+    @Test
+    fun `un echec d ouverture du canal ne met ni la destination ni le message dans le journal`() {
+        val ipv6Loopback = ByteArray(15) { 0 } + byteArrayOf(0x01)
+        val mockClient = mockk<SSHClient>()
+        every { mockClient.newDirectConnection(any(), any()) } throws
+            java.io.IOException("refused by secret-host.example.org")
+        val input = ByteArrayInputStream(buildHandshakeBytes(ipv6Loopback, 0x01, 0xBB.toByte()))
+        val tree = RecordingTree()
+        Timber.plant(tree)
+        try {
+            Socks5Server(mockClient, 0).handleConnection(socketWith(input, ByteArrayOutputStream()))
+        } finally {
+            Timber.uproot(tree)
+        }
+
+        val logged = tree.entries.joinToString("\n") { it.message }
+        assertTrue(logged.contains("IOException"), "la classe de l'exception suffit : $logged")
+        // Ce que le client SOCKS5 a demande (hote, port) et le message de l'erreur restent prives.
+        assertTrue(!logged.contains("0:0:0:0:0:0:0:1"), "pas d'hote de destination : $logged")
+        assertTrue(!logged.contains("443"), "pas de port de destination : $logged")
+        assertTrue(!logged.contains("secret-host"), "pas de message d'exception : $logged")
     }
 }

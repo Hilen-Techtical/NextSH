@@ -169,8 +169,9 @@ class LanDiscoveryClientTest {
     @Test
     fun `discover returns an empty list without probing when the vault is locked`() = runTest {
         val secretStore = mockk<EnrolledDeviceSecretStore>()
+        // What the vault adapter throws through the shared interface.
         coEvery { secretStore.retrieve(testDevice.deviceId) } throws
-            fr.techtical.nextsh.core.vault.VaultAuthExpiredException()
+            fr.techtical.nextsh.shared.domain.vault.VaultAuthExpiredException()
         val client = LanDiscoveryClient(secretStore)
 
         val result = client.discover(testDevice)

@@ -22,6 +22,7 @@ import kotlinx.coroutines.withContext
 class DesktopHostRepository(db: NextShDatabase) : HostRepository {
 
     private val q = db.hostQueries
+    private val tunnelQ = db.tunnelQueries
 
     override fun observeAll(): Flow<List<Host>> =
         q.selectAll().asFlow().mapToList(Dispatchers.IO).map { rows -> rows.map(::toDomain) }
@@ -37,30 +38,80 @@ class DesktopHostRepository(db: NextShDatabase) : HostRepository {
     }
 
     override suspend fun save(host: Host) = withContext(Dispatchers.IO) {
-        val now = System.currentTimeMillis()
-        val newClock = VectorClockCodec.decode("{}").tick(DeviceIdentity.deviceId(), now)
-        q.insert(
-            id = host.id,
-            label = host.label,
-            hostname = host.hostname,
-            port = host.port.toLong(),
-            username = host.username,
-            authType = host.authType.name,
-            credentialId = host.credentialId,
-            group = host.group,
-            keepAliveSeconds = host.keepAliveSeconds.toLong(),
-            autoReconnect = if (host.autoReconnect) 1L else 0L,
-            terminalTheme = host.terminalTheme,
-            fido2Mode = host.fido2Mode?.name,
-            isFavorite = if (host.isFavorite) 1L else 0L,
-            createdAt = now,
-            lastConnectedAt = null,
-            vectorClock = VectorClockCodec.encode(newClock),
-            deleted = 0L,
-            deletedAt = null,
-            updatedAt = now,
-        )
+        q.transaction { saveInTransaction(host) }
     }
+
+    /**
+     * Body of [save], without a transaction of its own so that a caller can write several rows atomically
+     * (backup restore). Not a suspend function on purpose: a SQLDelight transaction is bound to its thread.
+     *
+     * A new id is a plain INSERT with a fresh clock. An id that already exists, live or tombstoned, is
+     * rewritten IN PLACE: INSERT OR REPLACE would delete the row first, which cascades to its tunnels and
+     * resets the local-only columns createdAt and lastConnectedAt. The row is revived (deleted = 0) and its
+     * clock is the existing one ticked, so this version also wins on the peers.
+     *
+     * A LIVE row whose content already equals [host] is left untouched (no clock tick, no updatedAt bump):
+     * restoring the same backup twice must not look like a new edit to the peers, where it would turn into
+     * sync churn or a false conflict against a peer that edited the item since.
+     */
+    internal fun saveInTransaction(host: Host) {
+        val now = System.currentTimeMillis()
+        val existing = q.selectByIdIncludingDeleted(host.id).executeAsOneOrNull()
+        if (existing != null && existing.deleted == 0L && toDomain(existing) == host) return
+        if (existing == null) {
+            val newClock = VectorClockCodec.decode("{}").tick(DeviceIdentity.deviceId(), now)
+            q.insert(
+                id = host.id,
+                label = host.label,
+                hostname = host.hostname,
+                port = host.port.toLong(),
+                username = host.username,
+                authType = host.authType.name,
+                credentialId = host.credentialId,
+                group = host.group,
+                keepAliveSeconds = host.keepAliveSeconds.toLong(),
+                autoReconnect = if (host.autoReconnect) 1L else 0L,
+                terminalTheme = host.terminalTheme,
+                fido2Mode = host.fido2Mode?.name,
+                isFavorite = if (host.isFavorite) 1L else 0L,
+                createdAt = now,
+                lastConnectedAt = null,
+                vectorClock = VectorClockCodec.encode(newClock),
+                deleted = 0L,
+                deletedAt = null,
+                updatedAt = now,
+            )
+        } else {
+            val newClock = VectorClockCodec.decode(existing.vectorClock).tick(DeviceIdentity.deviceId(), now)
+            q.updateFromSync(
+                label = host.label,
+                hostname = host.hostname,
+                port = host.port.toLong(),
+                username = host.username,
+                authType = host.authType.name,
+                credentialId = host.credentialId,
+                group = host.group,
+                keepAliveSeconds = host.keepAliveSeconds.toLong(),
+                autoReconnect = if (host.autoReconnect) 1L else 0L,
+                terminalTheme = host.terminalTheme,
+                fido2Mode = host.fido2Mode?.name,
+                isFavorite = if (host.isFavorite) 1L else 0L,
+                vectorClock = VectorClockCodec.encode(newClock),
+                deleted = 0L,
+                deletedAt = null,
+                updatedAt = now,
+                id = host.id,
+            )
+        }
+    }
+
+    /** The host with this id, live OR tombstoned (backup restore: held destinations). Non-suspend, for a transaction. */
+    internal fun getByIdIncludingDeletedInTransaction(id: String): Host? =
+        q.selectByIdIncludingDeleted(id).executeAsOneOrNull()?.let(::toDomain)
+
+    /** True when a LIVE (not tombstoned) host row has this id. Non-suspend: meant to run inside a transaction. */
+    internal fun existsLiveInTransaction(id: String): Boolean =
+        q.selectById(id).executeAsOneOrNull() != null
 
     override suspend fun update(host: Host) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
@@ -86,12 +137,21 @@ class DesktopHostRepository(db: NextShDatabase) : HostRepository {
         )
     }
 
+    /**
+     * Tombstones the host AND every live tunnel that points at it, in one transaction. A tunnel of a deleted
+     * host is unusable (no address, cannot start) and would otherwise travel on in sync bundles and
+     * backups. Each tunnel gets its own ticked clock so the deletion propagates to the peers.
+     */
     override suspend fun delete(id: String) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        val existing = q.selectAllIncludingDeleted().executeAsList().firstOrNull { it.id == id }
-        val prevClock = existing?.vectorClock ?: "{}"
-        val newClock = VectorClockCodec.decode(prevClock).tick(DeviceIdentity.deviceId(), now)
-        q.markDeleted(deletedAt = now, updatedAt = now, vectorClock = VectorClockCodec.encode(newClock), id = id)
+        val deviceId = DeviceIdentity.deviceId()
+        q.transaction {
+            val existing = q.selectByIdIncludingDeleted(id).executeAsOneOrNull()
+            val prevClock = existing?.vectorClock ?: "{}"
+            val newClock = VectorClockCodec.decode(prevClock).tick(deviceId, now)
+            q.markDeleted(deletedAt = now, updatedAt = now, vectorClock = VectorClockCodec.encode(newClock), id = id)
+            tunnelQ.tombstoneTunnels(tunnelQ.selectByHost(id).executeAsList(), deviceId, now)
+        }
     }
 
     override suspend fun updateLastConnected(id: String) = withContext(Dispatchers.IO) {

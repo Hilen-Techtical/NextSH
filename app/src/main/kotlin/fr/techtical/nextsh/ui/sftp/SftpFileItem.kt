@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,12 +33,15 @@ import com.composables.icons.lucide.Image
 import com.composables.icons.lucide.Link
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Music
+import com.composables.icons.lucide.TriangleAlert
+import fr.techtical.nextsh.R
+import fr.techtical.nextsh.core.ssh.uploadLeftoverName
 import fr.techtical.nextsh.domain.model.SftpFile
 import fr.techtical.nextsh.ui.theme.*
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
+import java.time.format.FormatStyle
 
 /**
  * Carte de fichier/dossier SFTP : Phase 3.3 DA Techtical.
@@ -55,10 +60,25 @@ fun SftpFileItem(
     onLongClick: () -> Unit = {},
     isSelectionMode: Boolean = false,
     isSelected: Boolean = false,
+    /**
+     * Non-null when the file is the leftover of an interrupted upload: the name of the file it was to
+     * replace, ready to show (see [leftoverOriginalLabel]). The row then carries a warning icon and a
+     * line that says so.
+     */
+    leftoverOf: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val backgroundColor = if (isSelected) Burgundy.copy(alpha = 0.18f) else Surface
     val borderColor     = if (isSelected) Gold else Border1
+
+    // The date follows the language of the loaded texts (resourceLocale), and is rebuilt when the
+    // language changes: the formatter is not a top-level value that would keep the locale of the
+    // first composition.
+    val locale = resourceLocale()
+    val dateFormatter = remember(locale) {
+        DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale)
+    }
+    val formatSize = rememberSizeFormatter()
 
     Row(
         modifier = modifier
@@ -85,7 +105,7 @@ fun SftpFileItem(
         }
 
         // ── Icon-wrap 36dp, fond accent doux par type ─────────────────────────
-        val iconColor = fileIconTint(file)
+        val iconColor = if (leftoverOf != null) WarningAmber else fileIconTint(file)
         Box(
             modifier = Modifier
                 .size(36.dp)
@@ -94,7 +114,7 @@ fun SftpFileItem(
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector        = fileIcon(file),
+                imageVector        = if (leftoverOf != null) Lucide.TriangleAlert else fileIcon(file),
                 contentDescription = null,
                 tint               = iconColor,
                 modifier           = Modifier.size(18.dp),
@@ -114,7 +134,7 @@ fun SftpFileItem(
         // ── Nom + meta ────────────────────────────────────────────────────────
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text     = file.name,
+                text     = displayEntryName(file.name),
                 fontFamily = SpaceGroteskFamily,
                 fontWeight = FontWeight.Medium,
                 fontSize   = 14.sp,
@@ -122,9 +142,32 @@ fun SftpFileItem(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (leftoverOf != null) {
+                // What the file is, said under its name on two lines of their own: the badge, then whose
+                // incomplete copy it is. Side by side, the name of the original was cut off on a narrow
+                // screen, and a large font let the badge take the whole width.
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text       = stringResource(R.string.sftp_leftover_badge),
+                    fontFamily = SpaceGroteskFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize   = 11.sp,
+                    color      = WarningAmber,
+                    maxLines   = 1,
+                    overflow   = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text       = stringResource(R.string.sftp_leftover_detail, leftoverOf),
+                    fontFamily = SpaceGroteskFamily,
+                    fontSize   = 11.sp,
+                    color      = WarningAmber,
+                    maxLines   = 1,
+                    overflow   = TextOverflow.Ellipsis,
+                )
+            }
             Spacer(Modifier.height(2.dp))
             Text(
-                text     = buildMeta(file),
+                text     = buildMeta(file, dateFormatter),
                 fontFamily = JetBrainsMonoFamily,
                 fontSize   = 11.sp,
                 color      = TextSecondary,
@@ -146,11 +189,21 @@ fun SftpFileItem(
     }
 }
 
-private fun buildMeta(file: SftpFile): String = buildString {
+/**
+ * The name of the file the leftover [fileName] was to replace, ready to show: invisible characters made
+ * visible ([displayEntryName]) and a cut mark when the start may be shorter than the real name. Null when
+ * [fileName] is not the name of a leftover.
+ */
+internal fun leftoverOriginalLabel(fileName: String): String? {
+    val leftover = uploadLeftoverName(fileName) ?: return null
+    return displayEntryName(leftover.original) + if (leftover.cut) "…" else ""
+}
+
+private fun buildMeta(file: SftpFile, dateFormatter: DateTimeFormatter): String = buildString {
     append(file.permissionsString)
     if (file.modifiedAt > 0L) {
         append("  ")
-        append(formatDate(file.modifiedAt))
+        append(formatDate(file.modifiedAt, dateFormatter))
     }
     if (file.owner.isNotEmpty()) {
         append("  ")
@@ -198,21 +251,9 @@ private val PDF_EXTS   = setOf("pdf")
 
 // ── Formatage ─────────────────────────────────────────────────────────────────
 
-private val DATE_FORMATTER = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.getDefault())
-
-private fun formatDate(epochMillis: Long): String =
+private fun formatDate(epochMillis: Long, formatter: DateTimeFormatter): String =
     runCatching {
         Instant.ofEpochMilli(epochMillis)
             .atZone(ZoneId.systemDefault())
-            .format(DATE_FORMATTER)
+            .format(formatter)
     }.getOrDefault("")
-
-/**
- * Convertit une taille en octets en chaîne lisible (B, KB, MB, GB).
- */
-fun formatSize(bytes: Long): String = when {
-    bytes < 1_024L                   -> "$bytes B"
-    bytes < 1_048_576L               -> String.format("%.1f KB", bytes / 1_024.0)
-    bytes < 1_073_741_824L           -> String.format("%.1f MB", bytes / 1_048_576.0)
-    else                             -> String.format("%.2f GB", bytes / 1_073_741_824.0)
-}

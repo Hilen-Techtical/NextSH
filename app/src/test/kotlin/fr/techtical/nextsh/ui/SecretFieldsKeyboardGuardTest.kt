@@ -77,11 +77,11 @@ class SecretFieldsKeyboardGuardTest {
                 assertPasswordKeyboard(path, call)
             }
         }
-        // 1 host password, 1 imported key passphrase, 2 backup passphrases, 1 HTTP auth password,
-        // 1 FIDO2 enrolment PIN.
+        // 1 host password, 1 imported key passphrase, 2 backup passphrases, 1 HTTP auth password.
+        // The FIDO2 PINs go through MaskedPinField, checked on its own below.
         assertTrue(
-            found >= 6,
-            "expected at least 6 masked secret fields under ui/, found $found; if some moved or " +
+            found >= 5,
+            "expected at least 5 masked secret fields under ui/, found $found; if some moved or " +
                 "were renamed, update this guard so they are still checked",
         )
     }
@@ -107,26 +107,17 @@ class SecretFieldsKeyboardGuardTest {
     }
 
     @Test
-    fun `FIDO2 PIN uses the password keyboard without autocorrect`() {
-        assertMaskedFieldsUsePasswordKeyboard("ui/vault/Fido2EnrollScreen.kt", atLeast = 1)
-    }
-
-    @Test
-    fun `FIDO2 challenge PIN field uses a password keyboard type`() {
-        // This PIN field masks its value by hand (bullets, the PIN never assembled into a String),
-        // so it has no PasswordVisualTransformation: it still must not get a plain text keyboard.
-        val path = "ui/sessions/Fido2ChallengeBottomSheet.kt"
+    fun `FIDO2 PIN field uses the password keyboard without autocorrect`() {
+        // MaskedPinField masks its value by hand (bullets, the PIN never assembled into a String), so
+        // it has no PasswordVisualTransformation and the sweep above does not see it. The enrolment
+        // screen and the sign-in sheet both use it (see Fido2EnrollScreenPinGuardTest).
+        val path = "ui/components/MaskedPinField.kt"
         val calls = SourceGuardSupport.calls(source(path), "BasicTextField")
         assertTrue(
-            calls.isNotEmpty(),
-            "$path: the BasicTextField of the PIN is gone; if it moved, update this guard",
+            calls.size == 1,
+            "$path: expected the one BasicTextField of the PIN, found ${calls.size}; if it moved, update this guard",
         )
-        calls.forEach { call ->
-            assertTrue(
-                Regex("""keyboardType\s*=\s*KeyboardType\.(NumberPassword|Password)\b""").containsMatchIn(call),
-                "$path: the PIN field must use KeyboardType.NumberPassword or KeyboardType.Password",
-            )
-        }
+        assertPasswordKeyboard(path, calls.single())
     }
 
     @Test

@@ -17,14 +17,23 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.dismiss
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,7 +54,7 @@ import fr.techtical.nextsh.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 
 /** Durée d'affichage d'un message d'information, en millisecondes. */
-private const val INFO_DURATION_MS = 3_000L
+internal const val INFO_DURATION_MS = 3_000L
 
 /**
  * Durée d'affichage d'une erreur.
@@ -53,7 +62,30 @@ private const val INFO_DURATION_MS = 3_000L
  * Plus longue qu'une information : une erreur porte une consigne à lire et
  * souvent une action à décider.
  */
-private const val ERROR_DURATION_MS = 7_000L
+internal const val ERROR_DURATION_MS = 7_000L
+
+/**
+ * Durée réelle d'affichage d'un message, en millisecondes.
+ *
+ * Part de 3 s (information) ou 7 s (erreur), puis laisse le réglage
+ * d'accessibilité « Délai de réaction » l'allonger : [recommend] reçoit la
+ * durée de base et rend la durée recommandée par le système. Sans réglage
+ * disponible ([recommend] nul), la durée de base est conservée. Une durée
+ * recommandée plus courte que la base est ignorée : le réglage ne sert qu'à
+ * laisser plus de temps, jamais moins.
+ *
+ * [long] donne les 7 s d une erreur à un message qui n en est pas une (un avis à lire, affiché
+ * sans le rouge).
+ */
+internal fun messageDurationMillis(
+    isError: Boolean,
+    recommend: ((Long) -> Long)?,
+    long: Boolean = false,
+): Long {
+    val base = if (isError || long) ERROR_DURATION_MS else INFO_DURATION_MS
+    val recommended = recommend?.invoke(base) ?: return base
+    return maxOf(base, recommended)
+}
 
 /**
  * Message applicatif dans la direction artistique NextSH.
@@ -65,25 +97,45 @@ private const val ERROR_DURATION_MS = 7_000L
  * Ce composant ne se positionne pas lui-même. L'écran l'insère là où il ne
  * masque rien, typiquement empilé au-dessus d'un bandeau existant.
  *
+ * Accessibilité : le message est une région vive annoncée par TalkBack (polie
+ * pour une information, assertive pour une erreur), avec une action « fermer ».
+ * Sa durée suit le réglage « Délai de réaction » du système.
+ *
  * @param message   texte à afficher, null pour ne rien afficher.
  * @param isError   colorise en rouge, ajoute l'icône d'alerte et laisse le
  *                  message affiché plus longtemps.
  * @param onDismiss appelé à la fermeture, manuelle ou automatique. L'appelant
  *                  doit y remettre [message] à null.
+ * @param long      affiche 7 s comme une erreur, sans le rouge : pour un avis à lire.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NextShMessage(
     message: String?,
     isError: Boolean = false,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    long: Boolean = false,
 ) {
+    val accessibilityManager = LocalAccessibilityManager.current
+    val currentOnDismiss by rememberUpdatedState(onDismiss)
+
     // Le compte à rebours redémarre à chaque nouveau texte : deux messages
     // successifs ne doivent pas partager le délai du premier.
-    LaunchedEffect(message, isError) {
+    LaunchedEffect(message, isError, long) {
         if (message == null) return@LaunchedEffect
-        delay(if (isError) ERROR_DURATION_MS else INFO_DURATION_MS)
-        onDismiss()
+        val recommend = accessibilityManager?.let { manager ->
+            { base: Long ->
+                manager.calculateRecommendedTimeoutMillis(
+                    originalTimeoutMillis = base,
+                    containsIcons = true,
+                    containsText = true,
+                    containsControls = true,
+                )
+            }
+        }
+        delay(messageDurationMillis(isError, recommend, long))
+        currentOnDismiss()
     }
 
     AnimatedVisibility(
@@ -93,13 +145,21 @@ fun NextShMessage(
         modifier = modifier,
     ) {
         val accent = if (isError) ErrorRed else Gold
+        val closeLabel = stringResource(R.string.action_close)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .semantics {
+                    liveRegion = if (isError) LiveRegionMode.Assertive else LiveRegionMode.Polite
+                    dismiss(label = closeLabel) {
+                        onDismiss()
+                        true
+                    }
+                }
                 .clip(RoundedCornerShape(Radii.Md))
                 .background(Surface, RoundedCornerShape(Radii.Md))
                 .border(1.dp, if (isError) ErrorRed else Border1, RoundedCornerShape(Radii.Md))
-                .padding(horizontal = Spacing.Md, vertical = Spacing.Sm),
+                .padding(horizontal = Spacing.Md, vertical = Spacing.Xs),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
         ) {
@@ -119,9 +179,11 @@ fun NextShMessage(
             )
             Icon(
                 Lucide.X,
-                contentDescription = stringResource(R.string.action_close),
+                contentDescription = closeLabel,
                 tint     = TextSecondary,
+                // Zone tactile de 48 dp, le dessin de la croix reste de 16 dp.
                 modifier = Modifier
+                    .minimumInteractiveComponentSize()
                     .size(16.dp)
                     .clickable(onClick = onDismiss),
             )

@@ -3,11 +3,14 @@
 
 package fr.techtical.nextsh.core.shortcut
 
+import android.content.Intent
 import fr.techtical.nextsh.domain.model.AuthType
 import fr.techtical.nextsh.domain.model.Host
 import fr.techtical.nextsh.domain.model.TunnelConfig
 import fr.techtical.nextsh.domain.model.TunnelType
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -16,9 +19,11 @@ import org.junit.jupiter.api.Test
  *
  * Because [ShortcutInfoCompat.Builder] and [IconCompat] are Android framework
  * classes that cannot be instantiated in a JVM-only test, we test the
- * *selection and priority algorithm* directly (i.e. which IDs are selected,
- * how many, and in which order) by replicating the identical logic here
- * (hosts first up to MAX_SHORTCUTS, then tunnels filling remaining slots).
+ * *selection and priority algorithm* through the production function
+ * [selectDynamicShortcuts] (which IDs are selected, how many, and in which
+ * order: hosts first up to MAX_SHORTCUTS, then tunnels filling remaining slots),
+ * and the intents through the production [ShortcutUpdater.hostIntent] and
+ * [ShortcutUpdater.tunnelIntent].
  *
  * The companion-object constants (MAX_SHORTCUTS, EXTRA_HOST_ID, …) are still
  * referenced from the production class so any change to them will break these
@@ -50,29 +55,14 @@ class ShortcutUpdaterTest {
     )
 
     /**
-     * Mirrors the algorithm in [ShortcutUpdater.updateShortcuts]:
-     * hosts fill slots first (up to MAX_SHORTCUTS), tunnels fill the rest.
-     * Returns pairs of (shortcutId, rank).
+     * What [ShortcutUpdater] publishes as dynamic shortcuts, from the production
+     * [selectDynamicShortcuts]: pairs of (shortcutId, rank), the rank being the place in the list.
      */
     private fun buildShortcutList(
         hosts: List<Host>,
         tunnels: List<TunnelConfig>,
-    ): List<Pair<String, Int>> {
-        val max = ShortcutUpdater.MAX_SHORTCUTS
-        val result = mutableListOf<Pair<String, Int>>()
-        var rank = 0
-
-        for (host in hosts.take(max)) {
-            result.add("host_${host.id}" to rank++)
-        }
-
-        val remaining = max - result.size
-        for (tunnel in tunnels.take(remaining)) {
-            result.add("tunnel_${tunnel.id}" to rank++)
-        }
-
-        return result
-    }
+    ): List<Pair<String, Int>> =
+        selectDynamicShortcuts(hosts, tunnels).shortcutIds.mapIndexed { rank, id -> id to rank }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
 
@@ -170,7 +160,64 @@ class ShortcutUpdaterTest {
     fun `action constants are defined correctly`() {
         assertEquals("connect_host", ShortcutUpdater.ACTION_CONNECT_HOST)
         assertEquals("start_tunnel", ShortcutUpdater.ACTION_START_TUNNEL)
+        assertEquals("open_terminal", ShortcutUpdater.ACTION_OPEN_TERMINAL)
         assertEquals("shortcut_host_id", ShortcutUpdater.EXTRA_HOST_ID)
         assertEquals("shortcut_tunnel_id", ShortcutUpdater.EXTRA_TUNNEL_ID)
+        assertEquals("shortcut_token", ShortcutUpdater.EXTRA_SHORTCUT_TOKEN)
+    }
+
+    // ── The token in the intents ─────────────────────────────────────────────
+
+    @Test
+    fun `the intent of a host shortcut carries the action, the host and the token`() {
+        val fake = FakeIntent()
+
+        val intent = ShortcutUpdater.hostIntent(fake.intent, "h1", "the-token")
+
+        assertSame(fake.intent, intent)
+        assertEquals(
+            mapOf(
+                ShortcutUpdater.EXTRA_SHORTCUT_ACTION to ShortcutUpdater.ACTION_CONNECT_HOST,
+                ShortcutUpdater.EXTRA_HOST_ID to "h1",
+                ShortcutUpdater.EXTRA_SHORTCUT_TOKEN to "the-token",
+            ),
+            fake.extras,
+        )
+        verify { fake.intent.action = Intent.ACTION_VIEW }
+    }
+
+    @Test
+    fun `the intent of a tunnel shortcut carries the action, the tunnel and the token`() {
+        val fake = FakeIntent()
+
+        val intent = ShortcutUpdater.tunnelIntent(fake.intent, "t1", "the-token")
+
+        assertSame(fake.intent, intent)
+        assertEquals(
+            mapOf(
+                ShortcutUpdater.EXTRA_SHORTCUT_ACTION to ShortcutUpdater.ACTION_START_TUNNEL,
+                ShortcutUpdater.EXTRA_TUNNEL_ID to "t1",
+                ShortcutUpdater.EXTRA_SHORTCUT_TOKEN to "the-token",
+            ),
+            fake.extras,
+        )
+        verify { fake.intent.action = Intent.ACTION_VIEW }
+    }
+
+    @Test
+    fun `the intent that opens the terminal carries the action and the token, and no target`() {
+        val fake = FakeIntent()
+
+        val intent = ShortcutUpdater.openTerminalIntent(fake.intent, "the-token")
+
+        assertSame(fake.intent, intent)
+        assertEquals(
+            mapOf(
+                ShortcutUpdater.EXTRA_SHORTCUT_ACTION to ShortcutUpdater.ACTION_OPEN_TERMINAL,
+                ShortcutUpdater.EXTRA_SHORTCUT_TOKEN to "the-token",
+            ),
+            fake.extras,
+        )
+        verify { fake.intent.action = Intent.ACTION_VIEW }
     }
 }

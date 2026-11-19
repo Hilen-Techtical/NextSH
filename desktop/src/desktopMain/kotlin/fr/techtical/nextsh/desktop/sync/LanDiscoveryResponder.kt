@@ -8,6 +8,7 @@ import fr.techtical.nextsh.shared.core.sync.EnrolledDeviceRepository
 import fr.techtical.nextsh.shared.core.sync.EnrolledDeviceSecretStore
 import fr.techtical.nextsh.shared.util.AppScope
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -149,14 +150,14 @@ class LanDiscoveryResponder(
                     )
                 }
             } catch (e: IOException) {
-                Logger.w(TAG, "Impossible de démarrer le répondeur de découverte LAN : ${e.message}")
+                Logger.w(TAG, "Impossible de démarrer le répondeur de découverte LAN (${errorClass(e)})")
                 return false
             }
 
             socket = sock
             perIpBuckets.clear()
             servedNonces.clear()
-            Logger.d(TAG, "Répondeur de découverte LAN actif sur le port ${sock.localPort}")
+            Logger.d(TAG, "Répondeur de découverte LAN actif")
             receiveJob = appScope.coroutineScope.launch(Dispatchers.IO) { receiveLoop(sock) }
             return true
         }

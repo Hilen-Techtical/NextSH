@@ -5,6 +5,7 @@ package fr.techtical.nextsh.desktop.core.clipboard
 
 import fr.techtical.nextsh.shared.util.AppScope
 import fr.techtical.nextsh.shared.util.Logger
+import fr.techtical.nextsh.shared.util.errorClass
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -64,7 +65,7 @@ class DesktopClipboardManager(
                 val current = try {
                     readClipboardText()
                 } catch (e: Exception) {
-                    Logger.w("ClipboardMgr", "poll read failed: ${e.javaClass.simpleName}")
+                    Logger.w("ClipboardMgr", "poll read failed: ${errorClass(e)}")
                     continue
                 }
                 if (current != lastSeen) {
@@ -115,7 +116,7 @@ class DesktopClipboardManager(
         try {
             clipboard.setContents(StringSelection(""), null)
         } catch (e: IllegalStateException) {
-            Logger.w("ClipboardMgr", "clear failed: ${e.javaClass.simpleName}")
+            Logger.w("ClipboardMgr", "clear failed: ${errorClass(e)}")
         }
     }
 

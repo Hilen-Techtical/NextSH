@@ -6,8 +6,10 @@ package fr.techtical.nextsh.domain.usecase
 import android.content.Context
 import android.net.Uri
 import dagger.hilt.android.qualifiers.ApplicationContext
+import fr.techtical.nextsh.core.ssh.SFTP_DESTINATION_UNAVAILABLE_MESSAGE
 import fr.techtical.nextsh.core.ssh.SftpManager
 import fr.techtical.nextsh.shared.domain.model.SshResult
+import fr.techtical.nextsh.shared.util.errorClass
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -42,7 +44,7 @@ class DownloadFileUseCase @Inject constructor(
             val outputStream = context.contentResolver.openOutputStream(localUri)
                 ?: return SshResult.Error(
                     fr.techtical.nextsh.domain.model.SshErrorCode.UNKNOWN,
-                    "Impossible d'ouvrir le fichier de destination"
+                    SFTP_DESTINATION_UNAVAILABLE_MESSAGE
                 )
             outputStream.use { stream ->
                 sftpManager.readFile(
@@ -58,10 +60,10 @@ class DownloadFileUseCase @Inject constructor(
             // echec et masquerait la nature de l interruption.
             throw e
         } catch (e: Exception) {
-            Timber.e(e, "DownloadFileUseCase: erreur d'accès SAF pour $localUri")
+            Timber.e("DownloadFileUseCase: SAF access error (${errorClass(e)})")
             SshResult.Error(
                 fr.techtical.nextsh.domain.model.SshErrorCode.UNKNOWN,
-                "Impossible d'accéder au fichier de destination"
+                SFTP_DESTINATION_UNAVAILABLE_MESSAGE
             )
         }
     }

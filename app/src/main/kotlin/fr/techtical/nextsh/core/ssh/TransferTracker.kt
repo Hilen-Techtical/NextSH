@@ -4,6 +4,8 @@
 package fr.techtical.nextsh.core.ssh
 
 import android.net.Uri
+import fr.techtical.nextsh.core.vault.VaultWipeGate
+import fr.techtical.nextsh.shared.util.LogId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,6 +44,10 @@ enum class TransferStatus {
  * @param direction   sens du transfert (DOWNLOAD ou UPLOAD).
  * @param fileSize    taille du fichier en octets (0 si inconnue).
  * @param displayName nom de fichier affichable (tronqué à 20 caractères par le service).
+ * @param replaceExisting vrai seulement quand l'utilisateur a confirmé le remplacement d'un fichier
+ *   de même nom (envoi uniquement). Le fichier est alors remplacé sans être vidé avant la fin de
+ *   l'envoi (fichier temporaire caché, puis renommage, voir [SftpManager.writeFile]). Faux par
+ *   défaut : un nom déjà pris est alors refusé par le serveur et rien n'est remplacé.
  */
 data class TransferRequest(
     val id: String = UUID.randomUUID().toString(),
@@ -51,6 +57,7 @@ data class TransferRequest(
     val direction: TransferDirection,
     val fileSize: Long,
     val displayName: String,
+    val replaceExisting: Boolean = false,
 )
 
 // ── Transfer state: mutable runtime state ────────────────────────────────────
@@ -87,7 +94,13 @@ data class TransferState(
  * [MutableStateFlow.update] (compare-and-swap atomique).
  */
 @Singleton
-class TransferTracker @Inject constructor() {
+class TransferTracker @Inject constructor(
+    /** The wipe of the vault: while the app is closed no transfer is accepted, see [enqueue]. */
+    private val wipeGate: VaultWipeGate,
+) {
+    /** Without the wipe gate of the app (tests): a gate that is never closed. Not an injection point. */
+    constructor() : this(VaultWipeGate())
+
 
     private val _transfers = MutableStateFlow<Map<String, TransferState>>(emptyMap())
 
@@ -101,12 +114,18 @@ class TransferTracker @Inject constructor() {
      * Sans effet si un transfert avec le même [TransferRequest.id] existe déjà.
      */
     fun enqueue(request: TransferRequest) {
+        // The wipe of the vault has the app closed: a transfer asked for now (a screen that is still up)
+        // would run on a session that is gone, and would write its file name into the list just emptied.
+        if (wipeGate.isClosed()) {
+            Timber.w("TransferTracker: transfer ${LogId.of(request.id)} refused, the app is being wiped")
+            return
+        }
         _transfers.update { current ->
             if (current.containsKey(request.id)) {
-                Timber.w("TransferTracker: transfert ${request.id} déjà enregistré")
+                Timber.w("TransferTracker: transfer ${LogId.of(request.id)} already registered")
                 return@update current
             }
-            Timber.d("TransferTracker: mise en file ${request.id} (${request.displayName})")
+            Timber.d("TransferTracker: queued ${LogId.of(request.id)} (${request.direction}, ${request.fileSize} bytes)")
             current + (request.id to TransferState(request = request))
         }
     }
@@ -119,6 +138,9 @@ class TransferTracker @Inject constructor() {
      */
     fun updateProgress(id: String, bytes: Long, total: Long) {
         updateState(id) { state ->
+            // A late callback of the copy loop must not bring back to life a transfer that was cancelled
+            // (the cancellation of everything, by the wipe of the vault, comes first and the loop ends after).
+            if (state.status == TransferStatus.CANCELLED) return@updateState state
             state.copy(
                 status           = TransferStatus.IN_PROGRESS,
                 bytesTransferred = bytes,
@@ -136,7 +158,7 @@ class TransferTracker @Inject constructor() {
     fun complete(id: String) {
         updateState(id) { state ->
             if (state.status == TransferStatus.CANCELLED) return@updateState state
-            Timber.i("TransferTracker: transfert $id terminé (${state.request.displayName})")
+            Timber.i("TransferTracker: transfer ${LogId.of(id)} completed (${state.request.direction})")
             state.copy(
                 status           = TransferStatus.COMPLETED,
                 bytesTransferred = state.request.fileSize,
@@ -149,7 +171,8 @@ class TransferTracker @Inject constructor() {
      */
     fun fail(id: String, error: String) {
         updateState(id) { state ->
-            Timber.w("TransferTracker: transfert $id échoué : $error")
+            // [error] is the text shown to the user and can quote a path: never logged.
+            Timber.w("TransferTracker: transfer ${LogId.of(id)} failed (${state.request.direction})")
             state.copy(
                 status       = TransferStatus.FAILED,
                 errorMessage = error,
@@ -170,7 +193,7 @@ class TransferTracker @Inject constructor() {
             if (state.status == TransferStatus.COMPLETED || state.status == TransferStatus.FAILED) {
                 return@updateState state
             }
-            Timber.i("TransferTracker: transfert $id annulé")
+            Timber.i("TransferTracker: transfer ${LogId.of(id)} cancelled")
             state.copy(status = TransferStatus.CANCELLED)
         }
     }
@@ -180,6 +203,27 @@ class TransferTracker @Inject constructor() {
      */
     fun remove(id: String) {
         _transfers.update { current ->
+            current - id
+        }
+    }
+
+    /**
+     * L'utilisateur a été prévenu de l'issue de [id] : le tracker l'oublie.
+     *
+     * Le tracker vit autant que le processus et garde les transferts terminés. Sans acquittement,
+     * chaque nouvel explorateur retrouvait les échecs déjà annoncés (de toutes les sessions) et les
+     * annonçait de nouveau. L'explorateur qui annonce un échec l'acquitte donc, une seule fois pour
+     * tous les explorateurs de la session.
+     *
+     * Sans effet sur un transfert en attente ou en cours : il n'est pas fini, et le retirer
+     * ferait perdre sa file au service.
+     */
+    fun acknowledge(id: String) {
+        _transfers.update { current ->
+            val state = current[id] ?: return@update current
+            if (state.status == TransferStatus.QUEUED || state.status == TransferStatus.IN_PROGRESS) {
+                return@update current
+            }
             current - id
         }
     }
@@ -241,6 +285,51 @@ class TransferTracker @Inject constructor() {
                 }
             }
         }
+    }
+
+    /**
+     * Marks every transfer that is not over (waiting or running) as cancelled, in one update. The first
+     * half of the cancellation of everything ("Wipe the vault"): the service then cancels the jobs of
+     * the copies, [cancel] alone does not stop a copy.
+     */
+    fun cancelAll() {
+        _transfers.update { current ->
+            current.mapValues { (_, state) ->
+                if (state.status == TransferStatus.QUEUED || state.status == TransferStatus.IN_PROGRESS) {
+                    state.copy(status = TransferStatus.CANCELLED)
+                } else {
+                    state
+                }
+            }
+        }
+    }
+
+    private val _copying = MutableStateFlow<Set<String>>(emptySet())
+
+    /**
+     * The ids of the transfers whose copy is really running (the job of the service has not ended), which
+     * is not what [transfers] says: a cancelled transfer is CANCELLED at once, its copy ends a moment
+     * later. The wipe of the vault waits for this to be empty before it closes the sessions.
+     */
+    val copying: StateFlow<Set<String>> = _copying.asStateFlow()
+
+    /** The copy of [id] starts: the service calls it before it launches the job. */
+    fun copyStarted(id: String) {
+        _copying.update { it + id }
+    }
+
+    /** The copy of [id] is over (the job ended, whatever the way). Idempotent. */
+    fun copyEnded(id: String) {
+        _copying.update { it - id }
+    }
+
+    /**
+     * Forgets every transfer: the list holds file names and remote paths, which are private data. A late
+     * write for a forgotten transfer ([updateProgress], [complete], [fail], [cancel]) finds nothing and
+     * changes nothing.
+     */
+    fun clear() {
+        _transfers.value = emptyMap()
     }
 
     // ── Interne ───────────────────────────────────────────────────────────────────

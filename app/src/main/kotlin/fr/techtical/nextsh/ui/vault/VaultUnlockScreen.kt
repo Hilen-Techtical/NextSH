@@ -3,6 +3,7 @@
 
 package fr.techtical.nextsh.ui.vault
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -12,6 +13,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import fr.techtical.nextsh.ui.components.BrandText
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,14 +37,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.composables.icons.lucide.Fingerprint
 import com.composables.icons.lucide.Lucide
@@ -53,12 +57,15 @@ import fr.techtical.nextsh.ui.theme.Radii
 import fr.techtical.nextsh.ui.theme.SpaceGroteskFamily
 import fr.techtical.nextsh.ui.theme.Spacing
 import fr.techtical.nextsh.ui.theme.Surface
-import fr.techtical.nextsh.ui.theme.TextPrimary
 import fr.techtical.nextsh.ui.theme.TextSecondary
 import fr.techtical.nextsh.ui.theme.White
 
 /**
  * VaultUnlockScreen : refonte Phase 3.1 (DA Techtical portée du Desktop).
+ *
+ * C'est l'écran de démarrage, la route [fr.techtical.nextsh.ui.navigation.Routes.VaultUnlock] : son
+ * contenu est celui de [VaultUnlockPanel], que l'écran de verrou (`AppLockScreen`) affiche aussi par-dessus
+ * l'app. Le succès appelle `AppLock.unlock()` dans le ViewModel, avant la navigation.
  *
  * Conserve l'auth **biométrique** Android-only (BiometricPrompt + Keystore
  * TEE/StrongBox) : pas de PIN ici, contrairement au Desktop. La refonte
@@ -73,16 +80,39 @@ fun VaultUnlockScreen(
     viewModel: VaultUnlockViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
-    val activity = LocalContext.current as? FragmentActivity
 
     LaunchedEffect(state.isUnlocked) {
         if (state.isUnlocked) onUnlocked()
     }
 
+    VaultUnlockPanel(
+        biometricAvailable = state.biometricAvailable,
+        isAuthenticating = state.isAuthenticating,
+        errorRes = state.errorRes,
+        onUnlock = viewModel::authenticate,
+    )
+}
+
+/**
+ * Le contenu du déverrouillage, partagé par l'écran de démarrage et l'écran de verrou : logo, marque,
+ * slogan, bouton (ou la raison pour laquelle il n'y en a pas) et bandeau d'erreur, sur tout l'écran
+ * en NearBlack. Il ne sait rien de ce qui l'entoure, ni route ni fenêtre.
+ */
+@Composable
+internal fun VaultUnlockPanel(
+    biometricAvailable: Boolean,
+    isAuthenticating: Boolean,
+    @StringRes errorRes: Int?,
+    onUnlock: () -> Unit,
+) {
+    // Le fond couvre tout l'écran ; le contenu respecte les barres système (dans la fenêtre de l'écran de
+    // verrou, ce padding est le seul à les porter) et défile : l'écran de verrou peut s'ouvrir en paysage
+    // (terminal, SFTP), où le logo, le bouton et le bandeau d'erreur ne tiennent pas sur 360 dp de haut.
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(NearBlack),
+            .background(NearBlack)
+            .windowInsetsPadding(WindowInsets.systemBars),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -90,7 +120,8 @@ fun VaultUnlockScreen(
             verticalArrangement = Arrangement.Center,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 32.dp),
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 32.dp, vertical = Spacing.Md),
         ) {
             // ── Logo ────────────────────────────────────────────────────────
             Image(
@@ -120,10 +151,11 @@ fun VaultUnlockScreen(
             Spacer(Modifier.height(Spacing.Huge))
 
             // ── Bouton déverrouillage ou message fallback ────────────────────
-            if (state.biometricAvailable && activity != null) {
+            if (biometricAvailable) {
                 BtnUnlockPrimary(
                     label = stringResource(R.string.action_unlock_vault),
-                    onClick = { viewModel.authenticate(activity) },
+                    enabled = !isAuthenticating,
+                    onClick = onUnlock,
                 )
             } else {
                 FallbackBlock(
@@ -132,18 +164,19 @@ fun VaultUnlockScreen(
             }
 
             // ── Message d'erreur ─────────────────────────────────────────────
-            state.errorMessage?.let { error ->
+            errorRes?.let { error ->
                 Spacer(Modifier.height(Spacing.Md))
-                ErrorBanner(text = error)
+                ErrorBanner(text = stringResource(error))
             }
         }
     }
 }
 
 @Composable
-private fun BtnUnlockPrimary(label: String, onClick: () -> Unit) {
+private fun BtnUnlockPrimary(label: String, enabled: Boolean, onClick: () -> Unit) {
     Button(
         onClick = onClick,
+        enabled = enabled,
         colors = ButtonDefaults.buttonColors(
             containerColor = Burgundy,
             contentColor = White,
